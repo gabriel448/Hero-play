@@ -64,6 +64,11 @@ class _TelaPlayerState extends State<TelaPlayer> {
   StreamSubscription? _subBuffering;
   StreamSubscription? _subError;
   StreamSubscription? _subLog;
+  StreamSubscription? _subTracks;
+  StreamSubscription? _subTrack;
+
+  Tracks _tracks = Tracks(video: [], audio: [], subtitle: []);
+  Track _track = const Track();
 
   @override
   void initState() {
@@ -86,13 +91,13 @@ class _TelaPlayerState extends State<TelaPlayer> {
   void _registrarStreams() {
     _subPlaying = _player.stream.playing.listen((tocando) {
       if (!mounted) return;
-      if (tocando) {
+      if (tocando && !_iniciado) {
         _iniciado = true;
         _timeoutTimer?.cancel();
         _atualizadorStatus?.cancel();
         _registrarLog('playing=true');
         setState(() => _status = 'Tocando');
-      } else if (_iniciado) {
+      } else if (!tocando && _iniciado) {
         setState(() => _status = 'Pausado');
       }
     });
@@ -118,11 +123,34 @@ class _TelaPlayerState extends State<TelaPlayer> {
     });
 
     _subLog = _player.stream.log.listen((log) {
-      // Filtra so warnings/errors para nao poluir.
-      if (log.level == 'warn' || log.level == 'error' || log.level == 'fatal') {
-        _registrarLog('mpv[${log.level}] ${log.text}');
-      }
+      if (log.level != 'warn' && log.level != 'error' && log.level != 'fatal') return;
+      // Ignora ruido interno do libmpv que nao tem valor de diagnostico.
+      if (log.text.contains('_setProperty(osc')) return;
+      _registrarLog('mpv[${log.level}] ${log.text}');
     });
+
+    _subTracks = _player.stream.tracks.listen((t) {
+      if (!mounted) return;
+      setState(() => _tracks = t);
+    });
+
+    _subTrack = _player.stream.track.listen((t) {
+      if (!mounted) return;
+      setState(() => _track = t);
+    });
+  }
+
+  // Codifica @ em segmentos de caminho para evitar que parsers de URL
+  // (FFmpeg/libmpv) interpretem user:pass@host em URLs IPTV como
+  // http://server/movie/user/pass@Pato/id.mp4 → host=Pato (errado).
+  static String _normalizarUrl(String url) {
+    final schemeEnd = url.indexOf('://');
+    if (schemeEnd < 0) return url;
+    final authorityEnd = url.indexOf('/', schemeEnd + 3);
+    if (authorityEnd < 0) return url;
+    final path = url.substring(authorityEnd);
+    if (!path.contains('@')) return url;
+    return url.substring(0, authorityEnd) + path.replaceAll('@', '%40');
   }
 
   Future<void> _abrirStream() async {
@@ -159,8 +187,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _registrarLog('headers: ${headers.isEmpty ? "nenhum" : headers.keys.join(",")}');
 
     try {
+      final url = _normalizarUrl(widget.canal.url);
+      if (url != widget.canal.url) _registrarLog('url normalizada: $url');
       await _player.open(
-        Media(widget.canal.url, httpHeaders: headers.isEmpty ? null : headers),
+        Media(url, httpHeaders: headers.isEmpty ? null : headers),
         play: true,
       );
 
@@ -228,6 +258,22 @@ class _TelaPlayerState extends State<TelaPlayer> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  void _mostrarFaixas() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      isScrollControlled: true,
+      builder: (_) => _PainelFaixas(
+        player: _player,
+        tracks: _tracks,
+        track: _track,
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _timeoutTimer?.cancel();
@@ -236,6 +282,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subBuffering?.cancel();
     _subError?.cancel();
     _subLog?.cancel();
+    _subTracks?.cancel();
+    _subTrack?.cancel();
     _player.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
@@ -263,6 +311,12 @@ class _TelaPlayerState extends State<TelaPlayer> {
         backgroundColor: AppColors.surface0,
         foregroundColor: Colors.white,
         actions: [
+          if (_iniciado && _tracks.audio.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.closed_caption_rounded, color: Colors.white),
+              tooltip: 'Faixas e legendas',
+              onPressed: _mostrarFaixas,
+            ),
           IconButton(
             icon: const Icon(Icons.copy, color: Colors.white),
             tooltip: 'Copiar URL',
@@ -529,6 +583,228 @@ class _ViewErro extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Painel de faixas e legendas ─────────────────────────────────────────────
+
+class _PainelFaixas extends StatefulWidget {
+  final Player player;
+  final Tracks tracks;
+  final Track track;
+
+  const _PainelFaixas({
+    required this.player,
+    required this.tracks,
+    required this.track,
+  });
+
+  @override
+  State<_PainelFaixas> createState() => _PainelFaixasState();
+}
+
+class _PainelFaixasState extends State<_PainelFaixas> {
+  late AudioTrack _audio;
+  late SubtitleTrack _subtitle;
+
+  @override
+  void initState() {
+    super.initState();
+    _audio = widget.track.audio;
+    _subtitle = widget.track.subtitle;
+  }
+
+  String _labelAudio(AudioTrack t) {
+    if (t.id == 'auto') return 'Automático';
+    final parts = <String>[];
+    if (t.title != null && t.title!.isNotEmpty) parts.add(t.title!);
+    if (t.language != null && t.language!.isNotEmpty) {
+      parts.add(t.language!.toUpperCase());
+    }
+    return parts.isEmpty ? 'Faixa ${t.id}' : parts.join(' · ');
+  }
+
+  String _labelLegenda(SubtitleTrack t) {
+    if (t.id == 'no') return 'Desativar';
+    if (t.id == 'auto') return 'Automático';
+    final parts = <String>[];
+    if (t.title != null && t.title!.isNotEmpty) parts.add(t.title!);
+    if (t.language != null && t.language!.isNotEmpty) {
+      parts.add(t.language!.toUpperCase());
+    }
+    return parts.isEmpty ? 'Legenda ${t.id}' : parts.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final audioTracks = widget.tracks.audio.where((t) => t.id != 'auto' && t.id != 'no').toList();
+    final subTracks = widget.tracks.subtitle.where((t) => t.id != 'no' && t.id != 'auto').toList();
+    final temAudio = audioTracks.isNotEmpty;
+    final temLegenda = subTracks.isNotEmpty;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.base,
+          AppSpacing.base,
+          AppSpacing.base,
+          AppSpacing.lg,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.base),
+                decoration: BoxDecoration(
+                  color: AppColors.outlineSubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
+            ),
+            Text(
+              'Faixas e Legendas',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+
+            // ── Áudio ─────────────────────────────────────────────────────
+            if (temAudio) ...[
+              _SecaoLabel('ÁUDIO'),
+              const SizedBox(height: AppSpacing.xs),
+              // "Auto" sempre disponível
+              _ItemFaixa(
+                rotulo: 'Automático',
+                selecionado: _audio.id == 'auto',
+                onTap: () async {
+                  final t = AudioTrack.auto();
+                  await widget.player.setAudioTrack(t);
+                  setState(() => _audio = t);
+                },
+              ),
+              ...audioTracks.map(
+                (t) => _ItemFaixa(
+                  rotulo: _labelAudio(t),
+                  selecionado: _audio.id == t.id,
+                  onTap: () async {
+                    await widget.player.setAudioTrack(t);
+                    setState(() => _audio = t);
+                  },
+                ),
+              ),
+              const SizedBox(height: AppSpacing.base),
+            ],
+
+            // ── Legendas ──────────────────────────────────────────────────
+            if (temLegenda) ...[
+              _SecaoLabel('LEGENDAS'),
+              const SizedBox(height: AppSpacing.xs),
+              _ItemFaixa(
+                rotulo: 'Desativar',
+                selecionado: _subtitle.id == 'no',
+                onTap: () async {
+                  final t = SubtitleTrack.no();
+                  await widget.player.setSubtitleTrack(t);
+                  setState(() => _subtitle = t);
+                },
+              ),
+              ...subTracks.map(
+                (t) => _ItemFaixa(
+                  rotulo: _labelLegenda(t),
+                  selecionado: _subtitle.id == t.id,
+                  onTap: () async {
+                    await widget.player.setSubtitleTrack(t);
+                    setState(() => _subtitle = t);
+                  },
+                ),
+              ),
+            ],
+
+            if (!temAudio && !temLegenda)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                child: Center(
+                  child: Text(
+                    'Nenhuma faixa alternativa disponível',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SecaoLabel extends StatelessWidget {
+  final String texto;
+  const _SecaoLabel(this.texto);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      texto,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: AppColors.textTertiary,
+            letterSpacing: 0.6,
+          ),
+    );
+  }
+}
+
+class _ItemFaixa extends StatelessWidget {
+  final String rotulo;
+  final bool selecionado;
+  final VoidCallback onTap;
+
+  const _ItemFaixa({
+    required this.rotulo,
+    required this.selecionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.md,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selecionado
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              size: 20,
+              color: selecionado ? AppColors.accent : AppColors.textTertiary,
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                rotulo,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: selecionado
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
+                      fontWeight: selecionado ? FontWeight.w600 : null,
+                    ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
