@@ -1,0 +1,49 @@
+name: iptv_app
+description: "Leitor de listas IPTV M3U - foco didatico"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Cliente HTTP para baixar listas M3U por URL.
+  http: ^1.2.2
+
+  # Descobre caminhos do sistema (pasta de documentos do app, etc).
+  path_provider: ^2.1.5
+
+  # Banco local NoSQL para favoritos, historico e listas salvas.
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Player de video baseado em libmpv (mesmo motor do mpv).
+  # Suporta praticamente todos os formatos: HLS, MPEG-TS, RTSP, codecs exoticos.
+  # Imprescindivel para canais IPTV ao vivo (ExoPlayer falha em muitos streams).
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
+
+  # Gerenciamento de estado simples (recomendado oficialmente pela equipe Flutter).
+  provider: ^6.1.2
+
+  # Fontes do Google Fonts (Manrope) - baixa e cacheia em runtime.
+  google_fonts: ^6.2.1
+
+  # Texto rolante estilo LED/placa para titulos longos de filmes.
+  marquee: ^2.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

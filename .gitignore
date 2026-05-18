@@ -1,0 +1,91 @@
+# ─── Flutter / Dart ──────────────────────────────────────────────────────────
+
+# Build output
+/build/
+**/doc/api/
+
+# Dart tool cache (gerado pelo pub get / flutter pub get)
+.dart_tool/
+
+# Pub cache local (normalmente fica em $HOME, mas por segurança)
+.pub-cache/
+.pub/
+
+# Gerados automaticamente pelo Flutter ao resolver plugins
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Metadados do projeto Flutter (gerado pelo flutter create / flutter upgrade)
+.metadata
+
+# Coverage de testes
+/coverage/
+
+# Symbolication (gerado em builds obfuscados)
+app.*.symbols
+
+# Obfuscation map (gerado com --obfuscate --split-debug-info)
+app.*.map.json
+
+# ─── Android ─────────────────────────────────────────────────────────────────
+
+# Cache do Gradle (especifico da maquina)
+android/.gradle/
+android/.kotlin/
+
+# Build do Android
+android/build/
+
+# Artefatos de build (debug / profile / release)
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# Caminhos locais do SDK Android (especifico da maquina, nunca commitar)
+android/local.properties
+
+# ─── IDEs ────────────────────────────────────────────────────────────────────
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code (descomente se nao quiser versionar launch.json / tasks.json)
+# .vscode/
+
+# ─── Claude Code / Agentes ───────────────────────────────────────────────────
+
+# Configuracoes locais de agentes e skills (especificas da maquina)
+.agents/
+skills-lock.json
+
+# ─── Sistema Operacional ─────────────────────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ─── Logs e temporarios ──────────────────────────────────────────────────────
+
+*.log
+*.class
+*.pyc
+*.swp
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
