@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/canal.dart';
 import '../models/canal_assistido.dart';
 import '../models/lista_m3u.dart';
+import '../models/progresso_canal.dart';
 import '../services/armazenamento.dart';
 import '../services/carregador_lista.dart';
 import '../services/parser_m3u.dart';
@@ -30,6 +31,7 @@ class IptvProvider extends ChangeNotifier {
   List<ListaM3U> _listas = [];
   List<Canal> _favoritos = [];
   List<CanalAssistido> _historico = [];
+  List<ProgressoCanal> _progressos = [];
   ListaM3U? _listaAtiva;
   String _busca = '';
   bool _carregando = false;
@@ -38,6 +40,7 @@ class IptvProvider extends ChangeNotifier {
   List<ListaM3U> get listas => _listas;
   List<Canal> get favoritos => _favoritos;
   List<CanalAssistido> get historico => _historico;
+  List<ProgressoCanal> get progressos => _progressos;
   ListaM3U? get listaAtiva => _listaAtiva;
   String get busca => _busca;
   bool get carregando => _carregando;
@@ -48,6 +51,7 @@ class IptvProvider extends ChangeNotifier {
     _listas = _armazenamento.carregarListas();
     _favoritos = _armazenamento.carregarFavoritos();
     _historico = _armazenamento.carregarHistorico();
+    _progressos = _armazenamento.carregarProgressos();
     notifyListeners();
   }
 
@@ -181,6 +185,30 @@ class IptvProvider extends ChangeNotifier {
 
   void limparErro() {
     _erro = null;
+    notifyListeners();
+  }
+
+  // ===== PROGRESSO DE REPRODUCAO =====
+
+  ProgressoCanal? obterProgresso(Canal canal) =>
+      _armazenamento.obterProgresso(canal.url);
+
+  Future<void> salvarProgresso(
+      Canal canal, int posicaoSeg, int? duracaoSeg) async {
+    final p = ProgressoCanal(
+      url: canal.url,
+      posicaoSeg: posicaoSeg,
+      duracaoSeg: duracaoSeg,
+      atualizadoEm: DateTime.now(),
+    );
+    await _armazenamento.salvarProgresso(p);
+    _progressos = _armazenamento.carregarProgressos();
+    notifyListeners();
+  }
+
+  Future<void> removerProgresso(Canal canal) async {
+    await _armazenamento.removerProgresso(canal.url);
+    _progressos = _armazenamento.carregarProgressos();
     notifyListeners();
   }
 }

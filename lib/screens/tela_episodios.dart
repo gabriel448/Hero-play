@@ -4,6 +4,7 @@ import '../models/canal.dart';
 import '../models/serie.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import 'tela_player.dart';
 
 /// Tela de episodios de uma serie agrupada.
@@ -42,7 +43,9 @@ class TelaEpisodios extends StatelessWidget {
           ],
         ),
       ),
-      body: ListView.builder(
+      body: tabletBody(
+        context,
+        ListView.builder(
         padding: const EdgeInsets.only(bottom: AppSpacing.lg),
         itemCount: items.length,
         itemBuilder: (_, i) {
@@ -66,7 +69,7 @@ class TelaEpisodios extends StatelessWidget {
             onToggleFavorito: () => provider.alternarFavorito(ep),
           );
         },
-      ),
+      )),
     );
   }
 

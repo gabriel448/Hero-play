@@ -2,6 +2,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../models/canal.dart';
 import '../models/canal_assistido.dart';
 import '../models/lista_m3u.dart';
+import '../models/progresso_canal.dart';
 
 /// Camada de persistencia local usando Hive (banco NoSQL leve).
 ///
@@ -14,13 +15,14 @@ class Armazenamento {
   static const _nomeBoxListas = 'listas';
   static const _nomeBoxFavoritos = 'favoritos';
   static const _nomeBoxHistorico = 'historico';
+  static const _nomeBoxProgressos = 'progressos';
 
-  /// Limite de itens guardados no historico (mais antigos sao descartados).
   static const _limiteHistorico = 50;
 
   late Box _boxListas;
   late Box _boxFavoritos;
   late Box _boxHistorico;
+  late Box _boxProgressos;
 
   /// Inicializa o Hive e abre as boxes. Deve ser chamado UMA vez no main()
   /// antes de runApp.
@@ -29,6 +31,7 @@ class Armazenamento {
     _boxListas = await Hive.openBox(_nomeBoxListas);
     _boxFavoritos = await Hive.openBox(_nomeBoxFavoritos);
     _boxHistorico = await Hive.openBox(_nomeBoxHistorico);
+    _boxProgressos = await Hive.openBox(_nomeBoxProgressos);
   }
 
   // ===== LISTAS M3U =====
@@ -110,4 +113,24 @@ class Armazenamento {
   }
 
   Future<void> limparHistorico() => _boxHistorico.clear();
+
+  // ===== PROGRESSO DE REPRODUCAO =====
+
+  Future<void> salvarProgresso(ProgressoCanal p) =>
+      _boxProgressos.put(p.url, p.toMap());
+
+  Future<void> removerProgresso(String url) => _boxProgressos.delete(url);
+
+  ProgressoCanal? obterProgresso(String url) {
+    final m = _boxProgressos.get(url);
+    return m != null ? ProgressoCanal.fromMap(m as Map) : null;
+  }
+
+  List<ProgressoCanal> carregarProgressos() {
+    final lista = _boxProgressos.values
+        .map((m) => ProgressoCanal.fromMap(m as Map))
+        .toList();
+    lista.sort((a, b) => b.atualizadoEm.compareTo(a.atualizadoEm));
+    return lista;
+  }
 }

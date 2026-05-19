@@ -1,13 +1,46 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:marquee/marquee.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
+import '../models/progresso_canal.dart';
 import '../models/serie.dart';
 import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import 'tela_episodios.dart';
 import 'tela_player.dart';
+
+// Top-level: roda em Isolate separado via compute() para nao bloquear a UI.
+({
+  Map<String, List<Object>> conteudo,
+  List<String> nomes,
+  List<Object> todosConteudos,
+}) _computarConteudoFilmes(Map<String, List<Canal>> categorias) {
+  final conteudo = <String, List<Object>>{};
+  final nomes = categorias.keys.toList()..sort();
+  final visto = <String>{};
+  final todos = <Object>[];
+
+  String nomeItem(Object item) =>
+      item is Canal ? item.nome : (item as Serie).nome;
+
+  for (final cat in nomes) {
+    final ag = Serie.agrupar(categorias[cat]!);
+    final lista = <Object>[...ag.filmes, ...ag.series]
+      ..sort((a, b) => nomeItem(a).compareTo(nomeItem(b)));
+    conteudo[cat] = lista;
+
+    for (final item in lista) {
+      final key =
+          item is Canal ? 'c:${item.url}' : 's:${(item as Serie).nome}';
+      if (visto.add(key)) todos.add(item);
+    }
+  }
+
+  return (conteudo: conteudo, nomes: nomes, todosConteudos: todos);
+}
 
 const double _kPosterWidth = 100.0;
 const double _kPosterHeight = 150.0;
@@ -29,32 +62,36 @@ class _TelaFilmesState extends State<TelaFilmes> {
   bool _buscando = false;
   String _busca = '';
 
-  // Conteudo agrupado: filmes (Canal) + series (Serie) por categoria.
-  late final Map<String, List<Object>> _conteudo;
-  late final List<String> _nomes;
-  late final List<Object> _todosConteudos;
+  bool _pronto = false;
+  Map<String, List<Object>> _conteudo = const {};
+  List<String> _nomes = const [];
+  List<Object> _todosConteudos = const [];
+  // Lookup rápido url→Canal (inclui episódios de series)
+  Map<String, Canal> _canaisPorUrl = const {};
 
   @override
   void initState() {
     super.initState();
-    _conteudo = {};
-    final categoriasSorted = widget.categorias.keys.toList()..sort();
-    _nomes = categoriasSorted;
-    final visto = <String>{};
-    final todos = <Object>[];
-
-    for (final cat in categoriasSorted) {
-      final ag = Serie.agrupar(widget.categorias[cat]!);
-      final lista = <Object>[...ag.filmes, ...ag.series]
-        ..sort((a, b) => _nomeItem(a).compareTo(_nomeItem(b)));
-      _conteudo[cat] = lista;
-
-      for (final item in lista) {
-        final key = item is Canal ? 'c:${item.url}' : 's:${(item as Serie).nome}';
-        if (visto.add(key)) todos.add(item);
+    compute(_computarConteudoFilmes, widget.categorias).then((r) {
+      if (!mounted) return;
+      final lookup = <String, Canal>{};
+      for (final item in r.todosConteudos) {
+        if (item is Canal) {
+          lookup[item.url] = item;
+        } else {
+          for (final ep in (item as Serie).episodios) {
+            lookup[ep.url] = ep;
+          }
+        }
       }
-    }
-    _todosConteudos = todos;
+      setState(() {
+        _conteudo = r.conteudo;
+        _nomes = r.nomes;
+        _todosConteudos = r.todosConteudos;
+        _canaisPorUrl = lookup;
+        _pronto = true;
+      });
+    });
   }
 
   @override
@@ -62,9 +99,6 @@ class _TelaFilmesState extends State<TelaFilmes> {
     _buscaController.dispose();
     super.dispose();
   }
-
-  static String _nomeItem(Object item) =>
-      item is Canal ? item.nome : (item as Serie).nome;
 
   List<Object> _filtrar(String busca) {
     final q = busca.toLowerCase();
@@ -79,12 +113,15 @@ class _TelaFilmesState extends State<TelaFilmes> {
     }).toList();
   }
 
-  void _navegar(BuildContext context, Object item) {
+  void _navegar(BuildContext context, Object item, {Duration? posicaoInicial}) {
     final provider = context.read<IptvProvider>();
     if (item is Canal) {
       provider.registrarVisualizacao(item);
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TelaPlayer(canal: item)),
+        MaterialPageRoute(
+          builder: (_) =>
+              TelaPlayer(canal: item, posicaoInicial: posicaoInicial),
+        ),
       );
     } else {
       Navigator.of(context).push(
@@ -95,6 +132,13 @@ class _TelaFilmesState extends State<TelaFilmes> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_pronto) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Filmes e Séries')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -142,21 +186,13 @@ class _TelaFilmesState extends State<TelaFilmes> {
             )
           : _conteudo.isEmpty
               ? const _Vazio()
-              : ListView.builder(
-                  padding: const EdgeInsets.only(
-                    top: AppSpacing.sm,
-                    bottom: AppSpacing.xxl,
-                  ),
-                  itemCount: _nomes.length,
-                  itemBuilder: (_, i) {
-                    final nome = _nomes[i];
-                    final itens = _conteudo[nome]!;
-                    return _CarrosselCategoria(
-                      nomeCategoria: nome,
-                      itens: itens,
-                      onTap: (item) => _navegar(context, item),
-                    );
-                  },
+              : _BodyComCarrosseis(
+                  nomes: _nomes,
+                  conteudo: _conteudo,
+                  canaisPorUrl: _canaisPorUrl,
+                  progressos: context.watch<IptvProvider>().progressos,
+                  onTap: (item, {Duration? posicaoInicial}) =>
+                      _navegar(context, item, posicaoInicial: posicaoInicial),
                 ),
     );
   }
@@ -189,6 +225,123 @@ class _Vazio extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// Corpo principal: carrossel "Continuar assistindo" + carrosseis por categoria.
+class _BodyComCarrosseis extends StatelessWidget {
+  final List<String> nomes;
+  final Map<String, List<Object>> conteudo;
+  final Map<String, Canal> canaisPorUrl;
+  final List<ProgressoCanal> progressos;
+  final void Function(Object, {Duration? posicaoInicial}) onTap;
+
+  const _BodyComCarrosseis({
+    required this.nomes,
+    required this.conteudo,
+    required this.canaisPorUrl,
+    required this.progressos,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Filtra apenas progressos de canais presentes nesta lista, mais recente primeiro.
+    final emAndamento = progressos
+        .where((p) => canaisPorUrl.containsKey(p.url))
+        .toList();
+
+    final temAndamento = emAndamento.isNotEmpty;
+    final total = nomes.length + (temAndamento ? 1 : 0);
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(
+        top: AppSpacing.sm,
+        bottom: AppSpacing.xxl,
+      ),
+      itemCount: total,
+      itemBuilder: (_, i) {
+        if (temAndamento && i == 0) {
+          return _CarrosselContinuar(
+            progressos: emAndamento,
+            canaisPorUrl: canaisPorUrl,
+            onTap: (canal, progresso) => onTap(
+              canal,
+              posicaoInicial: Duration(seconds: progresso.posicaoSeg),
+            ),
+          );
+        }
+        final idx = temAndamento ? i - 1 : i;
+        final nome = nomes[idx];
+        return _CarrosselCategoria(
+          nomeCategoria: nome,
+          itens: conteudo[nome]!,
+          onTap: (item) => onTap(item),
+        );
+      },
+    );
+  }
+}
+
+class _CarrosselContinuar extends StatelessWidget {
+  final List<ProgressoCanal> progressos;
+  final Map<String, Canal> canaisPorUrl;
+  final void Function(Canal canal, ProgressoCanal progresso) onTap;
+
+  const _CarrosselContinuar({
+    required this.progressos,
+    required this.canaisPorUrl,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.play_circle_outline_rounded,
+                size: 16,
+                color: AppColors.accent,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                'Continuar assistindo',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: _kPosterHeight + _kPosterLabel,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            itemCount: progressos.length,
+            itemExtent: _kItemExtent,
+            itemBuilder: (_, i) {
+              final p = progressos[i];
+              final canal = canaisPorUrl[p.url]!;
+              return _Poster(
+                canal: canal,
+                progresso: p,
+                onTap: () => onTap(canal, p),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -289,7 +442,8 @@ class _CardConteudo extends StatelessWidget {
 class _Poster extends StatelessWidget {
   final Canal canal;
   final VoidCallback onTap;
-  const _Poster({required this.canal, required this.onTap});
+  final ProgressoCanal? progresso;
+  const _Poster({required this.canal, required this.onTap, this.progresso});
 
   @override
   Widget build(BuildContext context) {
@@ -306,20 +460,40 @@ class _Poster extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  height: _kPosterHeight,
-                  child: canal.logoUrl != null && canal.logoUrl!.isNotEmpty
-                      ? Image.network(
-                          canal.logoUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (ctx, err, st) =>
-                              const _PosterFallback(serie: false),
-                          loadingBuilder: (_, child, progress) =>
-                              progress == null
-                                  ? child
-                                  : const _PosterFallback(serie: false),
-                        )
-                      : const _PosterFallback(serie: false),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: canal.logoUrl != null &&
+                                canal.logoUrl!.isNotEmpty
+                            ? Image.network(
+                                canal.logoUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (ctx, err, st) =>
+                                    const _PosterFallback(serie: false),
+                                loadingBuilder: (_, child, p) =>
+                                    p == null
+                                        ? child
+                                        : const _PosterFallback(
+                                            serie: false),
+                              )
+                            : const _PosterFallback(serie: false),
+                      ),
+                      if (progresso != null)
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: LinearProgressIndicator(
+                            value: progresso!.fracao,
+                            minHeight: 3,
+                            backgroundColor: Colors.white24,
+                            valueColor: const AlwaysStoppedAnimation(
+                                AppColors.accent),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
                 SizedBox(
                   height: _kPosterLabel,
@@ -385,8 +559,7 @@ class _PosterSerieState extends State<_PosterSerie> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  height: _kPosterHeight,
+                Expanded(
                   child: FutureBuilder<String?>(
                     future: _tmdbFuture,
                     builder: (context, snap) {
@@ -540,8 +713,8 @@ class _GradeResultados extends StatelessWidget {
 
     return GridView.builder(
       padding: const EdgeInsets.all(AppSpacing.base),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: posterColumns(context),
         childAspectRatio: _kPosterWidth / (_kPosterHeight + _kPosterLabel),
         crossAxisSpacing: AppSpacing.sm,
         mainAxisSpacing: AppSpacing.sm,
@@ -687,8 +860,8 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
             )
           : GridView.builder(
               padding: const EdgeInsets.all(AppSpacing.base),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: posterColumns(context),
                 childAspectRatio:
                     _kPosterWidth / (_kPosterHeight + _kPosterLabel),
                 crossAxisSpacing: AppSpacing.sm,

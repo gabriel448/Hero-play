@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
 import 'tela_player.dart';
 
@@ -20,25 +21,29 @@ class TelaFavoritos extends StatelessWidget {
       ),
       body: favoritos.isEmpty
           ? const _Vazio()
-          : ListView.builder(
-              itemExtent: 64,
-              itemCount: favoritos.length,
-              padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-              itemBuilder: (_, i) {
-                final c = favoritos[i];
-                return ItemCanal(
-                  canal: c,
-                  ehFavorito: true,
-                  mostrarGrupo: true,
-                  onTap: () {
-                    provider.registrarVisualizacao(c);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
-                    );
-                  },
-                  onToggleFavorito: () => provider.alternarFavorito(c),
-                );
-              },
+          : tabletBody(
+              context,
+              ListView.builder(
+                itemExtent: 64,
+                itemCount: favoritos.length,
+                padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                itemBuilder: (_, i) {
+                  final c = favoritos[i];
+                  return ItemCanal(
+                    canal: c,
+                    ehFavorito: true,
+                    mostrarGrupo: true,
+                    onTap: () {
+                      provider.registrarVisualizacao(c);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => TelaPlayer(canal: c)),
+                      );
+                    },
+                    onToggleFavorito: () => provider.alternarFavorito(c),
+                  );
+                },
+              ),
             ),
     );
   }

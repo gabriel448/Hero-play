@@ -4,6 +4,7 @@ import '../models/canal.dart';
 import '../models/lista_m3u.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
 import 'tela_categoria.dart';
 import 'tela_player.dart';
@@ -252,8 +253,7 @@ class _ListaCategorias extends StatelessWidget {
     }
 
     final nomes = categorias.keys.toList()..sort();
-
-    return ListView.separated(
+    final list = ListView.separated(
       itemCount: nomes.length,
       padding: const EdgeInsets.only(bottom: AppSpacing.lg),
       separatorBuilder: (_, _) => const Padding(
@@ -279,6 +279,7 @@ class _ListaCategorias extends StatelessWidget {
         );
       },
     );
+    return tabletBody(context, list);
   }
 }
 
@@ -385,24 +386,27 @@ class _ListaBusca extends StatelessWidget {
         ),
       );
     }
-    return ListView.builder(
-      itemCount: canais.length,
-      itemExtent: 64,
-      itemBuilder: (_, i) {
-        final c = canais[i];
-        return ItemCanal(
-          canal: c,
-          ehFavorito: provider.ehFavorito(c),
-          mostrarGrupo: true,
-          onTap: () {
-            provider.registrarVisualizacao(c);
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
-            );
-          },
-          onToggleFavorito: () => provider.alternarFavorito(c),
-        );
-      },
+    return tabletBody(
+      context,
+      ListView.builder(
+        itemCount: canais.length,
+        itemExtent: 64,
+        itemBuilder: (_, i) {
+          final c = canais[i];
+          return ItemCanal(
+            canal: c,
+            ehFavorito: provider.ehFavorito(c),
+            mostrarGrupo: true,
+            onTap: () {
+              provider.registrarVisualizacao(c);
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
+              );
+            },
+            onToggleFavorito: () => provider.alternarFavorito(c),
+          );
+        },
+      ),
     );
   }
 }

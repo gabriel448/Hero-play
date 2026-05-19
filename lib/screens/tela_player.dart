@@ -18,7 +18,8 @@ import '../theme/app_theme.dart';
 /// servidores IPTV exigem UA especifico.
 class TelaPlayer extends StatefulWidget {
   final Canal canal;
-  const TelaPlayer({super.key, required this.canal});
+  final Duration? posicaoInicial;
+  const TelaPlayer({super.key, required this.canal, this.posicaoInicial});
 
   @override
   State<TelaPlayer> createState() => _TelaPlayerState();
@@ -59,6 +60,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   DateTime? _inicioTentativa;
   Timer? _timeoutTimer;
   Timer? _atualizadorStatus;
+  late IptvProvider _provider;
 
   StreamSubscription? _subPlaying;
   StreamSubscription? _subBuffering;
@@ -75,8 +77,25 @@ class _TelaPlayerState extends State<TelaPlayer> {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
+    _boostarVolume();
     _registrarStreams();
     _abrirStream();
+  }
+
+  void _boostarVolume() {
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      native.setProperty('volume-max', '200').then((_) {
+        if (!mounted) return;
+        native.setProperty('volume', '150');
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _provider = context.read<IptvProvider>();
   }
 
   void _registrarLog(String msg) {
@@ -97,6 +116,11 @@ class _TelaPlayerState extends State<TelaPlayer> {
         _atualizadorStatus?.cancel();
         _registrarLog('playing=true');
         setState(() => _status = 'Tocando');
+        if (widget.posicaoInicial != null &&
+            widget.posicaoInicial! > Duration.zero) {
+          _player.seek(widget.posicaoInicial!);
+          _registrarLog('seek para ${widget.posicaoInicial!.inSeconds}s');
+        }
       } else if (!tocando && _iniciado) {
         setState(() => _status = 'Pausado');
       }
@@ -276,6 +300,21 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   @override
   void dispose() {
+    if (_iniciado && widget.canal.tipo == TipoCanal.filme) {
+      final posicaoSeg = _player.state.position.inSeconds;
+      if (posicaoSeg > 120) {
+        final duracaoSeg = _player.state.duration.inSeconds;
+        final fracao = duracaoSeg > 0 ? posicaoSeg / duracaoSeg : 0.0;
+        if (fracao < 0.9) {
+          _provider
+              .salvarProgresso(
+                  widget.canal, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null)
+              .ignore();
+        } else {
+          _provider.removerProgresso(widget.canal).ignore();
+        }
+      }
+    }
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
     _subPlaying?.cancel();

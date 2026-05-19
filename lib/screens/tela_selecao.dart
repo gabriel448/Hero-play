@@ -77,13 +77,16 @@ class _TelaSelecaoState extends State<TelaSelecao> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
             child: tablet
-                ? Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Expanded(child: cardAoVivo),
-                      const SizedBox(width: AppSpacing.base),
-                      Expanded(child: cardFilmes),
-                    ],
+                ? IntrinsicHeight(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: cardAoVivo),
+                        const SizedBox(width: AppSpacing.base),
+                        Expanded(child: cardFilmes),
+                      ],
+                    ),
                   )
                 : Column(
                     mainAxisSize: MainAxisSize.min,

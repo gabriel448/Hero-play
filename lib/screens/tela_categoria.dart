@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
 import 'tela_player.dart';
 
@@ -113,24 +114,28 @@ class _TelaCategoriaState extends State<TelaCategoria> {
                     ),
               ),
             )
-          : ListView.builder(
-              itemExtent: 64,
-              itemCount: _canaisFiltrados.length,
-              padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-              itemBuilder: (_, i) {
-                final c = _canaisFiltrados[i];
-                return ItemCanal(
-                  canal: c,
-                  ehFavorito: provider.ehFavorito(c),
-                  onTap: () {
-                    provider.registrarVisualizacao(c);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
-                    );
-                  },
-                  onToggleFavorito: () => provider.alternarFavorito(c),
-                );
-              },
+          : tabletBody(
+              context,
+              ListView.builder(
+                itemExtent: 64,
+                itemCount: _canaisFiltrados.length,
+                padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                itemBuilder: (_, i) {
+                  final c = _canaisFiltrados[i];
+                  return ItemCanal(
+                    canal: c,
+                    ehFavorito: provider.ehFavorito(c),
+                    onTap: () {
+                      provider.registrarVisualizacao(c);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => TelaPlayer(canal: c)),
+                      );
+                    },
+                    onToggleFavorito: () => provider.alternarFavorito(c),
+                  );
+                },
+              ),
             ),
     );
   }

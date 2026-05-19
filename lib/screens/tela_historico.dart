@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
 import 'tela_player.dart';
 
@@ -28,28 +29,31 @@ class TelaHistorico extends StatelessWidget {
       ),
       body: historico.isEmpty
           ? const _Vazio()
-          : ListView.builder(
-              itemExtent: 64,
-              itemCount: historico.length,
-              padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-              itemBuilder: (_, i) {
-                final item = historico[i];
-                return ItemCanal(
-                  canal: item.canal,
-                  ehFavorito: provider.ehFavorito(item.canal),
-                  mostrarGrupo: true,
-                  onTap: () {
-                    provider.registrarVisualizacao(item.canal);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => TelaPlayer(canal: item.canal),
-                      ),
-                    );
-                  },
-                  onToggleFavorito: () =>
-                      provider.alternarFavorito(item.canal),
-                );
-              },
+          : tabletBody(
+              context,
+              ListView.builder(
+                itemExtent: 64,
+                itemCount: historico.length,
+                padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                itemBuilder: (_, i) {
+                  final item = historico[i];
+                  return ItemCanal(
+                    canal: item.canal,
+                    ehFavorito: provider.ehFavorito(item.canal),
+                    mostrarGrupo: true,
+                    onTap: () {
+                      provider.registrarVisualizacao(item.canal);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => TelaPlayer(canal: item.canal),
+                        ),
+                      );
+                    },
+                    onToggleFavorito: () =>
+                        provider.alternarFavorito(item.canal),
+                  );
+                },
+              ),
             ),
     );
   }
