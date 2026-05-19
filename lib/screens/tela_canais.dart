@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
 import 'tela_categoria.dart';
 import 'tela_player.dart';
@@ -21,6 +22,7 @@ class _TelaCanaisState extends State<TelaCanais> {
   final _buscaController = TextEditingController();
   bool _buscando = false;
   String _busca = '';
+  String? _categoriaAtiva;
 
   @override
   void dispose() {
@@ -84,7 +86,14 @@ class _TelaCanaisState extends State<TelaCanais> {
       ),
       body: _buscando && _busca.isNotEmpty
           ? _ListaResultados(canais: _resultadosBusca)
-          : _ListaCategorias(categorias: widget.categorias),
+          : isTablet(context)
+              ? _LayoutTabletCanais(
+                  categorias: widget.categorias,
+                  categoriaAtiva: _categoriaAtiva,
+                  onCategoriaSelecionada: (cat) =>
+                      setState(() => _categoriaAtiva = cat),
+                )
+              : _ListaCategorias(categorias: widget.categorias),
     );
   }
 }
@@ -218,6 +227,349 @@ class _ItemCategoria extends StatelessWidget {
     );
   }
 }
+
+// ─── Layout tablet: sidebar de categorias + painel de canais ─────────────────
+
+class _LayoutTabletCanais extends StatefulWidget {
+  final Map<String, List<Canal>> categorias;
+  final String? categoriaAtiva;
+  final ValueChanged<String> onCategoriaSelecionada;
+
+  const _LayoutTabletCanais({
+    required this.categorias,
+    required this.categoriaAtiva,
+    required this.onCategoriaSelecionada,
+  });
+
+  @override
+  State<_LayoutTabletCanais> createState() => _LayoutTabletCanaisState();
+}
+
+class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
+  final _buscaController = TextEditingController();
+  late List<Canal> _canaisFiltrados;
+
+  @override
+  void initState() {
+    super.initState();
+    _canaisFiltrados = _canaisAtivos;
+  }
+
+  @override
+  void didUpdateWidget(_LayoutTabletCanais old) {
+    super.didUpdateWidget(old);
+    if (old.categoriaAtiva != widget.categoriaAtiva) {
+      _buscaController.clear();
+      _canaisFiltrados = _canaisAtivos;
+    }
+  }
+
+  @override
+  void dispose() {
+    _buscaController.dispose();
+    super.dispose();
+  }
+
+  List<Canal> get _canaisAtivos =>
+      widget.categoriaAtiva != null
+          ? (widget.categorias[widget.categoriaAtiva] ?? [])
+          : [];
+
+  void _filtrar(String texto) {
+    final q = texto.trim().toLowerCase();
+    setState(() {
+      _canaisFiltrados = q.isEmpty
+          ? _canaisAtivos
+          : _canaisAtivos.where((c) => c.nome.toLowerCase().contains(q)).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nomes = widget.categorias.keys.toList()..sort();
+
+    return Row(
+      children: [
+        // ── Sidebar categorias ──────────────────────────────────────────────
+        SizedBox(
+          width: 260,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.base,
+                  AppSpacing.md,
+                  AppSpacing.base,
+                  AppSpacing.xs,
+                ),
+                child: Text(
+                  'CATEGORIAS',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.textTertiary,
+                        letterSpacing: 0.6,
+                      ),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(
+                    left: AppSpacing.sm,
+                    right: AppSpacing.sm,
+                    bottom: AppSpacing.lg,
+                  ),
+                  itemCount: nomes.length,
+                  itemBuilder: (_, i) {
+                    final nome = nomes[i];
+                    final ativo = nome == widget.categoriaAtiva;
+                    return _ItemCategoriaTablet(
+                      nome: nome,
+                      quantidade: widget.categorias[nome]!.length,
+                      ativo: ativo,
+                      onTap: () => widget.onCategoriaSelecionada(nome),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Divisor vertical
+        const VerticalDivider(width: 1, thickness: 1, color: AppColors.divider),
+        // ── Painel de canais ───────────────────────────────────────────────
+        Expanded(
+          child: widget.categoriaAtiva == null
+              ? _EmptyPainel()
+              : _PainelCanaisTablet(
+                  nomeCategoria: widget.categoriaAtiva!,
+                  canais: _canaisAtivos,
+                  canaisFiltrados: _canaisFiltrados,
+                  buscaController: _buscaController,
+                  onFiltrar: _filtrar,
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ItemCategoriaTablet extends StatelessWidget {
+  final String nome;
+  final int quantidade;
+  final bool ativo;
+  final VoidCallback onTap;
+
+  const _ItemCategoriaTablet({
+    required this.nome,
+    required this.quantidade,
+    required this.ativo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: ativo ? AppColors.accentDim : Colors.transparent,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              if (ativo)
+                Container(
+                  width: 3,
+                  height: 32,
+                  margin: const EdgeInsets.only(right: AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                )
+              else
+                const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      nome,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: ativo
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
+                            fontWeight:
+                                ativo ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '$quantidade canais',
+                      style: tabular(
+                        Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: ativo
+                                  ? AppColors.accentBright
+                                  : AppColors.textTertiary,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyPainel extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.live_tv_rounded,
+            size: 48,
+            color: AppColors.textTertiary,
+          ),
+          const SizedBox(height: AppSpacing.base),
+          Text(
+            'Selecione uma categoria',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PainelCanaisTablet extends StatelessWidget {
+  final String nomeCategoria;
+  final List<Canal> canais;
+  final List<Canal> canaisFiltrados;
+  final TextEditingController buscaController;
+  final ValueChanged<String> onFiltrar;
+
+  const _PainelCanaisTablet({
+    required this.nomeCategoria,
+    required this.canais,
+    required this.canaisFiltrados,
+    required this.buscaController,
+    required this.onFiltrar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<IptvProvider>();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.base,
+            AppSpacing.md,
+            AppSpacing.base,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  nomeCategoria,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                '${canais.length} canais',
+                style: tabular(
+                  Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.textTertiary),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.base,
+            0,
+            AppSpacing.base,
+            AppSpacing.sm,
+          ),
+          child: TextField(
+            controller: buscaController,
+            decoration: InputDecoration(
+              hintText: 'Buscar nesta categoria',
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              suffixIcon: buscaController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 18),
+                      onPressed: () {
+                        buscaController.clear();
+                        onFiltrar('');
+                      },
+                    ),
+            ),
+            onChanged: onFiltrar,
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: canaisFiltrados.isEmpty
+              ? Center(
+                  child: Text(
+                    'Nenhum canal encontrado',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                  ),
+                )
+              : ListView.builder(
+                  itemExtent: 64,
+                  itemCount: canaisFiltrados.length,
+                  padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                  itemBuilder: (_, i) {
+                    final c = canaisFiltrados[i];
+                    return ItemCanal(
+                      canal: c,
+                      ehFavorito: provider.ehFavorito(c),
+                      onTap: () {
+                        provider.registrarVisualizacao(c);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => TelaPlayer(canal: c)),
+                        );
+                      },
+                      onToggleFavorito: () => provider.alternarFavorito(c),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ListaResultados extends StatelessWidget {
   final List<Canal> canais;

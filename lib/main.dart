@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'app.dart';
 import 'services/armazenamento.dart';
+import 'services/tmdb_service.dart';
 import 'state/iptv_provider.dart';
 
 /// Ponto de entrada da aplicacao.
@@ -15,7 +17,7 @@ import 'state/iptv_provider.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicializa o engine de video (libmpv).
+  await dotenv.load(fileName: '.env');
   MediaKit.ensureInitialized();
 
   final armazenamento = Armazenamento();
@@ -24,9 +26,14 @@ Future<void> main() async {
   final provider = IptvProvider(armazenamento: armazenamento);
   await provider.inicializar();
 
+  final tmdb = TmdbService(dotenv.get('TMDB_API_KEY', fallback: ''));
+
   runApp(
-    ChangeNotifierProvider<IptvProvider>.value(
-      value: provider,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<IptvProvider>.value(value: provider),
+        Provider<TmdbService>.value(value: tmdb),
+      ],
       child: const IptvApp(),
     ),
   );

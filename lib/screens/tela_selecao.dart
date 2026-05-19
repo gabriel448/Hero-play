@@ -4,6 +4,7 @@ import '../models/canal.dart';
 import '../models/lista_m3u.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import 'tela_canais.dart';
 import 'tela_filmes.dart';
 
@@ -45,41 +46,53 @@ class _TelaSelecaoState extends State<TelaSelecao> {
     final totalLive = lista.canaisAoVivo.length;
     final totalFilmes = lista.filmes.length;
 
+    final tablet = isTablet(context);
+    final cardAoVivo = _CardOpcao(
+      icone: Icons.live_tv_rounded,
+      titulo: 'Canais ao vivo',
+      contagem: totalLive,
+      unidade: 'canal',
+      destaque: true,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaCanais(categorias: cacheAoVivo)),
+      ),
+    );
+    final cardFilmes = _CardOpcao(
+      icone: Icons.movie_creation_outlined,
+      titulo: 'Filmes e Séries',
+      contagem: totalFilmes,
+      unidade: 'item',
+      destaque: false,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaFilmes(categorias: cacheFilmes)),
+      ),
+    );
+
     return Scaffold(
       backgroundColor: AppColors.surface0,
       appBar: AppBar(title: Text(lista.nome)),
       body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _CardOpcao(
-                icone: Icons.live_tv_rounded,
-                titulo: 'Canais ao vivo',
-                contagem: totalLive,
-                unidade: 'canal',
-                destaque: true,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TelaCanais(categorias: cacheAoVivo),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: tablet ? 800 : double.infinity),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+            child: tablet
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Expanded(child: cardAoVivo),
+                      const SizedBox(width: AppSpacing.base),
+                      Expanded(child: cardFilmes),
+                    ],
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      cardAoVivo,
+                      const SizedBox(height: AppSpacing.base),
+                      cardFilmes,
+                    ],
                   ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.base),
-              _CardOpcao(
-                icone: Icons.movie_creation_outlined,
-                titulo: 'Filmes',
-                contagem: totalFilmes,
-                unidade: 'filme',
-                destaque: false,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TelaFilmes(categorias: cacheFilmes),
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ),

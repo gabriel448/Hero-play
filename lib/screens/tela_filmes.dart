@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:marquee/marquee.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
+import '../models/serie.dart';
+import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import 'tela_episodios.dart';
 import 'tela_player.dart';
 
 const double _kPosterWidth = 100.0;
@@ -11,8 +14,8 @@ const double _kPosterHeight = 150.0;
 const double _kPosterLabel = 28.0;
 const double _kItemExtent = _kPosterWidth + AppSpacing.sm;
 
-/// Tela estilo streaming: carrosseis horizontais por categoria de filmes.
-/// Cada cartao mostra o poster (tvg-logo) e o titulo do filme.
+/// Tela estilo streaming: carrosseis por categoria com filmes e series agrupadas.
+/// Series sao detectadas pelo padrao SxxExx no nome e agrupadas em um unico card.
 class TelaFilmes extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
   const TelaFilmes({super.key, required this.categorias});
@@ -26,29 +29,72 @@ class _TelaFilmesState extends State<TelaFilmes> {
   bool _buscando = false;
   String _busca = '';
 
+  // Conteudo agrupado: filmes (Canal) + series (Serie) por categoria.
+  late final Map<String, List<Object>> _conteudo;
+  late final List<String> _nomes;
+  late final List<Object> _todosConteudos;
+
+  @override
+  void initState() {
+    super.initState();
+    _conteudo = {};
+    final categoriasSorted = widget.categorias.keys.toList()..sort();
+    _nomes = categoriasSorted;
+    final visto = <String>{};
+    final todos = <Object>[];
+
+    for (final cat in categoriasSorted) {
+      final ag = Serie.agrupar(widget.categorias[cat]!);
+      final lista = <Object>[...ag.filmes, ...ag.series]
+        ..sort((a, b) => _nomeItem(a).compareTo(_nomeItem(b)));
+      _conteudo[cat] = lista;
+
+      for (final item in lista) {
+        final key = item is Canal ? 'c:${item.url}' : 's:${(item as Serie).nome}';
+        if (visto.add(key)) todos.add(item);
+      }
+    }
+    _todosConteudos = todos;
+  }
+
   @override
   void dispose() {
     _buscaController.dispose();
     super.dispose();
   }
 
-  List<Canal> _filtrar(String busca) {
+  static String _nomeItem(Object item) =>
+      item is Canal ? item.nome : (item as Serie).nome;
+
+  List<Object> _filtrar(String busca) {
     final q = busca.toLowerCase();
-    return widget.categorias.values
-        .expand((l) => l)
-        .where(
-          (c) =>
-              c.nome.toLowerCase().contains(q) ||
-              c.grupo.toLowerCase().contains(q),
-        )
-        .toList();
+    return _todosConteudos.where((item) {
+      if (item is Canal) {
+        return item.nome.toLowerCase().contains(q) ||
+            item.grupo.toLowerCase().contains(q);
+      }
+      final s = item as Serie;
+      return s.nome.toLowerCase().contains(q) ||
+          s.grupo.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  void _navegar(BuildContext context, Object item) {
+    final provider = context.read<IptvProvider>();
+    if (item is Canal) {
+      provider.registrarVisualizacao(item);
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaPlayer(canal: item)),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaEpisodios(serie: item as Serie)),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<IptvProvider>();
-    final nomes = widget.categorias.keys.toList()..sort();
-
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -59,7 +105,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
                   controller: _buscaController,
                   autofocus: true,
                   decoration: const InputDecoration(
-                    hintText: 'Buscar filmes',
+                    hintText: 'Buscar filmes e séries',
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
@@ -70,7 +116,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
                   onChanged: (v) => setState(() => _busca = v),
                 ),
               )
-            : const Text('Filmes'),
+            : const Text('Filmes e Séries'),
         actions: [
           IconButton(
             icon: Icon(
@@ -91,36 +137,24 @@ class _TelaFilmesState extends State<TelaFilmes> {
       ),
       body: _buscando && _busca.isNotEmpty
           ? _GradeResultados(
-              canais: _filtrar(_busca),
-              onTap: (c) {
-                provider.registrarVisualizacao(c);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
-                );
-              },
+              itens: _filtrar(_busca),
+              onTap: (item) => _navegar(context, item),
             )
-          : widget.categorias.isEmpty
+          : _conteudo.isEmpty
               ? const _Vazio()
               : ListView.builder(
                   padding: const EdgeInsets.only(
                     top: AppSpacing.sm,
                     bottom: AppSpacing.xxl,
                   ),
-                  itemCount: nomes.length,
+                  itemCount: _nomes.length,
                   itemBuilder: (_, i) {
-                    final nome = nomes[i];
-                    final filmes = widget.categorias[nome]!;
+                    final nome = _nomes[i];
+                    final itens = _conteudo[nome]!;
                     return _CarrosselCategoria(
                       nomeCategoria: nome,
-                      filmes: filmes,
-                      onTapFilme: (c) {
-                        provider.registrarVisualizacao(c);
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => TelaPlayer(canal: c),
-                          ),
-                        );
-                      },
+                      itens: itens,
+                      onTap: (item) => _navegar(context, item),
                     );
                   },
                 ),
@@ -146,7 +180,7 @@ class _Vazio extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.base),
             Text(
-              'Sem filmes nesta lista',
+              'Sem filmes ou séries nesta lista',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.textSecondary,
                   ),
@@ -161,13 +195,13 @@ class _Vazio extends StatelessWidget {
 
 class _CarrosselCategoria extends StatelessWidget {
   final String nomeCategoria;
-  final List<Canal> filmes;
-  final void Function(Canal) onTapFilme;
+  final List<Object> itens;
+  final void Function(Object) onTap;
 
   const _CarrosselCategoria({
     required this.nomeCategoria,
-    required this.filmes,
-    required this.onTapFilme,
+    required this.itens,
+    required this.onTap,
   });
 
   @override
@@ -180,7 +214,7 @@ class _CarrosselCategoria extends StatelessWidget {
             MaterialPageRoute(
               builder: (_) => _TelaCategoriaFilmes(
                 nomeCategoria: nomeCategoria,
-                filmes: filmes,
+                itens: itens,
               ),
             ),
           ),
@@ -202,7 +236,7 @@ class _CarrosselCategoria extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${filmes.length}',
+                  '${itens.length}',
                   style: tabular(
                     Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: AppColors.textTertiary,
@@ -224,11 +258,11 @@ class _CarrosselCategoria extends StatelessWidget {
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: filmes.length,
+            itemCount: itens.length,
             itemExtent: _kItemExtent,
-            itemBuilder: (_, i) => _Poster(
-              canal: filmes[i],
-              onTap: () => onTapFilme(filmes[i]),
+            itemBuilder: (_, i) => _CardConteudo(
+              item: itens[i],
+              onTap: () => onTap(itens[i]),
             ),
           ),
         ),
@@ -237,10 +271,24 @@ class _CarrosselCategoria extends StatelessWidget {
   }
 }
 
+// ─── Cards de poster ──────────────────────────────────────────────────────────
+
+class _CardConteudo extends StatelessWidget {
+  final Object item;
+  final VoidCallback onTap;
+  const _CardConteudo({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    if (item is Canal) return _Poster(canal: item as Canal, onTap: onTap);
+    final serie = item as Serie;
+    return _PosterSerie(key: ValueKey(serie.nome), serie: serie, onTap: onTap);
+  }
+}
+
 class _Poster extends StatelessWidget {
   final Canal canal;
   final VoidCallback onTap;
-
   const _Poster({required this.canal, required this.onTap});
 
   @override
@@ -264,11 +312,14 @@ class _Poster extends StatelessWidget {
                       ? Image.network(
                           canal.logoUrl!,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, _) => const _PosterFallback(),
+                          errorBuilder: (ctx, err, st) =>
+                              const _PosterFallback(serie: false),
                           loadingBuilder: (_, child, progress) =>
-                              progress == null ? child : const _PosterFallback(),
+                              progress == null
+                                  ? child
+                                  : const _PosterFallback(serie: false),
                         )
-                      : const _PosterFallback(),
+                      : const _PosterFallback(serie: false),
                 ),
                 SizedBox(
                   height: _kPosterLabel,
@@ -300,16 +351,163 @@ class _Poster extends StatelessWidget {
   }
 }
 
-class _PosterFallback extends StatelessWidget {
-  const _PosterFallback();
+class _PosterSerie extends StatefulWidget {
+  final Serie serie;
+  final VoidCallback onTap;
+  const _PosterSerie({super.key, required this.serie, required this.onTap});
+
+  @override
+  State<_PosterSerie> createState() => _PosterSerieState();
+}
+
+class _PosterSerieState extends State<_PosterSerie> {
+  late final Future<String?> _tmdbFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _tmdbFuture =
+        context.read<TmdbService>().posterSerie(widget.serie.nome);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      child: SizedBox(
+        width: _kPosterWidth,
+        child: Material(
+          color: AppColors.surface1,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: _kPosterHeight,
+                  child: FutureBuilder<String?>(
+                    future: _tmdbFuture,
+                    builder: (context, snap) {
+                      // Prioridade: TMDB > tvg-logo da M3U > fallback
+                      final url = snap.data?.isNotEmpty == true
+                          ? snap.data
+                          : (widget.serie.logoUrl?.isNotEmpty == true
+                              ? widget.serie.logoUrl
+                              : null);
+                      return Stack(
+                        children: [
+                          Positioned.fill(
+                            child: url != null
+                                ? Image.network(
+                                    url,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (ctx, err, st) =>
+                                        const _PosterFallback(serie: true),
+                                    loadingBuilder: (_, child, progress) =>
+                                        progress == null
+                                            ? child
+                                            : const _PosterFallback(
+                                                serie: true),
+                                  )
+                                : const _PosterFallback(serie: true),
+                          ),
+                          // Badge "SÉRIE"
+                          Positioned(
+                            top: 4,
+                            left: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.accentDim,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: const Text(
+                                'SÉRIE',
+                                style: TextStyle(
+                                  color: AppColors.accentBright,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Contagem de episodios
+                          Positioned(
+                            bottom: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                '${widget.serie.totalEpisodios} ep',
+                                style: tabular(
+                                  const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                SizedBox(
+                  height: _kPosterLabel,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xs,
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: Marquee(
+                      text: widget.serie.nome,
+                      style: Theme.of(context).textTheme.labelSmall!,
+                      scrollAxis: Axis.horizontal,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      blankSpace: 32.0,
+                      velocity: 30.0,
+                      pauseAfterRound: const Duration(seconds: 3),
+                      startAfter: const Duration(seconds: 2),
+                      fadingEdgeStartFraction: 0.0,
+                      fadingEdgeEndFraction: 0.12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PosterFallback extends StatelessWidget {
+  final bool serie;
+  const _PosterFallback({required this.serie});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
       color: AppColors.surface2,
       child: Center(
         child: Icon(
-          Icons.movie_creation_outlined,
+          serie ? Icons.tv_rounded : Icons.movie_creation_outlined,
           size: 32,
           color: AppColors.textTertiary,
         ),
@@ -318,18 +516,20 @@ class _PosterFallback extends StatelessWidget {
   }
 }
 
-class _GradeResultados extends StatelessWidget {
-  final List<Canal> canais;
-  final void Function(Canal) onTap;
+// ─── Grade de resultados de busca ────────────────────────────────────────────
 
-  const _GradeResultados({required this.canais, required this.onTap});
+class _GradeResultados extends StatelessWidget {
+  final List<Object> itens;
+  final void Function(Object) onTap;
+
+  const _GradeResultados({required this.itens, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    if (canais.isEmpty) {
+    if (itens.isEmpty) {
       return Center(
         child: Text(
-          'Nenhum filme encontrado',
+          'Nenhum resultado encontrado',
           style: Theme.of(context)
               .textTheme
               .bodyMedium
@@ -346,23 +546,24 @@ class _GradeResultados extends StatelessWidget {
         crossAxisSpacing: AppSpacing.sm,
         mainAxisSpacing: AppSpacing.sm,
       ),
-      itemCount: canais.length,
-      itemBuilder: (_, i) => _Poster(
-        canal: canais[i],
-        onTap: () => onTap(canais[i]),
+      itemCount: itens.length,
+      itemBuilder: (_, i) => _CardConteudo(
+        item: itens[i],
+        onTap: () => onTap(itens[i]),
       ),
     );
   }
 }
 
-/// Tela de detalhe de uma categoria de filmes: grade 3 colunas + busca local.
+// ─── Tela de detalhe de categoria ────────────────────────────────────────────
+
 class _TelaCategoriaFilmes extends StatefulWidget {
   final String nomeCategoria;
-  final List<Canal> filmes;
+  final List<Object> itens;
 
   const _TelaCategoriaFilmes({
     required this.nomeCategoria,
-    required this.filmes,
+    required this.itens,
   });
 
   @override
@@ -370,14 +571,18 @@ class _TelaCategoriaFilmes extends StatefulWidget {
 }
 
 class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
-  late List<Canal> _filtrados;
+  late List<Object> _filtrados;
   final _buscaController = TextEditingController();
   String _busca = '';
+  late final int _numFilmes;
+  late final int _numSeries;
 
   @override
   void initState() {
     super.initState();
-    _filtrados = widget.filmes;
+    _filtrados = widget.itens;
+    _numFilmes = widget.itens.whereType<Canal>().length;
+    _numSeries = widget.itens.whereType<Serie>().length;
   }
 
   @override
@@ -386,22 +591,46 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
     super.dispose();
   }
 
+  String get _contagemLabel {
+    final parts = <String>[];
+    if (_numFilmes > 0) {
+      parts.add('$_numFilmes ${_numFilmes == 1 ? "filme" : "filmes"}');
+    }
+    if (_numSeries > 0) {
+      parts.add('$_numSeries ${_numSeries == 1 ? "série" : "séries"}');
+    }
+    return parts.join(' · ');
+  }
+
   void _filtrar(String q) {
     final lower = q.trim().toLowerCase();
     setState(() {
       _busca = q;
       _filtrados = lower.isEmpty
-          ? widget.filmes
-          : widget.filmes
-              .where((c) => c.nome.toLowerCase().contains(lower))
-              .toList();
+          ? widget.itens
+          : widget.itens.where((item) {
+              final nome =
+                  item is Canal ? item.nome : (item as Serie).nome;
+              return nome.toLowerCase().contains(lower);
+            }).toList();
     });
+  }
+
+  void _navegar(Object item) {
+    if (item is Canal) {
+      context.read<IptvProvider>().registrarVisualizacao(item);
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaPlayer(canal: item)),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaEpisodios(serie: item as Serie)),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<IptvProvider>();
-
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -413,7 +642,7 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
               overflow: TextOverflow.ellipsis,
             ),
             Text(
-              '${widget.filmes.length} filmes',
+              _contagemLabel,
               style: tabular(Theme.of(context).textTheme.bodySmall),
             ),
           ],
@@ -450,7 +679,7 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
       body: _filtrados.isEmpty
           ? Center(
               child: Text(
-                'Nenhum filme encontrado',
+                'Nenhum resultado encontrado',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.textSecondary,
                     ),
@@ -460,23 +689,16 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
               padding: const EdgeInsets.all(AppSpacing.base),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
-                childAspectRatio: _kPosterWidth / (_kPosterHeight + _kPosterLabel),
+                childAspectRatio:
+                    _kPosterWidth / (_kPosterHeight + _kPosterLabel),
                 crossAxisSpacing: AppSpacing.sm,
                 mainAxisSpacing: AppSpacing.sm,
               ),
               itemCount: _filtrados.length,
-              itemBuilder: (_, i) {
-                final c = _filtrados[i];
-                return _Poster(
-                  canal: c,
-                  onTap: () {
-                    provider.registrarVisualizacao(c);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
-                    );
-                  },
-                );
-              },
+              itemBuilder: (_, i) => _CardConteudo(
+                item: _filtrados[i],
+                onTap: () => _navegar(_filtrados[i]),
+              ),
             ),
     );
   }

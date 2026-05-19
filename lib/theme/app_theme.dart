@@ -21,11 +21,11 @@ abstract class AppColors {
   static const divider = Color(0xFF2A2622);
   static const outlineSubtle = Color(0xFF3A3530);
 
-  // Accent (ambar quente - "cinema iluminado por lampada de tungstenio").
-  static const accent = Color(0xFFE5A56C);
-  static const accentBright = Color(0xFFF2BC85);
-  static const accentOn = Color(0xFF1A1815);
-  static const accentDim = Color(0xFF3A2A1F);
+  // Accent (vermelho streaming - bold, reconhecivel no dark).
+  static const accent = Color(0xFFE53935);
+  static const accentBright = Color(0xFFEF5350);
+  static const accentOn = Color(0xFFFFFFFF);
+  static const accentDim = Color(0xFF3D1212);
 
   // Semantico.
   static const live = Color(0xFFD9534F);

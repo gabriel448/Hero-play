@@ -115,7 +115,7 @@ class _TelaConteudoState extends State<TelaConteudo>
                       contagem: totalLive,
                     ),
                     _TabLabel(
-                      titulo: 'Filmes',
+                      titulo: 'Filmes e Séries',
                       contagem: totalFilmes,
                     ),
                   ],
@@ -239,7 +239,7 @@ class _ListaCategorias extends StatelessWidget {
               Text(
                 tipo == TipoCanal.aoVivo
                     ? 'Sem canais ao vivo nesta lista'
-                    : 'Sem filmes nesta lista',
+                    : 'Sem filmes ou séries nesta lista',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.textSecondary,
                     ),

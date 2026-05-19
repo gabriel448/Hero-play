@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 
@@ -33,12 +34,7 @@ class CarregadorLista {
         );
       }
 
-      // Algumas listas vem em latin1; tentamos UTF-8 primeiro com fallback.
-      try {
-        return resposta.body;
-      } catch (_) {
-        return String.fromCharCodes(resposta.bodyBytes);
-      }
+      return _decodificar(resposta.bodyBytes);
     } on FormatException {
       throw CarregamentoListaException('URL invalida: $url');
     } on SocketException {
@@ -50,6 +46,15 @@ class CarregadorLista {
     } catch (e) {
       if (e is CarregamentoListaException) rethrow;
       throw CarregamentoListaException(e.toString());
+    }
+  }
+
+  /// Decodifica bytes tentando UTF-8 primeiro; cai em latin1 se invalido.
+  static String _decodificar(List<int> bytes) {
+    try {
+      return utf8.decode(bytes);
+    } catch (_) {
+      return latin1.decode(bytes);
     }
   }
 

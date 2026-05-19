@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/lista_m3u.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import 'tela_selecao.dart';
 import 'tela_favoritos.dart';
 import 'tela_historico.dart';
@@ -21,11 +22,21 @@ class TelaInicial extends StatelessWidget {
     final listas = provider.listas;
     final temListas = listas.isNotEmpty;
 
+    final tablet = isTablet(context);
     return Scaffold(
       body: SafeArea(
-        child: temListas
-            ? _BodyComListas(listas: listas)
-            : const _BodyVazio(),
+        child: tablet
+            ? Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: temListas
+                      ? _BodyComListas(listas: listas)
+                      : const _BodyVazio(),
+                ),
+              )
+            : temListas
+                ? _BodyComListas(listas: listas)
+                : const _BodyVazio(),
       ),
       floatingActionButton: temListas
           ? FloatingActionButton.extended(
@@ -383,3 +394,4 @@ class _BodyVazio extends StatelessWidget {
     );
   }
 }
+

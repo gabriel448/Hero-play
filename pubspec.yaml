@@ -39,6 +39,9 @@ dependencies:
   # Texto rolante estilo LED/placa para titulos longos de filmes.
   marquee: ^2.2.3
 
+  # Carrega variaveis de ambiente do arquivo .env em runtime.
+  flutter_dotenv: ^5.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -47,3 +50,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - .env
