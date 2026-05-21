@@ -7,19 +7,33 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../state/iptv_provider.dart';
+import '../state/mini_player_provider.dart';
 import '../theme/app_theme.dart';
 
-/// Tela do player usando media_kit (engine libmpv - mesmo motor do mpv/VLC).
-///
-/// Diferente do better_player (que usa ExoPlayer), o libmpv suporta praticamente
-/// todos os formatos exoticos comuns em IPTV: MPEG-TS, RTSP, HLS sem .m3u8, etc.
-///
-/// Mantemos as estrategias de retry com diferentes User-Agents porque alguns
-/// servidores IPTV exigem UA especifico.
 class TelaPlayer extends StatefulWidget {
   final Canal canal;
   final Duration? posicaoInicial;
-  const TelaPlayer({super.key, required this.canal, this.posicaoInicial});
+  // Quando vem do mini player, o player já existe e não deve ser recriado.
+  final Player? playerExterno;
+  final VideoController? controllerExterno;
+
+  const TelaPlayer({
+    super.key,
+    required this.canal,
+    this.posicaoInicial,
+    this.playerExterno,
+    this.controllerExterno,
+  });
+
+  /// Construtor usado ao maximizar o mini player (reutiliza player existente).
+  const TelaPlayer.comPlayer({
+    super.key,
+    required this.canal,
+    required Player player,
+    required VideoController controller,
+  })  : posicaoInicial = null,
+        playerExterno = player,
+        controllerExterno = controller;
 
   @override
   State<TelaPlayer> createState() => _TelaPlayerState();
@@ -72,14 +86,30 @@ class _TelaPlayerState extends State<TelaPlayer> {
   Tracks _tracks = Tracks(video: [], audio: [], subtitle: []);
   Track _track = const Track();
 
+  // Quando true, o player foi transferido para o mini player e não deve
+  // ser disposto neste widget.
+  bool _transferidoParaMini = false;
+  // Evita loop: permite apenas 1 auto-retry por tentativa explícita.
+  bool _tentouAutoRetry = false;
+
   @override
   void initState() {
     super.initState();
-    _player = Player();
-    _controller = VideoController(_player);
-    _boostarVolume();
+    if (widget.playerExterno != null) {
+      _player = widget.playerExterno!;
+      _controller = widget.controllerExterno!;
+      // O player já está tocando; marca como iniciado.
+      _iniciado = true;
+      _status = 'Tocando';
+      // Restaura o volume caso estivesse mutado no mini player.
+      _boostarVolume();
+    } else {
+      _player = Player();
+      _controller = VideoController(_player);
+      _boostarVolume();
+      _abrirStream();
+    }
     _registrarStreams();
-    _abrirStream();
   }
 
   void _boostarVolume() {
@@ -90,6 +120,14 @@ class _TelaPlayerState extends State<TelaPlayer> {
         native.setProperty('volume', '150');
       });
     }
+  }
+
+  // Chamado pelo PopScope quando o canal é ao vivo: envia para mini player.
+  void _minimizar() {
+    final mini = context.read<MiniPlayerProvider>();
+    _transferidoParaMini = true;
+    mini.iniciar(widget.canal, _player, _controller);
+    Navigator.of(context).pop();
   }
 
   @override
@@ -140,6 +178,16 @@ class _TelaPlayerState extends State<TelaPlayer> {
       _timeoutTimer?.cancel();
       _atualizadorStatus?.cancel();
       if (!mounted) return;
+      // Erros transitórios durante a inicialização (player ainda não começou
+      // a tocar): retry automático e silencioso uma única vez.
+      if (!_iniciado && !_tentouAutoRetry) {
+        _tentouAutoRetry = true;
+        _registrarLog('Auto-retry em 600ms...');
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) _abrirStream();
+        });
+        return;
+      }
       setState(() {
         _erro = mensagem;
         _status = 'Erro';
@@ -181,6 +229,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
     _iniciado = false;
+    _tentouAutoRetry = false;
     _inicioTentativa = DateTime.now();
 
     setState(() {
@@ -282,9 +331,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  void _mostrarFaixas() {
+  void _mostrarFaixas([BuildContext? ctx]) {
     showModalBottomSheet(
-      context: context,
+      context: ctx ?? context,
       backgroundColor: AppColors.surface2,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
@@ -295,6 +344,39 @@ class _TelaPlayerState extends State<TelaPlayer> {
         tracks: _tracks,
         track: _track,
       ),
+    );
+  }
+
+  Widget _buildControlesAoVivo(VideoState state) {
+    return _ControlesAoVivo(
+      state: state,
+      iniciado: _iniciado,
+      tracks: _tracks,
+      onFaixas: () => _mostrarFaixas(state.context),
+    );
+  }
+
+  Widget _buildControls(VideoState state) {
+    return Stack(
+      children: [
+        AdaptiveVideoControls(state),
+        if (_iniciado && _tracks.audio.isNotEmpty)
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              child: IconButton(
+                icon: const Icon(
+                  Icons.closed_caption_rounded,
+                  color: Colors.white,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                ),
+                tooltip: 'Faixas e legendas',
+                onPressed: () => _mostrarFaixas(state.context),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -323,7 +405,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subLog?.cancel();
     _subTracks?.cancel();
     _subTrack?.cancel();
-    _player.dispose();
+    // Não dispõe se o player foi transferido para o mini player.
+    if (!_transferidoParaMini) {
+      _player.dispose();
+    }
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
   }
@@ -334,7 +419,15 @@ class _TelaPlayerState extends State<TelaPlayer> {
     final favorito = provider.ehFavorito(widget.canal);
     final conectando = _erro == null && !_iniciado;
 
-    return Scaffold(
+    final aoVivo = widget.canal.tipo == TipoCanal.aoVivo;
+
+    return PopScope(
+      // Intercepta o back em canais ao vivo para minimizar em vez de fechar.
+      canPop: !aoVivo,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && aoVivo) _minimizar();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.surface0,
       appBar: AppBar(
         title: Column(
@@ -350,12 +443,6 @@ class _TelaPlayerState extends State<TelaPlayer> {
         backgroundColor: AppColors.surface0,
         foregroundColor: Colors.white,
         actions: [
-          if (_iniciado && _tracks.audio.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.closed_caption_rounded, color: Colors.white),
-              tooltip: 'Faixas e legendas',
-              onPressed: _mostrarFaixas,
-            ),
           IconButton(
             icon: const Icon(Icons.copy, color: Colors.white),
             tooltip: 'Copiar URL',
@@ -381,7 +468,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
               onResetar: _resetarParaPadrao,
               onCopiarUrl: _copiarUrl,
             )
-          : Stack(
+          : SafeArea(
+              top: false,
+              child: Stack(
               alignment: Alignment.center,
               children: [
                 Center(
@@ -389,7 +478,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
                     aspectRatio: 16 / 9,
                     child: Video(
                       controller: _controller,
-                      controls: AdaptiveVideoControls,
+                      controls: aoVivo
+                          ? _buildControlesAoVivo
+                          : _buildControls,
                     ),
                   ),
                 ),
@@ -402,7 +493,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
                   ),
               ],
             ),
-    );
+            ),
+      ), // Scaffold
+    ); // PopScope
   }
 }
 
@@ -620,6 +713,147 @@ class _ViewErro extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Controles canal ao vivo (toque → fullscreen/CC, sem barra de progresso) ─
+
+class _ControlesAoVivo extends StatefulWidget {
+  final VideoState state;
+  final bool iniciado;
+  final Tracks tracks;
+  final VoidCallback onFaixas;
+
+  const _ControlesAoVivo({
+    required this.state,
+    required this.iniciado,
+    required this.tracks,
+    required this.onFaixas,
+  });
+
+  @override
+  State<_ControlesAoVivo> createState() => _ControlesAoVivoState();
+}
+
+class _ControlesAoVivoState extends State<_ControlesAoVivo> {
+  bool _visivel = false;
+  Timer? _timer;
+
+  void _onTap() {
+    setState(() => _visivel = !_visivel);
+    if (_visivel) _resetTimer();
+  }
+
+  void _resetTimer() {
+    _timer?.cancel();
+    _timer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _visivel = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final emTela = isFullscreen(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _onTap,
+      child: AnimatedOpacity(
+        opacity: _visivel ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 200),
+        child: IgnorePointer(
+          ignoring: !_visivel,
+          child: Stack(
+            children: [
+              // Fundo escuro semi-transparente ao exibir controles.
+              Container(color: Colors.black38),
+              // Badge AO VIVO no canto superior esquerdo.
+              const Positioned(
+                top: 12,
+                left: 12,
+                child: _BadgeAoVivo(),
+              ),
+              // Botões fullscreen e CC no canto inferior direito.
+              Positioned(
+                bottom: 4,
+                right: 4,
+                child: SafeArea(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.iniciado && widget.tracks.audio.isNotEmpty)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.closed_caption_rounded,
+                            color: Colors.white,
+                          ),
+                          tooltip: 'Faixas e legendas',
+                          onPressed: widget.onFaixas,
+                        ),
+                      IconButton(
+                        icon: Icon(
+                          emTela
+                              ? Icons.fullscreen_exit_rounded
+                              : Icons.fullscreen_rounded,
+                          color: Colors.white,
+                        ),
+                        tooltip:
+                            emTela ? 'Sair da tela cheia' : 'Tela cheia',
+                        onPressed: () => toggleFullscreen(context),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Badge AO VIVO ───────────────────────────────────────────────────────────
+
+class _BadgeAoVivo extends StatelessWidget {
+  const _BadgeAoVivo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.red,
+              shape: BoxShape.circle,
+            ),
+            child: SizedBox(width: 8, height: 8),
+          ),
+          SizedBox(width: 5),
+          Text(
+            'AO VIVO',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
           ),
         ],
       ),

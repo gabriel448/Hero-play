@@ -6,6 +6,7 @@ import 'app.dart';
 import 'services/armazenamento.dart';
 import 'services/tmdb_service.dart';
 import 'state/iptv_provider.dart';
+import 'state/mini_player_provider.dart';
 
 /// Ponto de entrada da aplicacao.
 ///
@@ -33,6 +34,9 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider<IptvProvider>.value(value: provider),
         Provider<TmdbService>.value(value: tmdb),
+        ChangeNotifierProvider<MiniPlayerProvider>(
+          create: (_) => MiniPlayerProvider(),
+        ),
       ],
       child: const IptvApp(),
     ),

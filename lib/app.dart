@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'screens/tela_inicial.dart';
 import 'theme/app_theme.dart';
+import 'widgets/mini_player_overlay.dart';
 
-/// Widget raiz da aplicacao.
-///
-/// Dark mode forcado por design - ver PRODUCT.md (cena fisica de uso a noite).
 class IptvApp extends StatelessWidget {
   const IptvApp({super.key});
 
@@ -15,6 +13,7 @@ class IptvApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
       themeMode: ThemeMode.dark,
+      builder: (context, child) => MiniPlayerOverlay(child: child!),
       home: const TelaInicial(),
     );
   }

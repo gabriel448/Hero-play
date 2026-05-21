@@ -53,8 +53,6 @@ class Serie {
           '')
       // Ano isolado: (2019), [2019]
       .replaceAll(RegExp(r'[\[\(]\d{4}[\]\)]'), '')
-      // Tags de audio/legenda IPTV: LEG, DUB, VOST, DUAL como palavras isoladas
-      .replaceAll(RegExp(r'\b(LEG|DUB|VOST|DUAL)\b', caseSensitive: false), '')
       // Pontos e underscores viram espacos (The.Boys -> The Boys)
       .replaceAll(RegExp(r'[._]'), ' ')
       // Espacos multiplos
