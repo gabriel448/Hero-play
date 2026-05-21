@@ -292,7 +292,7 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
       children: [
         // ── Sidebar categorias ──────────────────────────────────────────────
         SizedBox(
-          width: 260,
+          width: channelSidebarWidth(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
