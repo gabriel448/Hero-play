@@ -9,8 +9,7 @@ import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
-import 'tela_episodios.dart';
-import 'tela_player.dart';
+import 'tela_detalhes.dart';
 
 // Top-level: roda em Isolate separado via compute() para nao bloquear a UI.
 ({
@@ -68,6 +67,8 @@ class _TelaFilmesState extends State<TelaFilmes> {
   List<Object> _todosConteudos = const [];
   // Lookup rápido url→Canal (inclui episódios de series)
   Map<String, Canal> _canaisPorUrl = const {};
+  // Lookup url-do-episódio → Serie a que ele pertence
+  Map<String, Serie> _seriesPorUrlEpisodio = const {};
 
   @override
   void initState() {
@@ -75,12 +76,15 @@ class _TelaFilmesState extends State<TelaFilmes> {
     compute(_computarConteudoFilmes, widget.categorias).then((r) {
       if (!mounted) return;
       final lookup = <String, Canal>{};
+      final seriesPorEp = <String, Serie>{};
       for (final item in r.todosConteudos) {
         if (item is Canal) {
           lookup[item.url] = item;
         } else {
-          for (final ep in (item as Serie).episodios) {
+          final serie = item as Serie;
+          for (final ep in serie.episodios) {
             lookup[ep.url] = ep;
+            seriesPorEp[ep.url] = serie;
           }
         }
       }
@@ -89,6 +93,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
         _nomes = r.nomes;
         _todosConteudos = r.todosConteudos;
         _canaisPorUrl = lookup;
+        _seriesPorUrlEpisodio = seriesPorEp;
         _pronto = true;
       });
     });
@@ -113,21 +118,15 @@ class _TelaFilmesState extends State<TelaFilmes> {
     }).toList();
   }
 
-  void _navegar(BuildContext context, Object item, {Duration? posicaoInicial}) {
-    final provider = context.read<IptvProvider>();
-    if (item is Canal) {
-      provider.registrarVisualizacao(item);
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) =>
-              TelaPlayer(canal: item, posicaoInicial: posicaoInicial),
-        ),
-      );
-    } else {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TelaEpisodios(serie: item as Serie)),
-      );
-    }
+  void _navegar(BuildContext context, Object item) {
+    // Filme ou série: sempre abre a tela de detalhes.
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => item is Canal
+            ? TelaDetalhes.filme(item)
+            : TelaDetalhes.serie(item as Serie),
+      ),
+    );
   }
 
   @override
@@ -190,9 +189,9 @@ class _TelaFilmesState extends State<TelaFilmes> {
                   nomes: _nomes,
                   conteudo: _conteudo,
                   canaisPorUrl: _canaisPorUrl,
+                  seriesPorUrlEpisodio: _seriesPorUrlEpisodio,
                   progressos: context.watch<IptvProvider>().progressos,
-                  onTap: (item, {Duration? posicaoInicial}) =>
-                      _navegar(context, item, posicaoInicial: posicaoInicial),
+                  onTap: (item) => _navegar(context, item),
                 ),
     );
   }
@@ -234,25 +233,41 @@ class _BodyComCarrosseis extends StatelessWidget {
   final List<String> nomes;
   final Map<String, List<Object>> conteudo;
   final Map<String, Canal> canaisPorUrl;
+  final Map<String, Serie> seriesPorUrlEpisodio;
   final List<ProgressoCanal> progressos;
-  final void Function(Object, {Duration? posicaoInicial}) onTap;
+  final void Function(Object) onTap;
 
   const _BodyComCarrosseis({
     required this.nomes,
     required this.conteudo,
     required this.canaisPorUrl,
+    required this.seriesPorUrlEpisodio,
     required this.progressos,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Filtra apenas progressos de canais presentes nesta lista, mais recente primeiro.
-    final emAndamento = progressos
-        .where((p) => canaisPorUrl.containsKey(p.url))
-        .toList();
+    // Monta o "Continuar assistindo": filmes entram como o próprio Canal
+    // (retomam direto no player); episódios de série entram como o objeto
+    // Serie — abrem a tela de detalhes, onde já aparece "Continuar T1:E2".
+    // Cada série aparece uma única vez (o progresso mais recente vence).
+    final continuar = <_ItemContinuar>[];
+    final seriesVistas = <String>{};
+    for (final p in progressos) {
+      final canal = canaisPorUrl[p.url];
+      if (canal == null) continue;
+      final serie = seriesPorUrlEpisodio[p.url];
+      if (serie != null) {
+        if (seriesVistas.add(serie.nome)) {
+          continuar.add(_ItemContinuar.serie(serie));
+        }
+      } else {
+        continuar.add(_ItemContinuar.filme(canal, p));
+      }
+    }
 
-    final temAndamento = emAndamento.isNotEmpty;
+    final temAndamento = continuar.isNotEmpty;
     final total = nomes.length + (temAndamento ? 1 : 0);
 
     return ListView.builder(
@@ -263,14 +278,7 @@ class _BodyComCarrosseis extends StatelessWidget {
       itemCount: total,
       itemBuilder: (_, i) {
         if (temAndamento && i == 0) {
-          return _CarrosselContinuar(
-            progressos: emAndamento,
-            canaisPorUrl: canaisPorUrl,
-            onTap: (canal, progresso) => onTap(
-              canal,
-              posicaoInicial: Duration(seconds: progresso.posicaoSeg),
-            ),
-          );
+          return _CarrosselContinuar(itens: continuar, onTap: onTap);
         }
         final idx = temAndamento ? i - 1 : i;
         final nome = nomes[idx];
@@ -284,16 +292,26 @@ class _BodyComCarrosseis extends StatelessWidget {
   }
 }
 
-class _CarrosselContinuar extends StatelessWidget {
-  final List<ProgressoCanal> progressos;
-  final Map<String, Canal> canaisPorUrl;
-  final void Function(Canal canal, ProgressoCanal progresso) onTap;
+/// Um item do carrossel "Continuar assistindo": ou um filme (com seu
+/// progresso, para retomar direto no player), ou uma série (abre a tela
+/// de detalhes).
+class _ItemContinuar {
+  final Serie? serie;
+  final Canal? filme;
+  final ProgressoCanal? progresso;
 
-  const _CarrosselContinuar({
-    required this.progressos,
-    required this.canaisPorUrl,
-    required this.onTap,
-  });
+  const _ItemContinuar.serie(Serie this.serie)
+      : filme = null,
+        progresso = null;
+  const _ItemContinuar.filme(Canal this.filme, ProgressoCanal this.progresso)
+      : serie = null;
+}
+
+class _CarrosselContinuar extends StatelessWidget {
+  final List<_ItemContinuar> itens;
+  final void Function(Object) onTap;
+
+  const _CarrosselContinuar({required this.itens, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -326,17 +344,24 @@ class _CarrosselContinuar extends StatelessWidget {
           height: _kPosterHeight + _kPosterLabel,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: progressos.length,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            itemCount: itens.length,
             itemExtent: _kItemExtent,
             itemBuilder: (_, i) {
-              final p = progressos[i];
-              final canal = canaisPorUrl[p.url]!;
+              final item = itens[i];
+              final serie = item.serie;
+              if (serie != null) {
+                return _PosterSerie(
+                  key: ValueKey('cont:${serie.nome}'),
+                  serie: serie,
+                  onTap: () => onTap(serie),
+                );
+              }
+              final filme = item.filme!;
               return _Poster(
-                canal: canal,
-                progresso: p,
-                onTap: () => onTap(canal, p),
+                canal: filme,
+                progresso: item.progresso,
+                onTap: () => onTap(filme),
               );
             },
           ),
@@ -790,16 +815,13 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
   }
 
   void _navegar(Object item) {
-    if (item is Canal) {
-      context.read<IptvProvider>().registrarVisualizacao(item);
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TelaPlayer(canal: item)),
-      );
-    } else {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TelaEpisodios(serie: item as Serie)),
-      );
-    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => item is Canal
+            ? TelaDetalhes.filme(item)
+            : TelaDetalhes.serie(item as Serie),
+      ),
+    );
   }
 
   @override

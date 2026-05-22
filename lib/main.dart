@@ -7,6 +7,7 @@ import 'services/armazenamento.dart';
 import 'services/tmdb_service.dart';
 import 'state/iptv_provider.dart';
 import 'state/mini_player_provider.dart';
+import 'state/preferencias_provider.dart';
 
 /// Ponto de entrada da aplicacao.
 ///
@@ -27,12 +28,15 @@ Future<void> main() async {
   final provider = IptvProvider(armazenamento: armazenamento);
   await provider.inicializar();
 
+  final preferencias = PreferenciasProvider(armazenamento);
+
   final tmdb = TmdbService(dotenv.get('TMDB_API_KEY', fallback: ''));
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<IptvProvider>.value(value: provider),
+        ChangeNotifierProvider<PreferenciasProvider>.value(value: preferencias),
         Provider<TmdbService>.value(value: tmdb),
         ChangeNotifierProvider<MiniPlayerProvider>(
           create: (_) => MiniPlayerProvider(),

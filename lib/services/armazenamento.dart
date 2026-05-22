@@ -16,6 +16,7 @@ class Armazenamento {
   static const _nomeBoxFavoritos = 'favoritos';
   static const _nomeBoxHistorico = 'historico';
   static const _nomeBoxProgressos = 'progressos';
+  static const _nomeBoxPreferencias = 'preferencias';
 
   static const _limiteHistorico = 50;
 
@@ -23,6 +24,7 @@ class Armazenamento {
   late Box _boxFavoritos;
   late Box _boxHistorico;
   late Box _boxProgressos;
+  late Box _boxPreferencias;
 
   /// Inicializa o Hive e abre as boxes. Deve ser chamado UMA vez no main()
   /// antes de runApp.
@@ -32,7 +34,16 @@ class Armazenamento {
     _boxFavoritos = await Hive.openBox(_nomeBoxFavoritos);
     _boxHistorico = await Hive.openBox(_nomeBoxHistorico);
     _boxProgressos = await Hive.openBox(_nomeBoxProgressos);
+    _boxPreferencias = await Hive.openBox(_nomeBoxPreferencias);
   }
+
+  // ===== PREFERENCIAS =====
+
+  /// Codigo do idioma escolhido (ex.: 'pt-BR'), ou null se ainda nao escolheu.
+  String? obterIdioma() => _boxPreferencias.get('idioma') as String?;
+
+  Future<void> salvarIdioma(String codigo) =>
+      _boxPreferencias.put('idioma', codigo);
 
   // ===== LISTAS M3U =====
 

@@ -1,0 +1,36 @@
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
+
+/// Player reutilizável para canais ao vivo em tela cheia.
+///
+/// Como em [PlayerVod], evita o vazamento de superfícies EGL no Windows
+/// causado por criar um [Player]/[VideoController] novo a cada canal aberto
+/// ("Failed to create EGL surface" depois de várias aberturas).
+///
+/// Diferença para o VOD: um canal ao vivo pode ser transferido para o mini
+/// player ao minimizar. Nesse caso [liberarSeAtual] é chamado — o player
+/// passa a pertencer ao mini player e o próximo canal cria uma instância
+/// nova. No uso comum (abrir e fechar canais em tela cheia, sem minimizar)
+/// a mesma instância é sempre reaproveitada — sem churn, sem vazamento.
+class PlayerAoVivo {
+  PlayerAoVivo._();
+  static final PlayerAoVivo instancia = PlayerAoVivo._();
+
+  Player? _player;
+  VideoController? _controller;
+
+  /// Player compartilhado — criado sob demanda.
+  Player get player => _player ??= Player();
+
+  /// VideoController compartilhado — uma única superfície de vídeo.
+  VideoController get controller => _controller ??= VideoController(player);
+
+  /// Esquece a instância atual se ela for [p] — usado quando esse player
+  /// foi transferido ao mini player. O próximo acesso cria uma nova.
+  void liberarSeAtual(Player p) {
+    if (identical(_player, p)) {
+      _player = null;
+      _controller = null;
+    }
+  }
+}

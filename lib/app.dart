@@ -1,6 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'screens/tela_inicial.dart';
+import 'screens/tela_onboarding.dart';
+import 'state/preferencias_provider.dart';
 import 'theme/app_theme.dart';
 import 'utils/nav_keys.dart';
 import 'widgets/mini_player_overlay.dart';
@@ -14,6 +17,10 @@ class IptvApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Enquanto o usuario nao escolher um idioma, mostramos o onboarding.
+    // Assim que ele escolhe, PreferenciasProvider notifica e a home troca.
+    final temIdioma = context.watch<PreferenciasProvider>().idiomaDefinido;
+
     return MaterialApp(
       title: 'IPTV',
       debugShowCheckedModeBanner: false,
@@ -21,7 +28,9 @@ class IptvApp extends StatelessWidget {
       theme: AppTheme.dark,
       themeMode: ThemeMode.dark,
       builder: (context, child) => MiniPlayerOverlay(child: child!),
-      home: _isDesktopOS ? const ShellDesktop() : const TelaInicial(),
+      home: !temIdioma
+          ? const TelaOnboarding()
+          : (_isDesktopOS ? const ShellDesktop() : const TelaInicial()),
     );
   }
 }

@@ -5,6 +5,7 @@ import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import 'tela_selecao.dart';
+import 'tela_configuracoes.dart';
 import 'tela_favoritos.dart';
 import 'tela_historico.dart';
 import 'tela_importar.dart';
@@ -67,20 +68,29 @@ class _BodyComListas extends StatelessWidget {
               AppSpacing.lg,
               AppSpacing.sm,
             ),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Boa noite',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.textTertiary,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Boa noite',
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textTertiary,
+                                ),
                       ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Minhas listas',
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Minhas listas',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
+                const _BotaoConfiguracoes(),
               ],
             ),
           ),
@@ -347,6 +357,10 @@ class _BodyVazio extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [_BotaoConfiguracoes()],
+          ),
           const Spacer(),
           Center(
             child: Container(
@@ -390,6 +404,23 @@ class _BodyVazio extends StatelessWidget {
           ),
           const Spacer(flex: 2),
         ],
+      ),
+    );
+  }
+}
+
+/// Engrenagem que abre a tela de configurações. Usada no cabeçalho da home.
+class _BotaoConfiguracoes extends StatelessWidget {
+  const _BotaoConfiguracoes();
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.settings_rounded, size: 22),
+      color: AppColors.textSecondary,
+      tooltip: 'Configurações',
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const TelaConfiguracoes()),
       ),
     );
   }

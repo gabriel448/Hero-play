@@ -6,6 +6,8 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
+import '../services/player_ao_vivo.dart';
+import '../services/player_vod.dart';
 import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
 import '../theme/app_theme.dart';
@@ -82,6 +84,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   StreamSubscription? _subLog;
   StreamSubscription? _subTracks;
   StreamSubscription? _subTrack;
+  StreamSubscription? _subDuration;
 
   Tracks _tracks = Tracks(video: [], audio: [], subtitle: []);
   Track _track = const Track();
@@ -89,23 +92,40 @@ class _TelaPlayerState extends State<TelaPlayer> {
   // Quando true, o player foi transferido para o mini player e não deve
   // ser disposto neste widget.
   bool _transferidoParaMini = false;
+  // Quando true, usa o player VOD compartilhado: ao sair, só para (não
+  // dispõe) — assim ele é reaproveitado no próximo filme.
+  bool _compartilhado = false;
   // Evita loop: permite apenas 1 auto-retry por tentativa explícita.
   bool _tentouAutoRetry = false;
+  // Garante que o seek de retomada aconteça uma única vez.
+  bool _seekFeito = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.playerExterno != null) {
+      // Veio do mini player: reutiliza o player que já está tocando.
       _player = widget.playerExterno!;
       _controller = widget.controllerExterno!;
-      // O player já está tocando; marca como iniciado.
       _iniciado = true;
       _status = 'Tocando';
       // Restaura o volume caso estivesse mutado no mini player.
       _boostarVolume();
+    } else if (widget.canal.tipo == TipoCanal.filme) {
+      // VOD reutiliza um player único — criar um player novo a cada filme
+      // vaza superfícies EGL no Windows ("Failed to create EGL surface").
+      _compartilhado = true;
+      _player = PlayerVod.instancia.player;
+      _controller = PlayerVod.instancia.controller;
+      _boostarVolume();
+      _abrirStream();
     } else {
-      _player = Player();
-      _controller = VideoController(_player);
+      // Canal ao vivo: player compartilhado e reutilizável (mesma razão do
+      // VOD). Se for minimizado, é transferido ao mini player — ver
+      // _minimizar, que avisa o holder para criar um novo no próximo canal.
+      _compartilhado = true;
+      _player = PlayerAoVivo.instancia.player;
+      _controller = PlayerAoVivo.instancia.controller;
       _boostarVolume();
       _abrirStream();
     }
@@ -126,6 +146,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
   void _minimizar() {
     final mini = context.read<MiniPlayerProvider>();
     _transferidoParaMini = true;
+    // O player passa a pertencer ao mini player; o holder esquece a
+    // instância para que o próximo canal ao vivo crie uma nova.
+    PlayerAoVivo.instancia.liberarSeAtual(_player);
     mini.iniciar(widget.canal, _player, _controller);
     Navigator.of(context).pop();
   }
@@ -154,11 +177,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
         _atualizadorStatus?.cancel();
         _registrarLog('playing=true');
         setState(() => _status = 'Tocando');
-        if (widget.posicaoInicial != null &&
-            widget.posicaoInicial! > Duration.zero) {
-          _player.seek(widget.posicaoInicial!);
-          _registrarLog('seek para ${widget.posicaoInicial!.inSeconds}s');
-        }
+        _tentarSeekInicial();
       } else if (!tocando && _iniciado) {
         setState(() => _status = 'Pausado');
       }
@@ -210,6 +229,30 @@ class _TelaPlayerState extends State<TelaPlayer> {
       if (!mounted) return;
       setState(() => _track = t);
     });
+
+    // A retomada (posicaoInicial) só é confiável depois que a duração é
+    // conhecida — aí a mídia está carregada e aceita seek. Seekar cedo
+    // demais (ex.: no playing=true) faz o libmpv ignorar e tocar do início.
+    _subDuration = _player.stream.duration.listen((_) {
+      if (!mounted) return;
+      _tentarSeekInicial();
+    });
+  }
+
+  /// Executa o seek de retomada uma única vez, quando a mídia já está
+  /// pronta (duração conhecida). Chamado tanto pelo evento de duração
+  /// quanto pelo de playing.
+  void _tentarSeekInicial() {
+    if (_seekFeito) return;
+    final alvo = widget.posicaoInicial;
+    if (alvo == null || alvo <= Duration.zero) return;
+    final duracao = _player.state.duration;
+    if (duracao <= Duration.zero) return; // duração ainda desconhecida
+    _seekFeito = true;
+    if (alvo >= duracao) return; // alvo inválido — toca do início
+    _player.seek(alvo);
+    _registrarLog('seek de retomada para ${alvo.inSeconds}s '
+        '(duração ${duracao.inSeconds}s)');
   }
 
   // Codifica @ em segmentos de caminho para evitar que parsers de URL
@@ -406,8 +449,13 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subLog?.cancel();
     _subTracks?.cancel();
     _subTrack?.cancel();
-    // Não dispõe se o player foi transferido para o mini player.
-    if (!_transferidoParaMini) {
+    _subDuration?.cancel();
+    if (_transferidoParaMini) {
+      // Player foi para o mini player — segue vivo lá, não mexe.
+    } else if (_compartilhado) {
+      // Player VOD compartilhado: só para, mantém vivo para o próximo filme.
+      _player.stop();
+    } else {
       _player.dispose();
     }
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);

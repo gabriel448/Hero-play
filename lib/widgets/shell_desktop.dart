@@ -5,6 +5,7 @@ import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../utils/nav_keys.dart';
+import '../screens/tela_configuracoes.dart';
 import '../screens/tela_favoritos.dart';
 import '../screens/tela_historico.dart';
 import '../screens/tela_importar.dart';
@@ -52,6 +53,12 @@ class _ShellDesktopState extends State<ShellDesktop> {
     );
   }
 
+  void _irConfiguracoes() {
+    desktopContentNavigatorKey.currentState?.push(
+      MaterialPageRoute(builder: (_) => const TelaConfiguracoes()),
+    );
+  }
+
   /// Substitui toda a pilha do Navigator de conteúdo por [screen].
   void _replacePrincipal(Widget screen) {
     desktopContentNavigatorKey.currentState?.pushAndRemoveUntil(
@@ -77,6 +84,7 @@ class _ShellDesktopState extends State<ShellDesktop> {
             onFavoritos: _irFavoritos,
             onHistorico: _irHistorico,
             onImportar: _irImportar,
+            onConfiguracoes: _irConfiguracoes,
           ),
           const VerticalDivider(
             width: 1,
@@ -155,6 +163,7 @@ class _SidebarDesktop extends StatelessWidget {
   final VoidCallback onFavoritos;
   final VoidCallback onHistorico;
   final VoidCallback onImportar;
+  final VoidCallback onConfiguracoes;
 
   const _SidebarDesktop({
     required this.listas,
@@ -164,6 +173,7 @@ class _SidebarDesktop extends StatelessWidget {
     required this.onFavoritos,
     required this.onHistorico,
     required this.onImportar,
+    required this.onConfiguracoes,
   });
 
   @override
@@ -194,6 +204,13 @@ class _SidebarDesktop extends StatelessWidget {
                   Text(
                     'IPTV',
                     style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.settings_rounded, size: 20),
+                    color: AppColors.textSecondary,
+                    tooltip: 'Configurações',
+                    onPressed: onConfiguracoes,
                   ),
                 ],
               ),
