@@ -117,7 +117,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
     if (native is NativePlayer) {
       native.setProperty('volume-max', '200').then((_) {
         if (!mounted) return;
-        native.setProperty('volume', '150');
+        native.setProperty('volume', '50');
       });
     }
   }
@@ -353,6 +353,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       iniciado: _iniciado,
       tracks: _tracks,
       onFaixas: () => _mostrarFaixas(state.context),
+      player: _player,
     );
   }
 
@@ -727,12 +728,14 @@ class _ControlesAoVivo extends StatefulWidget {
   final bool iniciado;
   final Tracks tracks;
   final VoidCallback onFaixas;
+  final Player player;
 
   const _ControlesAoVivo({
     required this.state,
     required this.iniciado,
     required this.tracks,
     required this.onFaixas,
+    required this.player,
   });
 
   @override
@@ -742,6 +745,24 @@ class _ControlesAoVivo extends StatefulWidget {
 class _ControlesAoVivoState extends State<_ControlesAoVivo> {
   bool _visivel = false;
   Timer? _timer;
+  double _volume = 50.0;
+  StreamSubscription<double>? _subVolume;
+
+  @override
+  void initState() {
+    super.initState();
+    _volume = widget.player.state.volume;
+    _subVolume = widget.player.stream.volume.listen((v) {
+      if (mounted) setState(() => _volume = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _subVolume?.cancel();
+    super.dispose();
+  }
 
   void _onTap() {
     setState(() => _visivel = !_visivel);
@@ -753,12 +774,6 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
     _timer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _visivel = false);
     });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
   }
 
   @override
@@ -774,22 +789,53 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
           ignoring: !_visivel,
           child: Stack(
             children: [
-              // Fundo escuro semi-transparente ao exibir controles.
               Container(color: Colors.black38),
-              // Badge AO VIVO no canto superior esquerdo.
               const Positioned(
                 top: 12,
                 left: 12,
                 child: _BadgeAoVivo(),
               ),
-              // Botões fullscreen e CC no canto inferior direito.
+              // Barra inferior: volume (esquerda) + CC/fullscreen (direita).
               Positioned(
                 bottom: 4,
+                left: 4,
                 right: 4,
                 child: SafeArea(
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
+                      // ── Volume ───────────────────────────────────────────
+                      Icon(
+                        _volume == 0
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      Expanded(
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            activeTrackColor: Colors.white,
+                            inactiveTrackColor: Colors.white30,
+                            thumbColor: Colors.white,
+                            overlayColor: Colors.white24,
+                            trackHeight: 2.0,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 6,
+                            ),
+                          ),
+                          child: Slider(
+                            // max = 150 para manter o boost configurado.
+                            value: _volume.clamp(0.0, 150.0),
+                            min: 0,
+                            max: 150,
+                            onChanged: (v) => widget.player.setVolume(v),
+                            // Pausa o auto-hide enquanto arrasta o slider.
+                            onChangeStart: (_) => _timer?.cancel(),
+                            onChangeEnd: (_) => _resetTimer(),
+                          ),
+                        ),
+                      ),
+                      // ── CC e Fullscreen ──────────────────────────────────
                       if (widget.iniciado && widget.tracks.audio.isNotEmpty)
                         IconButton(
                           icon: const Icon(
@@ -806,8 +852,7 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
                               : Icons.fullscreen_rounded,
                           color: Colors.white,
                         ),
-                        tooltip:
-                            emTela ? 'Sair da tela cheia' : 'Tela cheia',
+                        tooltip: emTela ? 'Sair da tela cheia' : 'Tela cheia',
                         onPressed: () => toggleFullscreen(context),
                       ),
                     ],

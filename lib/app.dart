@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'screens/tela_inicial.dart';
 import 'theme/app_theme.dart';
+import 'utils/nav_keys.dart';
 import 'widgets/mini_player_overlay.dart';
 import 'widgets/shell_desktop.dart';
 
@@ -16,6 +17,7 @@ class IptvApp extends StatelessWidget {
     return MaterialApp(
       title: 'IPTV',
       debugShowCheckedModeBanner: false,
+      navigatorKey: rootNavigatorKey,
       theme: AppTheme.dark,
       themeMode: ThemeMode.dark,
       builder: (context, child) => MiniPlayerOverlay(child: child!),

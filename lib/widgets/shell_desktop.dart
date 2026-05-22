@@ -4,6 +4,7 @@ import '../models/lista_m3u.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
+import '../utils/nav_keys.dart';
 import '../screens/tela_favoritos.dart';
 import '../screens/tela_historico.dart';
 import '../screens/tela_importar.dart';
@@ -24,7 +25,6 @@ class ShellDesktop extends StatefulWidget {
 enum _Secao { lista, favoritos, historico }
 
 class _ShellDesktopState extends State<ShellDesktop> {
-  final _navigatorKey = GlobalKey<NavigatorState>();
   _Secao _secao = _Secao.lista;
 
   // ─── navegação do conteúdo ────────────────────────────────────────────────
@@ -47,14 +47,14 @@ class _ShellDesktopState extends State<ShellDesktop> {
 
   void _irImportar() {
     // Importar empilha sobre o que está mostrando (não troca a seção ativa).
-    _navigatorKey.currentState?.push(
+    desktopContentNavigatorKey.currentState?.push(
       MaterialPageRoute(builder: (_) => const TelaImportar()),
     );
   }
 
   /// Substitui toda a pilha do Navigator de conteúdo por [screen].
   void _replacePrincipal(Widget screen) {
-    _navigatorKey.currentState?.pushAndRemoveUntil(
+    desktopContentNavigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => screen),
       (r) => false,
     );
@@ -85,7 +85,7 @@ class _ShellDesktopState extends State<ShellDesktop> {
           ),
           Expanded(
             child: Navigator(
-              key: _navigatorKey,
+              key: desktopContentNavigatorKey,
               onGenerateRoute: (_) => MaterialPageRoute(
                 builder: (_) => const _BemVindoDesktop(),
               ),

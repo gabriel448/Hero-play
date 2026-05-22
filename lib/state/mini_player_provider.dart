@@ -82,11 +82,17 @@ class MiniPlayerProvider extends ChangeNotifier {
   }
 
   void _fecharPlayer() {
-    _player?.dispose();
+    final p = _player;
     _canal = null;
     _player = null;
     _controller = null;
     _mostrarAcoes = false;
+    if (p != null) {
+      // stop() encerra áudio + vídeo na hora; dispose() libera o handle
+      // nativo só depois. Sem o stop(), o áudio do libmpv pode continuar
+      // tocando de fundo no Windows.
+      p.stop().whenComplete(p.dispose);
+    }
   }
 
   @override
