@@ -1,25 +1,19 @@
-export const config = { runtime: 'edge' };
+module.exports = async function handler(req, res) {
+  const segments = req.query.path || [];
+  const tmdbPath = '/' + (Array.isArray(segments) ? segments.join('/') : segments);
 
-export default async function handler(request) {
-  const url = new URL(request.url);
-  const tmdbPath = url.pathname.replace(/^\/api\/tmdb/, '');
-
-  const params = new URLSearchParams(url.search);
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(req.query)) {
+    if (key !== 'path') params.set(key, value);
+  }
   params.set('api_key', process.env.TMDB_API_KEY);
 
   try {
     const upstream = `https://api.themoviedb.org${tmdbPath}?${params}`;
-    const res = await fetch(upstream);
-    const body = await res.text();
-
-    return new Response(body, {
-      status: res.status,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const response = await fetch(upstream);
+    const body = await response.text();
+    res.status(response.status).setHeader('Content-Type', 'application/json').send(body);
   } catch {
-    return new Response('{"error":"proxy_error"}', {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    res.status(502).json({ error: 'proxy_error' });
   }
-}
+};
