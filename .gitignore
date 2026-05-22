@@ -7,6 +7,9 @@
 /build/
 **/doc/api/
 
+# Instaladores gerados pelo build_installer.ps1 — artefatos, nunca versionar
+/installer_output/
+
 # Dart tool cache (gerado pelo pub get / flutter pub get)
 .dart_tool/
 
@@ -47,6 +50,19 @@ android/app/release/
 # Caminhos locais do SDK Android (especifico da maquina, nunca commitar)
 android/local.properties
 
+# ─── Desktop (Windows / macOS / Linux) ───────────────────────────────────────
+
+# Arquivos efemeros gerados pelo Flutter em cada plataforma desktop.
+# Cada pasta (windows/ linux/ macos/) ja tem seu proprio .gitignore;
+# estas regras sao apenas reforco.
+**/ephemeral/
+
+# macOS / Xcode — dados de usuario e dependencias locais
+**/xcuserdata/
+**/DerivedData/
+macos/Pods/
+macos/.symlinks/
+
 # ─── IDEs ────────────────────────────────────────────────────────────────────
 
 # IntelliJ / Android Studio
@@ -63,6 +79,9 @@ android/local.properties
 # Configuracoes locais de agentes e skills (especificas da maquina)
 .agents/
 skills-lock.json
+
+# Settings locais do Claude Code (por maquina — nunca versionar)
+.claude/settings.local.json
 
 # ─── Sistema Operacional ─────────────────────────────────────────────────────
 
