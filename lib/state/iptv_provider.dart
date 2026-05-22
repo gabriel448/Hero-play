@@ -36,6 +36,8 @@ class IptvProvider extends ChangeNotifier {
   String _busca = '';
   bool _carregando = false;
   String? _erro;
+  // Tipo do formato não suportado detectado pelo parser ('hls', 'epg', ou null).
+  String? _formatoNaoSuportado;
 
   List<ListaM3U> get listas => _listas;
   List<Canal> get favoritos => _favoritos;
@@ -45,6 +47,8 @@ class IptvProvider extends ChangeNotifier {
   String get busca => _busca;
   bool get carregando => _carregando;
   String? get erro => _erro;
+  /// Tipo do formato não suportado ('hls', 'epg') ou null se não houve esse erro.
+  String? get formatoNaoSuportado => _formatoNaoSuportado;
 
   /// Carrega tudo do armazenamento local. Chamar uma vez no startup.
   Future<void> inicializar() async {
@@ -172,9 +176,13 @@ class IptvProvider extends ChangeNotifier {
   Future<void> _executarComLoading(Future<void> Function() acao) async {
     _carregando = true;
     _erro = null;
+    _formatoNaoSuportado = null;
     notifyListeners();
     try {
       await acao();
+    } on FormatoNaoSuportadoException catch (e) {
+      _formatoNaoSuportado = e.mensagem; // 'hls' ou 'epg'
+      _erro = e.mensagem;
     } catch (e) {
       _erro = e.toString();
     } finally {
@@ -185,6 +193,7 @@ class IptvProvider extends ChangeNotifier {
 
   void limparErro() {
     _erro = null;
+    _formatoNaoSuportado = null;
     notifyListeners();
   }
 

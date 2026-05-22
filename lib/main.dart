@@ -30,7 +30,7 @@ Future<void> main() async {
 
   final preferencias = PreferenciasProvider(armazenamento);
 
-  final tmdb = TmdbService(dotenv.get('TMDB_API_KEY', fallback: ''));
+  final tmdb = TmdbService(dotenv.get('TMDB_PROXY_URL', fallback: ''));
 
   runApp(
     MultiProvider(

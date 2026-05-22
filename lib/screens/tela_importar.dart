@@ -17,6 +17,9 @@ class _TelaImportarState extends State<TelaImportar> {
   final _nomeController = TextEditingController();
   final _urlController = TextEditingController();
 
+  // Tipo de formato não suportado detectado ('hls', 'epg', ou null).
+  String? _formatoErro;
+
   @override
   void dispose() {
     _nomeController.dispose();
@@ -25,6 +28,7 @@ class _TelaImportarState extends State<TelaImportar> {
   }
 
   Future<void> _importar() async {
+    setState(() => _formatoErro = null);
     if (!_formKey.currentState!.validate()) return;
     final provider = context.read<IptvProvider>();
     final messenger = ScaffoldMessenger.of(context);
@@ -37,7 +41,11 @@ class _TelaImportarState extends State<TelaImportar> {
 
     if (!mounted) return;
 
-    if (provider.erro != null) {
+    if (provider.formatoNaoSuportado != null) {
+      // Formato incompatível — mostra banner inline detalhado no lugar do SnackBar.
+      setState(() => _formatoErro = provider.formatoNaoSuportado);
+      provider.limparErro();
+    } else if (provider.erro != null) {
       messenger.showSnackBar(SnackBar(content: Text(provider.erro!)));
       provider.limparErro();
     } else {
@@ -101,6 +109,12 @@ class _TelaImportarState extends State<TelaImportar> {
                       hintText: 'https://exemplo.com/minha-lista.m3u',
                     ),
                     keyboardType: TextInputType.url,
+                    // Limpa o banner de erro ao editar a URL.
+                    onChanged: (_) {
+                      if (_formatoErro != null) {
+                        setState(() => _formatoErro = null);
+                      }
+                    },
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Informe a URL';
                       final uri = Uri.tryParse(v.trim());
@@ -125,6 +139,14 @@ class _TelaImportarState extends State<TelaImportar> {
                         : const Icon(Icons.download_rounded, size: 18),
                     label: Text(carregando ? 'Importando...' : 'Importar'),
                   ),
+
+                  // Banner de formato não suportado — aparece abaixo do botão
+                  // quando o servidor retorna um formato incompatível (HLS ou EPG).
+                  if (_formatoErro != null) ...[
+                    const SizedBox(height: AppSpacing.lg),
+                    _BannerFormatoInvalido(formato: _formatoErro!),
+                  ],
+
                   const SizedBox(height: AppSpacing.xxl),
                   const _DisclaimerLegal(),
                 ],
@@ -137,6 +159,258 @@ class _TelaImportarState extends State<TelaImportar> {
     );
   }
 }
+
+// ─── Banner de formato incompatível ──────────────────────────────────────────
+
+/// Banner inline exibido quando a URL aponta para um formato não importável
+/// (manifesto HLS ou EPG/XMLTV). Orienta o usuário sobre o que fazer.
+///
+/// Layout adapta conforme a tela:
+/// - Phone: coluna única compacta — espaço reduzido, informação essencial
+/// - Tablet / Desktop: duas colunas — explicação à esquerda, guia de
+///   formatos à direita — aproveita o espaço horizontal disponível
+class _BannerFormatoInvalido extends StatelessWidget {
+  final String formato; // 'hls' | 'epg'
+
+  const _BannerFormatoInvalido({required this.formato});
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = isPhone(context);
+
+    return AnimatedSize(
+      duration: AppMotion.base,
+      curve: Curves.easeOutQuart,
+      alignment: Alignment.topCenter,
+      child: Container(
+        padding: EdgeInsets.all(phone ? AppSpacing.base : AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.warn.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(AppRadius.base),
+          border: Border.all(
+            color: AppColors.warn.withValues(alpha: 0.35),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Cabeçalho ────────────────────────────────────────────────
+            Row(
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  color: AppColors.warn,
+                  size: 18,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  'Formato não suportado',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: AppColors.warn,
+                      ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+
+            // ── Corpo: coluna única (phone) ou duas colunas (tablet/desktop)
+            if (phone)
+              _CorpoPhone(formato: formato)
+            else
+              _CorpoLargo(formato: formato),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Corpo para phones ────────────────────────────────────────────────────────
+
+class _CorpoPhone extends StatelessWidget {
+  final String formato;
+  const _CorpoPhone({required this.formato});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _TextoExplicacao(formato: formato),
+        const SizedBox(height: AppSpacing.base),
+        _TextoComoResolver(formato: formato),
+        const SizedBox(height: AppSpacing.base),
+        _GuiaFormatos(),
+      ],
+    );
+  }
+}
+
+// ─── Corpo para tablet / desktop ─────────────────────────────────────────────
+
+class _CorpoLargo extends StatelessWidget {
+  final String formato;
+  const _CorpoLargo({required this.formato});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Coluna esquerda: explicação + o que fazer (3/5 do espaço)
+        Expanded(
+          flex: 3,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _TextoExplicacao(formato: formato),
+              const SizedBox(height: AppSpacing.base),
+              _TextoComoResolver(formato: formato),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xl),
+        // Coluna direita: guia de formatos aceitos / não aceitos (2/5)
+        Expanded(
+          flex: 2,
+          child: _GuiaFormatos(),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Componentes de conteúdo ──────────────────────────────────────────────────
+
+class _TextoExplicacao extends StatelessWidget {
+  final String formato;
+  const _TextoExplicacao({required this.formato});
+
+  @override
+  Widget build(BuildContext context) {
+    final texto = formato == 'epg'
+        ? 'Esta URL aponta para um guia de programação eletrônico (EPG/XMLTV) '
+            '— dados de grade de TV, não uma lista de canais.'
+        : 'Esta URL aponta para um manifesto HLS — um protocolo de streaming '
+            'adaptativo, não uma lista de canais IPTV.';
+
+    return Text(
+      texto,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.textSecondary,
+            height: 1.55,
+          ),
+    );
+  }
+}
+
+class _TextoComoResolver extends StatelessWidget {
+  final String formato;
+  const _TextoComoResolver({required this.formato});
+
+  @override
+  Widget build(BuildContext context) {
+    final texto = formato == 'epg'
+        ? 'No seu provedor, procure pelo link da lista de canais — '
+            'normalmente chamado de "Lista M3U" ou "M3U Playlist".'
+        : 'No seu provedor, procure por um link chamado "Lista M3U", '
+            '"M3U Playlist" ou similar. O arquivo normalmente tem extensão '
+            '.m3u ou .m3u8 e contém os canais, não um stream único.';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'O QUE FAZER',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppColors.textTertiary,
+                letterSpacing: 0.5,
+              ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          texto,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textSecondary,
+                height: 1.55,
+              ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GuiaFormatos extends StatelessWidget {
+  const _GuiaFormatos();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'FORMATOS ACEITOS',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppColors.textTertiary,
+                letterSpacing: 0.5,
+              ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        const _LinhaFormato(texto: '.m3u  —  Lista M3U padrão', aceito: true),
+        const _LinhaFormato(texto: '.m3u8  —  Lista de canais IPTV', aceito: true),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'NÃO ACEITOS',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppColors.textTertiary,
+                letterSpacing: 0.5,
+              ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        const _LinhaFormato(texto: '.m3u8  —  Manifesto HLS', aceito: false),
+        const _LinhaFormato(texto: '.xml  —  EPG / XMLTV', aceito: false),
+      ],
+    );
+  }
+}
+
+class _LinhaFormato extends StatelessWidget {
+  final String texto;
+  final bool aceito;
+
+  const _LinhaFormato({required this.texto, required this.aceito});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              aceito ? Icons.check_rounded : Icons.close_rounded,
+              size: 13,
+              color: aceito ? AppColors.success : AppColors.error,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              texto,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Widgets auxiliares ───────────────────────────────────────────────────────
 
 class _Label extends StatelessWidget {
   final String texto;

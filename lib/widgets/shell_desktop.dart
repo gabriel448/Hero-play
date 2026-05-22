@@ -46,6 +46,15 @@ class _ShellDesktopState extends State<ShellDesktop> {
     _replacePrincipal(const TelaHistorico());
   }
 
+  void _removerLista(ListaM3U lista) {
+    final foiAtiva =
+        context.read<IptvProvider>().listaAtiva?.id == lista.id;
+    if (foiAtiva) {
+      setState(() => _secao = _Secao.lista);
+      _replacePrincipal(const _BemVindoDesktop());
+    }
+  }
+
   void _irImportar() {
     // Importar empilha sobre o que está mostrando (não troca a seção ativa).
     desktopContentNavigatorKey.currentState?.push(
@@ -81,6 +90,7 @@ class _ShellDesktopState extends State<ShellDesktop> {
             listaAtiva: provider.listaAtiva,
             secao: _secao,
             onLista: _abrirLista,
+            onRemoverLista: _removerLista,
             onFavoritos: _irFavoritos,
             onHistorico: _irHistorico,
             onImportar: _irImportar,
@@ -160,6 +170,7 @@ class _SidebarDesktop extends StatelessWidget {
   final ListaM3U? listaAtiva;
   final _Secao secao;
   final ValueChanged<ListaM3U> onLista;
+  final ValueChanged<ListaM3U> onRemoverLista;
   final VoidCallback onFavoritos;
   final VoidCallback onHistorico;
   final VoidCallback onImportar;
@@ -170,6 +181,7 @@ class _SidebarDesktop extends StatelessWidget {
     required this.listaAtiva,
     required this.secao,
     required this.onLista,
+    required this.onRemoverLista,
     required this.onFavoritos,
     required this.onHistorico,
     required this.onImportar,
@@ -281,6 +293,7 @@ class _SidebarDesktop extends StatelessWidget {
                           lista: lista,
                           ativo: ativo,
                           onTap: () => onLista(lista),
+                          onRemovida: () => onRemoverLista(lista),
                         );
                       },
                     ),
@@ -366,73 +379,176 @@ class _ItemSidebar extends StatelessWidget {
 
 // ─── Item de lista IPTV na sidebar ───────────────────────────────────────────
 
-class _ItemLista extends StatelessWidget {
+class _ItemLista extends StatefulWidget {
   final ListaM3U lista;
   final bool ativo;
   final VoidCallback onTap;
+  final VoidCallback onRemovida;
 
   const _ItemLista({
     required this.lista,
     required this.ativo,
     required this.onTap,
+    required this.onRemovida,
   });
 
   @override
+  State<_ItemLista> createState() => _ItemListaState();
+}
+
+class _ItemListaState extends State<_ItemLista> {
+  bool _hover = false;
+
+  Future<void> _executar(String acao) async {
+    final provider = context.read<IptvProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (acao == 'atualizar') {
+      await provider.atualizarLista(widget.lista);
+      if (provider.erro != null) {
+        messenger.showSnackBar(SnackBar(content: Text(provider.erro!)));
+        provider.limparErro();
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Lista atualizada')),
+        );
+      }
+    } else if (acao == 'remover') {
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Remover lista?'),
+          content: Text('A lista "${widget.lista.nome}" sera apagada.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+              child: const Text('Remover'),
+            ),
+          ],
+        ),
+      );
+      if (confirmar == true) {
+        await provider.removerLista(widget.lista);
+        widget.onRemovida();
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Material(
-      color: ativo ? AppColors.accentDim : Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
-      child: InkWell(
-        onTap: onTap,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Material(
+        color: widget.ativo ? AppColors.accentDim : Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm,
-          ),
-          child: Row(
-            children: [
-              // Indicador ativo
-              if (ativo)
-                Container(
-                  width: 3,
-                  height: 32,
-                  margin: const EdgeInsets.only(right: AppSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            child: Row(
+              children: [
+                // Indicador ativo
+                if (widget.ativo)
+                  Container(
+                    width: 3,
+                    height: 32,
+                    margin: const EdgeInsets.only(right: AppSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                    ),
+                  )
+                else
+                  const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.lista.nome,
+                        style:
+                            Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: widget.ativo
+                                      ? AppColors.textPrimary
+                                      : AppColors.textSecondary,
+                                  fontWeight: widget.ativo
+                                      ? FontWeight.w600
+                                      : FontWeight.w500,
+                                ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${widget.lista.totalCanais} canais',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: widget.ativo
+                                  ? AppColors.accentBright
+                                  : AppColors.textTertiary,
+                            ),
+                      ),
+                    ],
                   ),
-                )
-              else
-                const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      lista.nome,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: ativo
-                                ? AppColors.textPrimary
-                                : AppColors.textSecondary,
-                            fontWeight:
-                                ativo ? FontWeight.w600 : FontWeight.w500,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      '${lista.totalCanais} canais',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: ativo
-                                ? AppColors.accentBright
-                                : AppColors.textTertiary,
-                          ),
-                    ),
-                  ],
                 ),
-              ),
-            ],
+                // Botão de menu aparece ao passar o mouse ou quando ativo
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: AnimatedOpacity(
+                    opacity: (_hover || widget.ativo) ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 150),
+                    child: PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(
+                        Icons.more_vert_rounded,
+                        size: 16,
+                        color: AppColors.textSecondary,
+                      ),
+                      onSelected: _executar,
+                      itemBuilder: (_) => [
+                        if (widget.lista.origem == OrigemLista.url)
+                          const PopupMenuItem(
+                            value: 'atualizar',
+                            child: Row(
+                              children: [
+                                Icon(Icons.refresh_rounded, size: 18),
+                                SizedBox(width: AppSpacing.md),
+                                Text('Atualizar'),
+                              ],
+                            ),
+                          ),
+                        const PopupMenuItem(
+                          value: 'remover',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.delete_outline_rounded,
+                                size: 18,
+                                color: AppColors.error,
+                              ),
+                              SizedBox(width: AppSpacing.md),
+                              Text(
+                                'Remover',
+                                style: TextStyle(color: AppColors.error),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

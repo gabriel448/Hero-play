@@ -8,6 +8,17 @@ class M3UInvalidoException implements Exception {
   String toString() => 'M3U invalido: $mensagem';
 }
 
+/// Lançada quando o conteúdo baixado é reconhecido como um formato diferente
+/// de M3U Extended (ex.: manifesto HLS, EPG/XMLTV). Tratada pela UI para
+/// exibir orientação específica ao usuário em vez de um erro genérico.
+class FormatoNaoSuportadoException implements Exception {
+  final String mensagem;
+  const FormatoNaoSuportadoException(this.mensagem);
+
+  @override
+  String toString() => mensagem;
+}
+
 /// Parser de listas M3U estendidas (formato IPTV).
 class ParserM3U {
   /// Regex para extrair atributos no formato chave="valor".
@@ -40,11 +51,35 @@ class ParserM3U {
     'vod',
   ];
 
+  /// Detecta manifesto HLS (streaming adaptativo) pelo cabeçalho.
+  /// Manifesto HLS usa tags como #EXT-X-TARGETDURATION, #EXT-X-STREAM-INF,
+  /// #EXT-X-MEDIA-SEQUENCE — completamente diferentes do #EXTINF do M3U IPTV.
+  static bool _ehManifestoHls(String conteudo) {
+    return conteudo.contains('#EXT-X-TARGETDURATION') ||
+        conteudo.contains('#EXT-X-STREAM-INF') ||
+        conteudo.contains('#EXT-X-MEDIA-SEQUENCE') ||
+        conteudo.contains('#EXT-X-VERSION');
+  }
+
+  /// Detecta EPG/XMLTV pelo marcador de abertura XML.
+  static bool _ehEpgXml(String conteudo) {
+    final inicio = conteudo.trimLeft();
+    return inicio.startsWith('<?xml') || inicio.startsWith('<tv');
+  }
+
   /// Faz parsing do texto bruto e devolve a lista de canais.
   /// Linhas malformadas individuais sao ignoradas (resilient parsing).
   List<Canal> parse(String conteudo) {
     if (conteudo.trim().isEmpty) {
       throw M3UInvalidoException('Conteudo vazio.');
+    }
+
+    // Detecta formatos incompatíveis antes de tentar parsear como M3U.
+    if (_ehManifestoHls(conteudo)) {
+      throw const FormatoNaoSuportadoException('hls');
+    }
+    if (_ehEpgXml(conteudo)) {
+      throw const FormatoNaoSuportadoException('epg');
     }
 
     final linhas = conteudo.split(RegExp(r'\r?\n'));

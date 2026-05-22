@@ -33,13 +33,13 @@ class TmdbInfo {
 class TmdbService {
   static const _imgBase = 'https://image.tmdb.org/t/p/w500';
 
-  final String apiKey;
+  final String proxyBaseUrl;
   final _cachePoster = <String, String?>{};
   final _cacheInfo = <String, TmdbInfo>{};
 
-  TmdbService(this.apiKey);
+  TmdbService(this.proxyBaseUrl);
 
-  bool get configurado => apiKey.trim().isNotEmpty;
+  bool get configurado => proxyBaseUrl.trim().isNotEmpty;
 
   // ─── Poster (carrosseis de series) ───────────────────────────────────────
 
@@ -126,10 +126,9 @@ class TmdbService {
   Future<List<String>> _elenco(int id, bool ehTv, String idioma) async {
     try {
       final endpoint = ehTv ? '/3/tv/$id/credits' : '/3/movie/$id/credits';
-      final uri = Uri.https('api.themoviedb.org', endpoint, {
-        'api_key': apiKey.trim(),
-        'language': idioma,
-      });
+      final uri = Uri.parse(
+        '${proxyBaseUrl.trim()}/api/tmdb$endpoint',
+      ).replace(queryParameters: {'language': idioma});
       final resp = await http.get(uri).timeout(const Duration(seconds: 6));
       if (resp.statusCode != 200) return const [];
 
@@ -157,9 +156,10 @@ class TmdbService {
     bool ehTv,
   ) async {
     try {
-      final uri = Uri.https('api.themoviedb.org', endpoint, {
+      final uri = Uri.parse(
+        '${proxyBaseUrl.trim()}/api/tmdb$endpoint',
+      ).replace(queryParameters: {
         'query': query,
-        'api_key': apiKey.trim(),
         'language': idioma,
         'include_adult': 'false',
       });

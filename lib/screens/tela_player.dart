@@ -95,7 +95,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
   // Quando true, usa o player VOD compartilhado: ao sair, só para (não
   // dispõe) — assim ele é reaproveitado no próximo filme.
   bool _compartilhado = false;
-  // Evita loop: permite apenas 1 auto-retry por tentativa explícita.
+  // Permite exatamente um retry silencioso por tentativa iniciada pelo usuário.
+  // Resetado apenas em chamadas diretas de _abrirStream() (não no auto-retry),
+  // evitando loop infinito caso o stream falhe repetidamente.
   bool _tentouAutoRetry = false;
   // Garante que o seek de retomada aconteça uma única vez.
   bool _seekFeito = false;
@@ -197,13 +199,17 @@ class _TelaPlayerState extends State<TelaPlayer> {
       _timeoutTimer?.cancel();
       _atualizadorStatus?.cancel();
       if (!mounted) return;
-      // Erros transitórios durante a inicialização (player ainda não começou
-      // a tocar): retry automático e silencioso uma única vez.
-      if (!_iniciado && !_tentouAutoRetry) {
+      // Retry silencioso na primeira falha, independente de playing=true já
+      // ter disparado. Com await _player.stop() em _abrirStream(), playing=true
+      // dispara antes do erro (player entra em estado "playing" antes de
+      // conectar de fato) — por isso a condição !_iniciado foi removida.
+      // deAutoRetry: true impede que o retry reset _tentouAutoRetry, evitando
+      // loop infinito caso o stream falhe em todas as tentativas.
+      if (!_tentouAutoRetry) {
         _tentouAutoRetry = true;
-        _registrarLog('Auto-retry em 600ms...');
-        Future.delayed(const Duration(milliseconds: 600), () {
-          if (mounted) _abrirStream();
+        _registrarLog('Auto-retry em 300ms...');
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) _abrirStream(deAutoRetry: true);
         });
         return;
       }
@@ -268,11 +274,16 @@ class _TelaPlayerState extends State<TelaPlayer> {
     return url.substring(0, authorityEnd) + path.replaceAll('@', '%40');
   }
 
-  Future<void> _abrirStream() async {
+  // deAutoRetry: true quando chamado pelo retry interno — NÃO reseta
+  // _tentouAutoRetry, evitando que o retry também receba um retry (loop).
+  // false (padrão) quando iniciado pelo usuário — reseta o flag para que
+  // a nova tentativa manual também possa ter seu único retry silencioso.
+  Future<void> _abrirStream({bool deAutoRetry = false}) async {
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
     _iniciado = false;
-    _tentouAutoRetry = false;
+    _seekFeito = false;
+    if (!deAutoRetry) _tentouAutoRetry = false;
     _inicioTentativa = DateTime.now();
 
     setState(() {
@@ -305,6 +316,15 @@ class _TelaPlayerState extends State<TelaPlayer> {
     try {
       final url = _normalizarUrl(widget.canal.url);
       if (url != widget.canal.url) _registrarLog('url normalizada: $url');
+
+      // Garante estado limpo antes de abrir nova mídia no player compartilhado.
+      // O dispose() da sessão anterior chama _player.stop() sem await (Flutter
+      // não permite async no dispose). Se esse stop ainda estiver em andamento
+      // quando open() for chamado, a transição stop→open emite erros transitórios
+      // que seriam mostrados ao usuário. Aguardar stop() aqui absorve o stop
+      // pendente e evita esses erros por completo.
+      if (_compartilhado) await _player.stop();
+
       await _player.open(
         Media(url, httpHeaders: headers.isEmpty ? null : headers),
         play: true,
