@@ -127,7 +127,7 @@ class TmdbService {
     try {
       final endpoint = ehTv ? '/3/tv/$id/credits' : '/3/movie/$id/credits';
       final uri = Uri.parse(
-        '${proxyBaseUrl.trim()}/api/tmdb$endpoint',
+        '${proxyBaseUrl.trim()}/api$endpoint',
       ).replace(queryParameters: {'language': idioma});
       final resp = await http.get(uri).timeout(const Duration(seconds: 6));
       if (resp.statusCode != 200) return const [];
@@ -157,7 +157,7 @@ class TmdbService {
   ) async {
     try {
       final uri = Uri.parse(
-        '${proxyBaseUrl.trim()}/api/tmdb$endpoint',
+        '${proxyBaseUrl.trim()}/api$endpoint',
       ).replace(queryParameters: {
         'query': query,
         'language': idioma,
