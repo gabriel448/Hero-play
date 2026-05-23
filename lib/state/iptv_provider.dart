@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/canal.dart';
 import '../models/canal_assistido.dart';
+import '../models/categoria_personalizada.dart';
 import '../models/lista_m3u.dart';
 import '../models/progresso_canal.dart';
 import '../services/armazenamento.dart';
@@ -32,6 +33,7 @@ class IptvProvider extends ChangeNotifier {
   List<Canal> _favoritos = [];
   List<CanalAssistido> _historico = [];
   List<ProgressoCanal> _progressos = [];
+  List<CategoriaPersonalizada> _categoriasPersonalizadas = [];
   ListaM3U? _listaAtiva;
   String _busca = '';
   bool _carregando = false;
@@ -43,6 +45,8 @@ class IptvProvider extends ChangeNotifier {
   List<Canal> get favoritos => _favoritos;
   List<CanalAssistido> get historico => _historico;
   List<ProgressoCanal> get progressos => _progressos;
+  List<CategoriaPersonalizada> get categoriasPersonalizadas =>
+      _categoriasPersonalizadas;
   ListaM3U? get listaAtiva => _listaAtiva;
   String get busca => _busca;
   bool get carregando => _carregando;
@@ -56,6 +60,8 @@ class IptvProvider extends ChangeNotifier {
     _favoritos = _armazenamento.carregarFavoritos();
     _historico = _armazenamento.carregarHistorico();
     _progressos = _armazenamento.carregarProgressos();
+    _categoriasPersonalizadas =
+        _armazenamento.carregarCategoriasPersonalizadas();
     notifyListeners();
   }
 
@@ -194,6 +200,66 @@ class IptvProvider extends ChangeNotifier {
   void limparErro() {
     _erro = null;
     _formatoNaoSuportado = null;
+    notifyListeners();
+  }
+
+  // ===== QUALIDADE PREFERIDA (canais agrupados) =====
+
+  /// Url da variante de qualidade lembrada para um canal agrupado, ou null.
+  String? qualidadePreferida(String idGrupo) =>
+      _armazenamento.qualidadeSalva(idGrupo);
+
+  /// Lembra a qualidade escolhida para um canal agrupado.
+  Future<void> salvarQualidadePreferida(String idGrupo, String url) =>
+      _armazenamento.salvarQualidade(idGrupo, url);
+
+  // ===== CATEGORIAS PERSONALIZADAS =====
+
+  CategoriaPersonalizada? categoriaPersonalizadaPorId(String id) {
+    for (final c in _categoriasPersonalizadas) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  /// Cria uma categoria personalizada vazia e devolve o id gerado.
+  Future<String> criarCategoriaPersonalizada(String nome) async {
+    final cat = CategoriaPersonalizada.nova(nome.trim());
+    await _armazenamento.salvarCategoriaPersonalizada(cat);
+    _categoriasPersonalizadas =
+        _armazenamento.carregarCategoriasPersonalizadas();
+    notifyListeners();
+    return cat.id;
+  }
+
+  Future<void> removerCategoriaPersonalizada(String id) async {
+    await _armazenamento.removerCategoriaPersonalizada(id);
+    _categoriasPersonalizadas =
+        _armazenamento.carregarCategoriasPersonalizadas();
+    notifyListeners();
+  }
+
+  Future<void> adicionarCanalACategoria(String idCategoria, Canal canal) async {
+    final cat = categoriaPersonalizadaPorId(idCategoria);
+    if (cat == null || cat.contem(canal)) return;
+    await _armazenamento.salvarCategoriaPersonalizada(
+      cat.copyWith(canais: [...cat.canais, canal]),
+    );
+    _categoriasPersonalizadas =
+        _armazenamento.carregarCategoriasPersonalizadas();
+    notifyListeners();
+  }
+
+  Future<void> removerCanalDeCategoria(String idCategoria, Canal canal) async {
+    final cat = categoriaPersonalizadaPorId(idCategoria);
+    if (cat == null) return;
+    await _armazenamento.salvarCategoriaPersonalizada(
+      cat.copyWith(
+        canais: cat.canais.where((c) => c.id != canal.id).toList(),
+      ),
+    );
+    _categoriasPersonalizadas =
+        _armazenamento.carregarCategoriasPersonalizadas();
     notifyListeners();
   }
 

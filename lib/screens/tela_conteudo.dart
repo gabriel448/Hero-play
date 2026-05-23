@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/lista_m3u.dart';
+import '../services/agrupador_canais.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
@@ -49,7 +50,7 @@ class _TelaConteudoState extends State<TelaConteudo>
 
   void _atualizarCache(ListaM3U lista) {
     if (_idListaCacheada == lista.id) return;
-    _cacheAoVivo = lista.agruparPorCategoria(TipoCanal.aoVivo);
+    _cacheAoVivo = agruparCanaisAoVivo(lista.canaisAoVivo);
     _cacheFilmes = lista.agruparPorCategoria(TipoCanal.filme);
     _idListaCacheada = lista.id;
   }

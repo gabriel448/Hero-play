@@ -11,6 +11,8 @@ import '../services/player_vod.dart';
 import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/qualidade.dart';
+import '../widgets/seletor_categoria.dart';
 
 class TelaPlayer extends StatefulWidget {
   final Canal canal;
@@ -67,6 +69,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
   late Player _player;
   late VideoController _controller;
 
+  // Variante de qualidade em reproducao. Para canais comuns e o proprio
+  // widget.canal; para canais agrupados e uma das variantes.
+  late Canal _varianteAtual;
+
   String? _erro;
   String _status = 'Iniciando...';
   _Estrategia _estrategia = _Estrategia.vlcUa;
@@ -105,6 +111,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   @override
   void initState() {
     super.initState();
+    _varianteAtual = _varianteInicial();
     if (widget.playerExterno != null) {
       // Veio do mini player: reutiliza o player que já está tocando.
       _player = widget.playerExterno!;
@@ -143,6 +150,38 @@ class _TelaPlayerState extends State<TelaPlayer> {
       });
     }
   }
+
+  /// Decide qual variante de qualidade abrir. Canal comum: ele mesmo.
+  /// Canal agrupado: a qualidade lembrada da ultima vez, ou — na primeira
+  /// vez — a melhor qualidade disponivel.
+  Canal _varianteInicial() {
+    final canal = widget.canal;
+    if (!canal.agrupado) return canal;
+    final idGrupo = canal.idGrupo;
+    if (idGrupo != null) {
+      final urlSalva = context.read<IptvProvider>().qualidadePreferida(idGrupo);
+      if (urlSalva != null) {
+        for (final v in canal.variantes) {
+          if (v.url == urlSalva) return v;
+        }
+      }
+    }
+    return canal.variantes.first; // melhor qualidade
+  }
+
+  /// Troca a qualidade do canal agrupado, reabrindo o stream na variante
+  /// escolhida e lembrando a preferencia para as proximas vezes.
+  Future<void> _trocarQualidade(Canal variante) async {
+    if (variante.url == _varianteAtual.url) return;
+    setState(() => _varianteAtual = variante);
+    final idGrupo = widget.canal.idGrupo;
+    if (idGrupo != null) {
+      _provider.salvarQualidadePreferida(idGrupo, variante.url);
+    }
+    await _abrirStream();
+  }
+
+  String _rotuloQualidade(Canal v) => detectarQualidade(v.nome).rotulo;
 
   // Chamado pelo PopScope quando o canal é ao vivo: envia para mini player.
   void _minimizar() {
@@ -314,8 +353,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _registrarLog('headers: ${headers.isEmpty ? "nenhum" : headers.keys.join(",")}');
 
     try {
-      final url = _normalizarUrl(widget.canal.url);
-      if (url != widget.canal.url) _registrarLog('url normalizada: $url');
+      final url = _normalizarUrl(_varianteAtual.url);
+      if (url != _varianteAtual.url) _registrarLog('url normalizada: $url');
 
       // Garante estado limpo antes de abrir nova mídia no player compartilhado.
       // O dispose() da sessão anterior chama _player.stop() sem await (Flutter
@@ -385,7 +424,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   Future<void> _copiarUrl() async {
-    await Clipboard.setData(ClipboardData(text: widget.canal.url));
+    await Clipboard.setData(ClipboardData(text: _varianteAtual.url));
     _mostrarSnack('URL copiada');
   }
 
@@ -406,6 +445,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
         player: _player,
         tracks: _tracks,
         track: _track,
+        canal: widget.canal,
+        varianteAtualUrl: _varianteAtual.url,
+        onTrocarQualidade: _trocarQualidade,
       ),
     );
   }
@@ -415,6 +457,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       state: state,
       iniciado: _iniciado,
       tracks: _tracks,
+      temQualidades: widget.canal.agrupado,
       onFaixas: () => _mostrarFaixas(state.context),
       player: _player,
     );
@@ -504,7 +547,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
           children: [
             Text(widget.canal.nome, overflow: TextOverflow.ellipsis),
             Text(
-              _status,
+              widget.canal.agrupado
+                  ? '$_status · ${_rotuloQualidade(_varianteAtual)}'
+                  : _status,
               style: const TextStyle(fontSize: 11, color: Colors.white70),
             ),
           ],
@@ -518,6 +563,14 @@ class _TelaPlayerState extends State<TelaPlayer> {
             onPressed: _copiarUrl,
           ),
           IconButton(
+            icon: const Icon(
+              Icons.playlist_add_rounded,
+              color: Colors.white,
+            ),
+            tooltip: 'Adicionar a categoria',
+            onPressed: () => mostrarSeletorCategoria(context, widget.canal),
+          ),
+          IconButton(
             icon: Icon(
               favorito ? Icons.star_rounded : Icons.star_outline_rounded,
               color: favorito ? AppColors.accent : Colors.white,
@@ -528,7 +581,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       ),
       body: _erro != null
           ? _ViewErro(
-              canal: widget.canal,
+              canal: _varianteAtual,
               erro: _erro!,
               estrategiaAtual: _estrategia,
               log: _log,
@@ -795,6 +848,7 @@ class _ControlesAoVivo extends StatefulWidget {
   final VideoState state;
   final bool iniciado;
   final Tracks tracks;
+  final bool temQualidades;
   final VoidCallback onFaixas;
   final Player player;
 
@@ -802,6 +856,7 @@ class _ControlesAoVivo extends StatefulWidget {
     required this.state,
     required this.iniciado,
     required this.tracks,
+    required this.temQualidades,
     required this.onFaixas,
     required this.player,
   });
@@ -904,13 +959,15 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
                         ),
                       ),
                       // ── CC e Fullscreen ──────────────────────────────────
-                      if (widget.iniciado && widget.tracks.audio.isNotEmpty)
+                      if (widget.iniciado &&
+                          (widget.tracks.audio.isNotEmpty ||
+                              widget.temQualidades))
                         IconButton(
                           icon: const Icon(
                             Icons.closed_caption_rounded,
                             color: Colors.white,
                           ),
-                          tooltip: 'Faixas e legendas',
+                          tooltip: 'Qualidade, faixas e legendas',
                           onPressed: widget.onFaixas,
                         ),
                       IconButton(
@@ -980,11 +1037,17 @@ class _PainelFaixas extends StatefulWidget {
   final Player player;
   final Tracks tracks;
   final Track track;
+  final Canal canal;
+  final String varianteAtualUrl;
+  final ValueChanged<Canal> onTrocarQualidade;
 
   const _PainelFaixas({
     required this.player,
     required this.tracks,
     required this.track,
+    required this.canal,
+    required this.varianteAtualUrl,
+    required this.onTrocarQualidade,
   });
 
   @override
@@ -1055,10 +1118,28 @@ class _PainelFaixasState extends State<_PainelFaixas> {
               ),
             ),
             Text(
-              'Faixas e Legendas',
+              widget.canal.agrupado ? 'Qualidade e Faixas' : 'Faixas e Legendas',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: AppSpacing.lg),
+
+            // ── Qualidade (canais agrupados) ──────────────────────────────
+            if (widget.canal.agrupado) ...[
+              _SecaoLabel('QUALIDADE'),
+              const SizedBox(height: AppSpacing.xs),
+              ...widget.canal.variantes.map((v) {
+                final q = detectarQualidade(v.nome);
+                return _ItemFaixa(
+                  rotulo: q == Qualidade.desconhecida ? v.nome : q.rotulo,
+                  selecionado: v.url == widget.varianteAtualUrl,
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.onTrocarQualidade(v);
+                  },
+                );
+              }),
+              const SizedBox(height: AppSpacing.base),
+            ],
 
             // ── Áudio ─────────────────────────────────────────────────────
             if (temAudio) ...[
@@ -1112,7 +1193,7 @@ class _PainelFaixasState extends State<_PainelFaixas> {
               ),
             ],
 
-            if (!temAudio && !temLegenda)
+            if (!temAudio && !temLegenda && !widget.canal.agrupado)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
                 child: Center(

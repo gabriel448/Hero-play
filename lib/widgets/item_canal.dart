@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/canal.dart';
 import '../theme/app_theme.dart';
+import 'seletor_categoria.dart';
 
 /// Linha de canal. Material denso, hierarquia clara, sem cards desnecessarios.
 ///
@@ -61,6 +62,20 @@ class ItemCanal extends StatelessWidget {
                 ],
               ),
             ),
+            if (canal.agrupado) ...[
+              _BadgeQualidades(quantidade: canal.variantes.length),
+              const SizedBox(width: AppSpacing.xs),
+            ],
+            IconButton(
+              icon: const Icon(
+                Icons.playlist_add_rounded,
+                color: AppColors.textTertiary,
+                size: 22,
+              ),
+              tooltip: 'Adicionar a categoria',
+              onPressed: () => mostrarSeletorCategoria(context, canal),
+              splashRadius: 22,
+            ),
             IconButton(
               icon: Icon(
                 ehFavorito ? Icons.star_rounded : Icons.star_outline_rounded,
@@ -75,6 +90,40 @@ class ItemCanal extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Selo discreto indicando que o canal reune varias qualidades.
+class _BadgeQualidades extends StatelessWidget {
+  final int quantidade;
+  const _BadgeQualidades({required this.quantidade});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.high_quality_rounded,
+            size: 13,
+            color: AppColors.textTertiary,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            '$quantidade',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppColors.textTertiary,
+                ),
+          ),
+        ],
       ),
     );
   }

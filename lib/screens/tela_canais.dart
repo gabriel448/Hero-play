@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
+import '../models/categoria_personalizada.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
+import '../widgets/seletor_categoria.dart';
 import 'tela_categoria.dart';
+import 'tela_categoria_personalizada.dart';
 import 'tela_player.dart';
 
 /// Lista de categorias de canais ao vivo. Cada categoria abre [TelaCategoria]
@@ -104,58 +107,167 @@ class _ListaCategorias extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (categorias.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xxl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.live_tv_rounded,
-                size: 36,
-                color: AppColors.textTertiary,
+    final personalizadas =
+        context.watch<IptvProvider>().categoriasPersonalizadas;
+    final nomes = categorias.keys.toList()..sort();
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: _SecaoMinhasCategoriasPhone(personalizadas: personalizadas),
+        ),
+        if (nomes.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.xs,
               ),
-              const SizedBox(height: AppSpacing.base),
-              Text(
-                'Sem canais ao vivo nesta lista',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
+              child: Text(
+                'CATEGORIAS',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: AppColors.textTertiary,
+                      letterSpacing: 0.6,
                     ),
-                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          SliverList.separated(
+            itemCount: nomes.length,
+            itemBuilder: (_, i) {
+              final nome = nomes[i];
+              final canais = categorias[nome]!;
+              return _ItemCategoria(
+                nome: nome,
+                quantidade: canais.length,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TelaCategoria(
+                      nomeCategoria: nome,
+                      canais: canais,
+                      tipo: TipoCanal.aoVivo,
+                    ),
+                  ),
+                ),
+              );
+            },
+            separatorBuilder: (_, _) => const Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: Divider(height: 1),
+            ),
+          ),
+        ] else
+          const SliverToBoxAdapter(child: _SemCanaisAoVivo()),
+        const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+      ],
+    );
+  }
+}
+
+class _SecaoMinhasCategoriasPhone extends StatelessWidget {
+  final List<CategoriaPersonalizada> personalizadas;
+  const _SecaoMinhasCategoriasPhone({required this.personalizadas});
+
+  Future<void> _criar(BuildContext context) async {
+    final provider = context.read<IptvProvider>();
+    final nome = await dialogoCriarCategoria(context);
+    if (nome != null) await provider.criarCategoriaPersonalizada(nome);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.xs,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'MINHAS CATEGORIAS',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.textTertiary,
+                        letterSpacing: 0.6,
+                      ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_rounded, size: 20),
+                tooltip: 'Nova categoria',
+                onPressed: () => _criar(context),
               ),
             ],
           ),
         ),
-      );
-    }
-
-    final nomes = categorias.keys.toList()..sort();
-
-    return ListView.separated(
-      itemCount: nomes.length,
-      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-      separatorBuilder: (_, _) => const Padding(
-        padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-        child: Divider(height: 1),
-      ),
-      itemBuilder: (_, i) {
-        final nome = nomes[i];
-        final canais = categorias[nome]!;
-        return _ItemCategoria(
-          nome: nome,
-          quantidade: canais.length,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => TelaCategoria(
-                nomeCategoria: nome,
-                canais: canais,
-                tipo: TipoCanal.aoVivo,
-              ),
+        if (personalizadas.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              0,
+              AppSpacing.lg,
+              AppSpacing.sm,
             ),
+            child: Text(
+              'Toque em + para criar uma categoria.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textTertiary,
+                  ),
+            ),
+          )
+        else
+          ...personalizadas.map((cat) => _ItemCategoria(
+                nome: cat.nome,
+                quantidade: cat.canais.length,
+                icone: Icons.bookmark_rounded,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        TelaCategoriaPersonalizada(idCategoria: cat.id),
+                  ),
+                ),
+              )),
+      ],
+    );
+  }
+}
+
+class _SemCanaisAoVivo extends StatelessWidget {
+  const _SemCanaisAoVivo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.xl,
+        AppSpacing.lg,
+        AppSpacing.xl,
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.live_tv_rounded,
+            size: 36,
+            color: AppColors.textTertiary,
           ),
-        );
-      },
+          const SizedBox(height: AppSpacing.base),
+          Text(
+            'Sem canais ao vivo nesta lista',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -163,12 +275,14 @@ class _ListaCategorias extends StatelessWidget {
 class _ItemCategoria extends StatelessWidget {
   final String nome;
   final int quantidade;
+  final IconData icone;
   final VoidCallback onTap;
 
   const _ItemCategoria({
     required this.nome,
     required this.quantidade,
     required this.onTap,
+    this.icone = Icons.live_tv_rounded,
   });
 
   @override
@@ -190,8 +304,8 @@ class _ItemCategoria extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
               alignment: Alignment.center,
-              child: const Icon(
-                Icons.live_tv_rounded,
+              child: Icon(
+                icone,
                 size: 18,
                 color: AppColors.accent,
               ),
@@ -287,15 +401,97 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
   @override
   Widget build(BuildContext context) {
     final nomes = widget.categorias.keys.toList()..sort();
+    final personalizadas =
+        context.watch<IptvProvider>().categoriasPersonalizadas;
 
     return Row(
       children: [
         // ── Sidebar categorias ──────────────────────────────────────────────
         SizedBox(
           width: channelSidebarWidth(context),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
             children: [
+              // ── MINHAS CATEGORIAS ────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.base,
+                  AppSpacing.md,
+                  AppSpacing.xs,
+                  AppSpacing.xs,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'MINHAS CATEGORIAS',
+                        style:
+                            Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: AppColors.textTertiary,
+                                  letterSpacing: 0.6,
+                                ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 32,
+                      height: 32,
+                      child: IconButton(
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        tooltip: 'Nova categoria',
+                        padding: EdgeInsets.zero,
+                        onPressed: () async {
+                          final provider = context.read<IptvProvider>();
+                          final nome = await dialogoCriarCategoria(context);
+                          if (nome != null) {
+                            await provider.criarCategoriaPersonalizada(nome);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (personalizadas.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.base,
+                    0,
+                    AppSpacing.base,
+                    AppSpacing.sm,
+                  ),
+                  child: Text(
+                    'Toque em + para criar.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textTertiary,
+                        ),
+                  ),
+                )
+              else
+                ...personalizadas.map(
+                  (cat) => Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                    ),
+                    child: _ItemCategoriaTablet(
+                      nome: cat.nome,
+                      quantidade: cat.canais.length,
+                      ativo: false,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => TelaCategoriaPersonalizada(
+                            idCategoria: cat.id,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.sm),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppSpacing.base),
+                child: Divider(height: 1, color: AppColors.divider),
+              ),
+              // ── CATEGORIAS ───────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.base,
@@ -311,26 +507,19 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                       ),
                 ),
               ),
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(
-                    left: AppSpacing.sm,
-                    right: AppSpacing.sm,
-                    bottom: AppSpacing.lg,
+              ...nomes.map((nome) {
+                final ativo = nome == widget.categoriaAtiva;
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                  child: _ItemCategoriaTablet(
+                    nome: nome,
+                    quantidade: widget.categorias[nome]!.length,
+                    ativo: ativo,
+                    onTap: () => widget.onCategoriaSelecionada(nome),
                   ),
-                  itemCount: nomes.length,
-                  itemBuilder: (_, i) {
-                    final nome = nomes[i];
-                    final ativo = nome == widget.categoriaAtiva;
-                    return _ItemCategoriaTablet(
-                      nome: nome,
-                      quantidade: widget.categorias[nome]!.length,
-                      ativo: ativo,
-                      onTap: () => widget.onCategoriaSelecionada(nome),
-                    );
-                  },
-                ),
-              ),
+                );
+              }),
             ],
           ),
         ),

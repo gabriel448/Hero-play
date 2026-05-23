@@ -1,6 +1,7 @@
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/canal.dart';
 import '../models/canal_assistido.dart';
+import '../models/categoria_personalizada.dart';
 import '../models/lista_m3u.dart';
 import '../models/progresso_canal.dart';
 
@@ -17,6 +18,8 @@ class Armazenamento {
   static const _nomeBoxHistorico = 'historico';
   static const _nomeBoxProgressos = 'progressos';
   static const _nomeBoxPreferencias = 'preferencias';
+  static const _nomeBoxQualidades = 'qualidades';
+  static const _nomeBoxCategorias = 'categorias_personalizadas';
 
   static const _limiteHistorico = 50;
 
@@ -25,6 +28,8 @@ class Armazenamento {
   late Box _boxHistorico;
   late Box _boxProgressos;
   late Box _boxPreferencias;
+  late Box _boxQualidades;
+  late Box _boxCategorias;
 
   /// Inicializa o Hive e abre as boxes. Deve ser chamado UMA vez no main()
   /// antes de runApp.
@@ -35,7 +40,39 @@ class Armazenamento {
     _boxHistorico = await Hive.openBox(_nomeBoxHistorico);
     _boxProgressos = await Hive.openBox(_nomeBoxProgressos);
     _boxPreferencias = await Hive.openBox(_nomeBoxPreferencias);
+    _boxQualidades = await Hive.openBox(_nomeBoxQualidades);
+    _boxCategorias = await Hive.openBox(_nomeBoxCategorias);
   }
+
+  // ===== CATEGORIAS PERSONALIZADAS =====
+
+  /// Salva ou atualiza uma categoria personalizada pelo seu id.
+  Future<void> salvarCategoriaPersonalizada(CategoriaPersonalizada c) =>
+      _boxCategorias.put(c.id, c.toMap());
+
+  /// Apaga uma categoria personalizada pelo id.
+  Future<void> removerCategoriaPersonalizada(String id) =>
+      _boxCategorias.delete(id);
+
+  /// Retorna todas as categorias personalizadas, da mais antiga a mais recente.
+  List<CategoriaPersonalizada> carregarCategoriasPersonalizadas() {
+    final lista = _boxCategorias.values
+        .map((m) => CategoriaPersonalizada.fromMap(m as Map))
+        .toList();
+    lista.sort((a, b) => a.criadaEm.compareTo(b.criadaEm));
+    return lista;
+  }
+
+  // ===== QUALIDADE PREFERIDA (canais agrupados) =====
+
+  /// Url da variante de qualidade que o usuario escolheu por ultimo para
+  /// um canal agrupado, ou null se ele nunca trocou a qualidade.
+  String? qualidadeSalva(String idGrupo) =>
+      _boxQualidades.get(idGrupo) as String?;
+
+  /// Lembra a qualidade (url da variante) escolhida para um canal agrupado.
+  Future<void> salvarQualidade(String idGrupo, String url) =>
+      _boxQualidades.put(idGrupo, url);
 
   // ===== PREFERENCIAS =====
 

@@ -33,6 +33,15 @@ class Canal {
   /// Tipo do conteudo: ao vivo ou filme/VOD.
   final TipoCanal tipo;
 
+  /// Variantes de qualidade do mesmo canal, ordenadas da melhor a pior.
+  /// Vazio para canais comuns; com 2+ itens quando o canal foi agrupado.
+  /// Cada variante e um [Canal] simples (sem variantes aninhadas).
+  final List<Canal> variantes;
+
+  /// Id estavel de um canal agrupado — nao muda ao trocar de qualidade.
+  /// null para canais comuns, que usam a [url] como id.
+  final String? idGrupo;
+
   const Canal({
     required this.nome,
     required this.url,
@@ -40,9 +49,16 @@ class Canal {
     this.grupo = 'Sem categoria',
     this.tvgId,
     this.tipo = TipoCanal.aoVivo,
+    this.variantes = const [],
+    this.idGrupo,
   });
 
-  String get id => url;
+  /// Identificador do canal. Para canais agrupados e um id estavel; para
+  /// canais comuns e a propria url.
+  String get id => idGrupo ?? url;
+
+  /// `true` quando este canal reune 2+ variantes de qualidade.
+  bool get agrupado => variantes.length > 1;
 
   Map<String, dynamic> toMap() => {
         'nome': nome,
@@ -51,6 +67,9 @@ class Canal {
         'grupo': grupo,
         'tvgId': tvgId,
         'tipo': tipo.name,
+        if (variantes.isNotEmpty)
+          'variantes': variantes.map((v) => v.toMap()).toList(),
+        if (idGrupo != null) 'idGrupo': idGrupo,
       };
 
   factory Canal.fromMap(Map map) => Canal(
@@ -63,13 +82,18 @@ class Canal {
           (t) => t.name == map['tipo'],
           orElse: () => TipoCanal.aoVivo,
         ),
+        variantes: (map['variantes'] as List?)
+                ?.map((m) => Canal.fromMap(m as Map))
+                .toList() ??
+            const [],
+        idGrupo: map['idGrupo'] as String?,
       );
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is Canal && runtimeType == other.runtimeType && url == other.url;
+      other is Canal && runtimeType == other.runtimeType && id == other.id;
 
   @override
-  int get hashCode => url.hashCode;
+  int get hashCode => id.hashCode;
 }
