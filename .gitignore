@@ -101,6 +101,13 @@ $RECYCLE.BIN/
 # Linux
 *~
 
+# ─── Assinatura / Chaves ─────────────────────────────────────────────────────
+
+# Reforco para keystores fora do android/ (ex: na raiz do projeto)
+*.keystore
+*.jks
+key.properties
+
 # ─── Logs e temporarios ──────────────────────────────────────────────────────
 
 *.log

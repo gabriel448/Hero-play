@@ -1,0 +1,23 @@
+<svg id="app-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" data-om-id="be529a7b:9">
+      <!-- Rounded red square -->
+      <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="#E10600" data-om-id="be529a7b:10"/>
+      <!-- Subtle inner highlight (top-left glow) -->
+      <defs data-om-id="be529a7b:11">
+        <radialGradient id="hi" cx="0.25" cy="0.15" r="0.7" data-om-id="be529a7b:12">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18" data-om-id="be529a7b:13"/>
+          <stop offset="60%" stop-color="#ffffff" stop-opacity="0" data-om-id="be529a7b:14"/>
+        </radialGradient>
+      </defs>
+      <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#hi)" data-om-id="be529a7b:15"/>
+      <!-- Letter H, centered, white on red.
+           Verticals span y=244 to y=780 (height 536).
+           Crossbar centered vertically. -->
+      <g fill="#ffffff" data-om-id="be529a7b:16">
+        <!-- Left bar -->
+        <rect x="240" y="244" width="120" height="536" rx="8" data-om-id="be529a7b:17"/>
+        <!-- Right bar -->
+        <rect x="664" y="244" width="120" height="536" rx="8" data-om-id="be529a7b:18"/>
+        <!-- Crossbar -->
+        <rect x="240" y="452" width="544" height="120" rx="8" data-om-id="be529a7b:19"/>
+      </g>
+    </svg>

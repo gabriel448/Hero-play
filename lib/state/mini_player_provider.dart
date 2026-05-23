@@ -4,6 +4,13 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../models/canal.dart';
 
 class MiniPlayerProvider extends ChangeNotifier {
+  // ── Tamanho do mini player no desktop ────────────────────────────────────
+  // Largura do video. Altura deriva por 16:9 + barra proporcional.
+  // Mobile usa tamanho fixo proprio — estes valores so afetam o desktop.
+  static const double _kLarguraDesktopMin = 220.0;
+  static const double _kLarguraDesktopMax = 800.0;
+  static const double _kLarguraDesktopInicial = 360.0;
+
   Canal? _canal;
   Player? _player;
   VideoController? _controller;
@@ -11,6 +18,7 @@ class MiniPlayerProvider extends ChangeNotifier {
   bool _mutado = false;
   bool _mostrarAcoes = false;
   double _volumeAnterior = 100;
+  double _larguraDesktop = _kLarguraDesktopInicial;
 
   Canal? get canal => _canal;
   Player? get player => _player;
@@ -19,6 +27,33 @@ class MiniPlayerProvider extends ChangeNotifier {
   bool get mutado => _mutado;
   bool get mostrarAcoes => _mostrarAcoes;
   bool get ativo => _canal != null;
+
+  /// Largura atual do video no mini player desktop.
+  double get larguraDesktop => _larguraDesktop;
+
+  /// Altura do video — sempre 16:9 sobre [larguraDesktop].
+  double get alturaVideoDesktop => _larguraDesktop * 9 / 16;
+
+  /// Altura da barra de botoes — proporcional a largura, com limites.
+  double get alturaBarraDesktop =>
+      (_larguraDesktop * 56 / 360).clamp(40.0, 60.0);
+
+  /// Altura total (video + barra).
+  double get alturaTotalDesktop => alturaVideoDesktop + alturaBarraDesktop;
+
+  /// Limites de largura — uteis para a UI clampar antes de chamar [redimensionarDesktop].
+  double get larguraDesktopMin => _kLarguraDesktopMin;
+  double get larguraDesktopMax => _kLarguraDesktopMax;
+
+  /// Define a largura do mini player desktop. Valor fora do intervalo
+  /// permitido e ajustado automaticamente. Sem efeito se a largura nao mudar.
+  void redimensionarDesktop(double novaLargura) {
+    final clamped =
+        novaLargura.clamp(_kLarguraDesktopMin, _kLarguraDesktopMax);
+    if (clamped == _larguraDesktop) return;
+    _larguraDesktop = clamped;
+    notifyListeners();
+  }
 
   /// Inicia o mini player com um [Player] já aberto (transferido de TelaPlayer).
   void iniciar(Canal canal, Player player, VideoController controller) {
