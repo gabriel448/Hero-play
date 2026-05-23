@@ -2,12 +2,14 @@
 
 Player IPTV multiplataforma feito com Flutter. Importe qualquer lista M3U, navegue por canais ao vivo, filmes e séries — com interface adaptada para celular, tablet e desktop.
 
+**Site:** [hero-play.vercel.app](https://hero-play.vercel.app)
+
 ## Download
 
 | Plataforma | Link |
 |---|---|
-| Android (APK) | [Hero_Play_v1.2.1.apk](https://github.com/gabriel448/IPTV/releases/download/v1.2.1/Hero_Play_v1.2.1.apk) |
-| Windows (Instalador) | [Hero_Play_Setup_1.2.1.exe](https://github.com/gabriel448/IPTV/releases/download/v1.2.1/Hero_Play_Setup_1.2.1.exe) |
+| Android (APK) | [Hero_Play_v1.3.0.apk](https://github.com/gabriel448/Hero-play/releases/download/v1.3.0/Hero_Play_v1.3.0.apk) |
+| Windows (Instalador) | [Hero_Play_Setup_1.3.0.exe](https://github.com/gabriel448/Hero-play/releases/download/v1.3.0/Hero_Play_Setup_1.3.0.exe) |
 
 ## Funcionalidades
 
