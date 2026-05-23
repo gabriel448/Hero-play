@@ -60,6 +60,6 @@ Write-Host "`nGerando instalador..." -ForegroundColor Cyan
 if (-not $?) { Write-Error "ISCC falhou."; exit 1 }
 
 # ─── 5. Resultado ────────────────────────────────────────────────────────────
-$output = "installer_output\IPTV_Player_Setup_$version.exe"
+$output = "installer_output\Hero_Play_Setup_$version.exe"
 Write-Host "`nInstalador gerado:" -ForegroundColor Green
 Write-Host "  $((Resolve-Path $output).Path)" -ForegroundColor Green

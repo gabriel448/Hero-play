@@ -6,13 +6,13 @@
 #endif
 
 [Setup]
-AppName=IPTV Player
+AppName=Hero Play
 AppVersion={#AppVersion}
 AppPublisher=Sousa
-DefaultDirName={autopf}\IPTV Player
-DefaultGroupName=IPTV Player
+DefaultDirName={autopf}\Hero Play
+DefaultGroupName=Hero Play
 OutputDir=installer_output
-OutputBaseFilename=IPTV_Player_Setup_{#AppVersion}
+OutputBaseFilename=Hero_Play_Setup_{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -32,9 +32,9 @@ Name: "desktopicon"; Description: "Criar ícone na Área de Trabalho"; GroupDesc
 Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\IPTV Player";             Filename: "{app}\iptv_app.exe"
-Name: "{group}\Desinstalar IPTV Player"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\IPTV Player";     Filename: "{app}\iptv_app.exe"; Tasks: desktopicon
+Name: "{group}\Hero Play";             Filename: "{app}\iptv_app.exe"
+Name: "{group}\Desinstalar Hero Play"; Filename: "{uninstallexe}"
+Name: "{commondesktop}\Hero Play";     Filename: "{app}\iptv_app.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\iptv_app.exe"; Description: "Abrir IPTV Player agora"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\iptv_app.exe"; Description: "Abrir Hero Play agora"; Flags: nowait postinstall skipifsilent

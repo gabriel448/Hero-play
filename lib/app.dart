@@ -22,7 +22,7 @@ class IptvApp extends StatelessWidget {
     final temIdioma = context.watch<PreferenciasProvider>().idiomaDefinido;
 
     return MaterialApp(
-      title: 'IPTV',
+      title: 'Hero Play',
       debugShowCheckedModeBanner: false,
       navigatorKey: rootNavigatorKey,
       theme: AppTheme.dark,
