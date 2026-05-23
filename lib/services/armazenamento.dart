@@ -82,6 +82,12 @@ class Armazenamento {
   Future<void> salvarIdioma(String codigo) =>
       _boxPreferencias.put('idioma', codigo);
 
+  bool obterAutoQualidade() =>
+      _boxPreferencias.get('auto_qualidade', defaultValue: false) as bool;
+
+  Future<void> salvarAutoQualidade(bool valor) =>
+      _boxPreferencias.put('auto_qualidade', valor);
+
   // ===== LISTAS M3U =====
 
   /// Salva ou atualiza uma lista pelo seu identificador (fonte).

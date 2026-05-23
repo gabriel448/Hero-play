@@ -10,6 +10,7 @@ import '../services/player_ao_vivo.dart';
 import '../services/player_vod.dart';
 import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
+import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/qualidade.dart';
 import '../widgets/seletor_categoria.dart';
@@ -82,7 +83,14 @@ class _TelaPlayerState extends State<TelaPlayer> {
   DateTime? _inicioTentativa;
   Timer? _timeoutTimer;
   Timer? _atualizadorStatus;
+  Timer? _timerBufferingLongo;
+  Timer? _timerBufferingCurto;
+  Timer? _timerResetContador;
+  Timer? _timerNotificacao;
+  int _contadorBuffering = 0;
+  String? _msgAutoQualidade;
   late IptvProvider _provider;
+  late PreferenciasProvider _preferencias;
 
   StreamSubscription? _subPlaying;
   StreamSubscription? _subBuffering;
@@ -173,12 +181,63 @@ class _TelaPlayerState extends State<TelaPlayer> {
   /// escolhida e lembrando a preferencia para as proximas vezes.
   Future<void> _trocarQualidade(Canal variante) async {
     if (variante.url == _varianteAtual.url) return;
+    _cancelarTimersBuffering();
     setState(() => _varianteAtual = variante);
     final idGrupo = widget.canal.idGrupo;
     if (idGrupo != null) {
       _provider.salvarQualidadePreferida(idGrupo, variante.url);
     }
     await _abrirStream();
+  }
+
+  void _cancelarTimersBuffering() {
+    _timerBufferingLongo?.cancel();
+    _timerBufferingLongo = null;
+    _timerBufferingCurto?.cancel();
+    _timerBufferingCurto = null;
+    _timerResetContador?.cancel();
+    _timerResetContador = null;
+    _contadorBuffering = 0;
+  }
+
+  void _tentarReduzirQualidade(String motivo) {
+    if (!mounted || !widget.canal.agrupado) return;
+    final variantes = widget.canal.variantes;
+    final indexAtual = variantes.indexWhere((v) => v.url == _varianteAtual.url);
+    if (indexAtual < 0 || indexAtual >= variantes.length - 1) return;
+
+    _cancelarTimersBuffering();
+    final proxima = variantes[indexAtual + 1];
+    final rotulo = _rotuloQualidade(proxima);
+    _registrarLog('Auto-qualidade: $motivo → reduzindo para $rotulo');
+    _mostrarNotificacaoAutoQualidade('Conexão instável — reduzindo para $rotulo');
+    setState(() => _varianteAtual = proxima);
+    _abrirStream();
+  }
+
+  void _incrementarContadorBuffering() {
+    _timerBufferingCurto = null;
+    _contadorBuffering++;
+    _registrarLog(
+        'Auto-qualidade: evento $_contadorBuffering/10 no último minuto');
+    _timerResetContador ??= Timer(const Duration(minutes: 1), () {
+      _contadorBuffering = 0;
+      _timerResetContador = null;
+      _registrarLog('Auto-qualidade: contador resetado');
+    });
+    if (_contadorBuffering >= 10) {
+      _tentarReduzirQualidade('$_contadorBuffering travamentos em 1 minuto');
+    }
+  }
+
+  void _mostrarNotificacaoAutoQualidade(String msg) {
+    _timerNotificacao?.cancel();
+    setState(() => _msgAutoQualidade = msg);
+    _timerNotificacao = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() => _msgAutoQualidade = null);
+      _timerNotificacao = null;
+    });
   }
 
   String _rotuloQualidade(Canal v) => detectarQualidade(v.nome).rotulo;
@@ -198,6 +257,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _provider = context.read<IptvProvider>();
+    _preferencias = context.read<PreferenciasProvider>();
   }
 
   void _registrarLog(String msg) {
@@ -228,8 +288,27 @@ class _TelaPlayerState extends State<TelaPlayer> {
       if (!mounted) return;
       if (bufferando) {
         setState(() => _status = 'Buffering...');
-      } else if (_iniciado) {
-        setState(() => _status = 'Tocando');
+        if (_iniciado &&
+            widget.canal.agrupado &&
+            widget.canal.tipo == TipoCanal.aoVivo &&
+            _preferencias.autoQualidade) {
+          // 8s contínuos de buffering → troca imediata
+          _timerBufferingLongo ??= Timer(
+            const Duration(seconds: 8),
+            () => _tentarReduzirQualidade('buffering contínuo >8s'),
+          );
+          // 2s de buffering → incrementa contador (reset a cada minuto)
+          _timerBufferingCurto ??= Timer(
+            const Duration(seconds: 2),
+            _incrementarContadorBuffering,
+          );
+        }
+      } else {
+        _timerBufferingLongo?.cancel();
+        _timerBufferingLongo = null;
+        _timerBufferingCurto?.cancel();
+        _timerBufferingCurto = null;
+        if (_iniciado) setState(() => _status = 'Tocando');
       }
     });
 
@@ -320,6 +399,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   Future<void> _abrirStream({bool deAutoRetry = false}) async {
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
+    _cancelarTimersBuffering();
     _iniciado = false;
     _seekFeito = false;
     if (!deAutoRetry) _tentouAutoRetry = false;
@@ -506,6 +586,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
     }
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
+    _cancelarTimersBuffering();
+    _timerNotificacao?.cancel();
     _subPlaying?.cancel();
     _subBuffering?.cancel();
     _subError?.cancel();
@@ -612,6 +694,12 @@ class _TelaPlayerState extends State<TelaPlayer> {
                     estrategia: _estrategia,
                     onCancelar: _cancelarTentativa,
                     onProximaEstrategia: _tentarProximaEstrategia,
+                  ),
+                if (_msgAutoQualidade != null)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: _BannerAutoQualidade(msg: _msgAutoQualidade!),
                   ),
               ],
             ),
@@ -1272,6 +1360,38 @@ class _ItemFaixa extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BannerAutoQualidade extends StatelessWidget {
+  final String msg;
+  const _BannerAutoQualidade({required this.msg});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 260),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.80),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.shade400),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.signal_cellular_alt_rounded,
+              color: Colors.orange.shade400, size: 16),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              msg,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }

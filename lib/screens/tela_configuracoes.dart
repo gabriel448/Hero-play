@@ -22,6 +22,15 @@ class TelaConfiguracoes extends StatelessWidget {
         ListView(
           padding: const EdgeInsets.only(bottom: AppSpacing.xl),
           children: [
+            const _TituloSecao('Reprodução'),
+            _OpcaoToggle(
+              titulo: 'Ajuste automático de qualidade',
+              subtitulo:
+                  'Reduz a qualidade automaticamente quando a conexão está instável.',
+              valor: preferencias.autoQualidade,
+              onChanged: preferencias.definirAutoQualidade,
+              beta: true,
+            ),
             const _TituloSecao('Idioma'),
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -67,6 +76,73 @@ class _TituloSecao extends StatelessWidget {
               color: AppColors.textTertiary,
               letterSpacing: 0.6,
             ),
+      ),
+    );
+  }
+}
+
+class _OpcaoToggle extends StatelessWidget {
+  final String titulo;
+  final String subtitulo;
+  final bool valor;
+  final ValueChanged<bool> onChanged;
+  final bool beta;
+
+  const _OpcaoToggle({
+    required this.titulo,
+    required this.subtitulo,
+    required this.valor,
+    required this.onChanged,
+    this.beta = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(titulo, style: Theme.of(context).textTheme.titleSmall),
+                    if (beta) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentDim,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'BETA',
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: AppColors.accentBright,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 10,
+                                  ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(subtitulo,
+                    style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+          Switch(value: valor, onChanged: onChanged),
+        ],
       ),
     );
   }

@@ -31,4 +31,11 @@ class PreferenciasProvider extends ChangeNotifier {
     await _armazenamento.salvarIdioma(idioma.codigo);
     notifyListeners();
   }
+
+  bool get autoQualidade => _armazenamento.obterAutoQualidade();
+
+  Future<void> definirAutoQualidade(bool valor) async {
+    await _armazenamento.salvarAutoQualidade(valor);
+    notifyListeners();
+  }
 }
