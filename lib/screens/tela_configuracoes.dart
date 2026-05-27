@@ -4,6 +4,7 @@ import '../models/idioma_app.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
+import 'tela_historico.dart';
 
 /// Tela de configuracoes. Hoje apenas o idioma — ponto de extensao natural
 /// para futuras opcoes.
@@ -22,6 +23,15 @@ class TelaConfiguracoes extends StatelessWidget {
         ListView(
           padding: const EdgeInsets.only(bottom: AppSpacing.xl),
           children: [
+            const _TituloSecao('Atividade'),
+            _OpcaoNavegacao(
+              icone: Icons.history_rounded,
+              titulo: 'Histórico',
+              subtitulo: 'Canais e episódios assistidos recentemente',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TelaHistorico()),
+              ),
+            ),
             const _TituloSecao('Reprodução'),
             _OpcaoToggle(
               titulo: 'Ajuste automático de qualidade',
@@ -50,6 +60,65 @@ class TelaConfiguracoes extends StatelessWidget {
                 selecionado: idioma == idiomaAtual,
                 onTap: () => preferencias.definirIdioma(idioma),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OpcaoNavegacao extends StatelessWidget {
+  final IconData icone;
+  final String titulo;
+  final String subtitulo;
+  final VoidCallback onTap;
+
+  const _OpcaoNavegacao({
+    required this.icone,
+    required this.titulo,
+    required this.subtitulo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.md,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: Icon(icone, size: 20, color: AppColors.textSecondary),
+            ),
+            const SizedBox(width: AppSpacing.base),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(titulo, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitulo,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColors.textTertiary,
+            ),
           ],
         ),
       ),

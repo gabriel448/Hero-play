@@ -146,10 +146,8 @@ class _PlayerEmbutidoDesktopState extends State<PlayerEmbutidoDesktop> {
     final controller = _controller;
     if (canal == null || player == null || controller == null) return;
     setState(() => _maximizado = true);
-    // Desktop: usa o navigator de conteudo para manter a sidebar visivel.
-    // Phone/tablet landscape: cai no navigator raiz.
-    final nav = desktopContentNavigatorKey.currentState ??
-        rootNavigatorKey.currentState;
+    // Desde a unificacao do layout, o app usa apenas o navigator raiz.
+    final nav = rootNavigatorKey.currentState;
     if (nav == null) {
       setState(() => _maximizado = false);
       return;

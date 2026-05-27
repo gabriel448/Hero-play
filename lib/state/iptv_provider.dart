@@ -80,7 +80,32 @@ class IptvProvider extends ChangeNotifier {
     _progressos = _armazenamento.carregarProgressos();
     _categoriasPersonalizadas =
         _armazenamento.carregarCategoriasPersonalizadas();
+    _restaurarListaAtiva();
     notifyListeners();
+  }
+
+  /// Restaura a lista marcada como ativa pelo usuario, ou fallback para a
+  /// primeira lista importada se nao houver marcacao mas existirem listas.
+  void _restaurarListaAtiva() {
+    final id = _armazenamento.obterIdListaAtiva();
+    ListaM3U? alvo;
+    if (id != null) {
+      for (final l in _listas) {
+        if (l.id == id) {
+          alvo = l;
+          break;
+        }
+      }
+    }
+    alvo ??= _listas.isNotEmpty ? _listas.first : null;
+    if (alvo == null) return;
+    _listaAtiva = alvo;
+    // Persiste se o id atual estava obsoleto.
+    if (id != alvo.id) {
+      _armazenamento.salvarIdListaAtiva(alvo.id);
+    }
+    _epg?.carregarDoDisco(alvo.id);
+    _baixarEpgEmBackground(alvo);
   }
 
   // ===== IMPORTACAO DE LISTAS =====
@@ -109,8 +134,12 @@ class IptvProvider extends ChangeNotifier {
         atualizadaEm: DateTime.now(),
         epgUrl: epgNormalizado,
       );
+      final eraPrimeiraLista = _listas.isEmpty;
       await _armazenamento.salvarLista(lista);
       _listas = _armazenamento.carregarListas();
+      if (eraPrimeiraLista || _listaAtiva == null) {
+        await _ativarLista(lista);
+      }
       _baixarEpgEmBackground(lista);
     });
   }
@@ -134,8 +163,12 @@ class IptvProvider extends ChangeNotifier {
         atualizadaEm: DateTime.now(),
         epgUrl: epgNormalizado,
       );
+      final eraPrimeiraLista = _listas.isEmpty;
       await _armazenamento.salvarLista(lista);
       _listas = _armazenamento.carregarListas();
+      if (eraPrimeiraLista || _listaAtiva == null) {
+        await _ativarLista(lista);
+      }
       _baixarEpgEmBackground(lista);
     });
   }
@@ -184,8 +217,18 @@ class IptvProvider extends ChangeNotifier {
   Future<void> removerLista(ListaM3U lista) async {
     await _armazenamento.removerLista(lista.id);
     await _epg?.remover(lista.id);
-    if (_listaAtiva?.id == lista.id) _listaAtiva = null;
+    final eraAtiva = _listaAtiva?.id == lista.id;
     _listas = _armazenamento.carregarListas();
+    if (eraAtiva) {
+      // Promove a primeira lista restante (se houver) para ativa.
+      final substituta = _listas.isNotEmpty ? _listas.first : null;
+      _listaAtiva = substituta;
+      await _armazenamento.salvarIdListaAtiva(substituta?.id);
+      if (substituta != null) {
+        _epg?.carregarDoDisco(substituta.id);
+        _baixarEpgEmBackground(substituta);
+      }
+    }
     notifyListeners();
   }
 
@@ -197,6 +240,66 @@ class IptvProvider extends ChangeNotifier {
     _epg?.carregarDoDisco(lista.id);
     _baixarEpgEmBackground(lista);
     notifyListeners();
+  }
+
+  /// Marca [lista] como a lista ativa que abre por padrao ao iniciar o app.
+  /// Persiste a escolha e atualiza o estado em memoria. Apenas UMA lista
+  /// pode estar ativa de cada vez — chamar com outra lista substitui.
+  Future<void> ativarLista(ListaM3U lista) async {
+    await _ativarLista(lista);
+    notifyListeners();
+  }
+
+  /// Verdadeiro se [lista] for a lista ativa atual.
+  bool ehListaAtiva(ListaM3U lista) => _listaAtiva?.id == lista.id;
+
+  Future<void> _ativarLista(ListaM3U lista) async {
+    _listaAtiva = lista;
+    _busca = '';
+    _canalSelecionadoDesktop = null;
+    await _armazenamento.salvarIdListaAtiva(lista.id);
+    _epg?.carregarDoDisco(lista.id);
+    _baixarEpgEmBackground(lista);
+  }
+
+  /// Renomeia uma lista existente preservando todos os outros campos.
+  Future<void> renomearLista(ListaM3U lista, String novoNome) async {
+    final nome = novoNome.trim();
+    if (nome.isEmpty || nome == lista.nome) return;
+    final atualizada = lista.copyWith(nome: nome);
+    await _armazenamento.salvarLista(atualizada);
+    _listas = _armazenamento.carregarListas();
+    if (_listaAtiva?.id == lista.id) _listaAtiva = atualizada;
+    notifyListeners();
+  }
+
+  /// Atualiza a URL fonte (M3U) de uma lista existente. Reimporta os canais
+  /// a partir da nova URL. Apenas para listas com origem URL.
+  Future<void> atualizarUrlLista(ListaM3U lista, String novaUrl) async {
+    if (lista.origem != OrigemLista.url) {
+      throw Exception('Apenas listas por URL podem ter a URL modificada.');
+    }
+    final url = novaUrl.trim();
+    if (url.isEmpty || url == lista.fonte) return;
+    await _executarComLoading(() async {
+      final conteudo = await _carregador.baixarDeUrl(url);
+      final canais = _parser.parse(conteudo);
+      // Remove o registro antigo (chave = fonte) antes de salvar com nova chave.
+      await _armazenamento.removerLista(lista.id);
+      final atualizada = ListaM3U(
+        nome: lista.nome,
+        fonte: url,
+        origem: OrigemLista.url,
+        canais: canais,
+        atualizadaEm: DateTime.now(),
+        epgUrl: lista.epgUrl,
+      );
+      await _armazenamento.salvarLista(atualizada);
+      _listas = _armazenamento.carregarListas();
+      if (_listaAtiva?.id == lista.id) {
+        await _ativarLista(atualizada);
+      }
+    });
   }
 
   /// Dispara um download/refresh do EPG sem bloquear a UI. Erros sao

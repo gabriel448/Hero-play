@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/categoria_personalizada.dart';
 import '../state/iptv_provider.dart';
+import '../state/mini_player_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
@@ -10,6 +11,7 @@ import '../widgets/player_embutido_desktop.dart';
 import '../widgets/seletor_categoria.dart';
 import 'tela_categoria.dart';
 import 'tela_categoria_personalizada.dart';
+import 'tela_favoritos.dart';
 import 'tela_player.dart';
 
 /// Lista de categorias de canais ao vivo. Cada categoria abre [TelaCategoria]
@@ -27,6 +29,7 @@ class _TelaCanaisState extends State<TelaCanais> {
   bool _buscando = false;
   String _busca = '';
   String? _categoriaAtiva;
+  Orientation? _orientacaoAnterior;
 
   @override
   void dispose() {
@@ -89,8 +92,48 @@ class _TelaCanaisState extends State<TelaCanais> {
         .toList();
   }
 
+  /// Chamado num post-frame callback quando o tablet muda de orientação.
+  /// Portrait → Landscape: move o mini player para a 3ª coluna.
+  /// Landscape → Portrait: move o canal da 3ª coluna para o mini player.
+  void _tratarMudancaOrientacao(Orientation novaOrientacao) {
+    if (!mounted) return;
+    final mini = context.read<MiniPlayerProvider>();
+    final provider = context.read<IptvProvider>();
+
+    if (novaOrientacao == Orientation.landscape) {
+      // Mini player ativo → transfere para a 3ª coluna (layout desktop)
+      if (mini.ativo) {
+        final canal = mini.canal!;
+        mini.fechar();
+        provider.selecionarCanalDesktop(canal);
+      }
+    } else {
+      // Canal na 3ª coluna → transfere para mini player
+      // PlayerEmbutidoDesktop já foi descartado e parou o singleton durante
+      // a reconciliação — iniciarComSingleton reabre o stream.
+      final canal = provider.canalSelecionadoDesktop;
+      if (canal != null) {
+        provider.selecionarCanalDesktop(null);
+        mini.iniciarComSingleton(canal);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Detecta rotação no tablet para transferir o canal entre mini player
+    // e layout 3 colunas (landscape usa _LayoutDesktopCanais; portrait usa
+    // _LayoutTabletCanais sem player embutido).
+    if (!isDesktop(context) && isTablet(context)) {
+      final orientation = MediaQuery.orientationOf(context);
+      if (_orientacaoAnterior != null && _orientacaoAnterior != orientation) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _tratarMudancaOrientacao(orientation),
+        );
+      }
+      _orientacaoAnterior = orientation;
+    }
+
     return PopScope(
       canPop: !_buscando,
       onPopInvokedWithResult: (didPop, _) {
@@ -254,11 +297,19 @@ class _SecaoMinhasCategoriasPhone extends StatelessWidget {
             ],
           ),
         ),
+        _ItemCategoria(
+          nome: 'Favoritos',
+          quantidade: context.watch<IptvProvider>().favoritos.length,
+          icone: Icons.star_rounded,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const TelaFavoritos()),
+          ),
+        ),
         if (personalizadas.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              0,
+              AppSpacing.sm,
               AppSpacing.lg,
               AppSpacing.sm,
             ),
@@ -498,11 +549,28 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                   ],
                 ),
               ),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                child: _ItemCategoriaTablet(
+                  nome: 'Favoritos',
+                  quantidade:
+                      context.watch<IptvProvider>().favoritos.length,
+                  ativo: false,
+                  leadingIcon: Icons.star_rounded,
+                  leadingIconColor: AppColors.accent,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TelaFavoritos(),
+                    ),
+                  ),
+                ),
+              ),
               if (personalizadas.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.base,
-                    0,
+                    AppSpacing.sm,
                     AppSpacing.base,
                     AppSpacing.sm,
                   ),
@@ -594,12 +662,16 @@ class _ItemCategoriaTablet extends StatelessWidget {
   final int quantidade;
   final bool ativo;
   final VoidCallback onTap;
+  final IconData? leadingIcon;
+  final Color? leadingIconColor;
 
   const _ItemCategoriaTablet({
     required this.nome,
     required this.quantidade,
     required this.ativo,
     required this.onTap,
+    this.leadingIcon,
+    this.leadingIconColor,
   });
 
   @override
@@ -629,6 +701,14 @@ class _ItemCategoriaTablet extends StatelessWidget {
                 )
               else
                 const SizedBox(width: 11),
+              if (leadingIcon != null) ...[
+                Icon(
+                  leadingIcon,
+                  size: 16,
+                  color: leadingIconColor ?? AppColors.textSecondary,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1023,11 +1103,27 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                   ],
                 ),
               ),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                child: _ItemCategoriaTablet(
+                  nome: 'Favoritos',
+                  quantidade: provider.favoritos.length,
+                  ativo: false,
+                  leadingIcon: Icons.star_rounded,
+                  leadingIconColor: AppColors.accent,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TelaFavoritos(),
+                    ),
+                  ),
+                ),
+              ),
               if (personalizadas.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.base,
-                    0,
+                    AppSpacing.sm,
                     AppSpacing.base,
                     AppSpacing.sm,
                   ),

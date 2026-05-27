@@ -5,13 +5,19 @@ import 'package:provider/provider.dart';
 import '../screens/tela_player.dart';
 import '../state/mini_player_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../utils/nav_keys.dart';
 
 // ── Mobile / tablet (mini player flutuante) ──────────────────────────────────
 // No desktop o mini player foi substituido pelo player embutido fixo
 // dentro de TelaCanais — ver lib/widgets/player_embutido_desktop.dart.
-const double _kW = 180.0;
-const double _kH = 108.0; // 16:9
+// No tablet landscape o mini player também é substituído pelo layout 3 colunas.
+const double _kWPhone = 180.0;
+const double _kHPhone = 108.0; // 16:9
+const double _kBarHPhone = 32.0;
+const double _kWTablet = 360.0; // 2× phone
+const double _kHTablet = 216.0; // 2× phone
+const double _kBarHTablet = 48.0;
 
 class MiniPlayerOverlay extends StatelessWidget {
   final Widget child;
@@ -36,20 +42,27 @@ class _MiniFloat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // No desktop o mini player flutuante foi substituido pelo player embutido
-    // fixo dentro da TelaCanais (PlayerEmbutidoDesktop). Nada e renderizado
-    // aqui — o overlay vira no-op pra essa plataforma.
+    // Desktop: substituído pelo PlayerEmbutidoDesktop fixo na TelaCanais.
     if (_isDesktop) return const SizedBox.shrink();
+
+    // Tablet landscape: substituído pelo layout 3 colunas — mini player oculto.
+    final tablet = isTablet(context);
+    if (tablet &&
+        MediaQuery.orientationOf(context) == Orientation.landscape) {
+      return const SizedBox.shrink();
+    }
 
     final mini = context.watch<MiniPlayerProvider>();
     if (!mini.ativo) return const SizedBox.shrink();
 
-    // ── Mobile / Tablet (código original intacto) ─────────────────────────────
+    final kW = tablet ? _kWTablet : _kWPhone;
+    final kH = tablet ? _kHTablet : _kHPhone;
+    final kBarH = tablet ? _kBarHTablet : _kBarHPhone;
     final screenSize = MediaQuery.sizeOf(context);
 
     return Positioned(
-      left: mini.posicao.dx.clamp(0, screenSize.width - _kW),
-      top: mini.posicao.dy.clamp(0, screenSize.height - _kH - 32),
+      left: mini.posicao.dx.clamp(0, screenSize.width - kW),
+      top: mini.posicao.dy.clamp(0, screenSize.height - kH - kBarH),
       child: GestureDetector(
         onPanUpdate: (d) => mini.mover(d.delta),
         onTap: mini.alternarAcoes,
@@ -59,20 +72,20 @@ class _MiniFloat extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           color: Colors.black,
           child: SizedBox(
-            width: _kW,
-            height: _kH + (mini.mostrarAcoes ? 32 : 0),
+            width: kW,
+            height: kH + (mini.mostrarAcoes ? kBarH : 0),
             child: Column(
               children: [
                 SizedBox(
-                  width: _kW,
-                  height: _kH,
+                  width: kW,
+                  height: kH,
                   child: Stack(
                     children: [
                       Video(
                         controller: mini.controller!,
                         controls: NoVideoControls,
-                        width: _kW,
-                        height: _kH,
+                        width: kW,
+                        height: kH,
                       ),
                       Positioned(
                         top: 4,
@@ -82,7 +95,8 @@ class _MiniFloat extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (mini.mostrarAcoes) _BarraMobile(mini: mini),
+                if (mini.mostrarAcoes)
+                  _BarraMobile(mini: mini, width: kW, height: kBarH),
               ],
             ),
           ),
@@ -96,13 +110,15 @@ class _MiniFloat extends StatelessWidget {
 
 class _BarraMobile extends StatelessWidget {
   final MiniPlayerProvider mini;
-  const _BarraMobile({required this.mini});
+  final double width;
+  final double height;
+  const _BarraMobile({required this.mini, required this.width, required this.height});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: _kW,
-      height: 32,
+      width: width,
+      height: height,
       color: AppColors.surface1,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,

@@ -137,6 +137,19 @@ class Armazenamento {
   Future<void> salvarAutoQualidade(bool valor) =>
       _boxPreferencias.put('auto_qualidade', valor);
 
+  /// Id da lista marcada como ativa pelo usuario (a que abre por padrao ao
+  /// iniciar o app). Apenas UMA lista pode estar ativa de cada vez.
+  String? obterIdListaAtiva() =>
+      _boxPreferencias.get('lista_ativa_id') as String?;
+
+  Future<void> salvarIdListaAtiva(String? id) async {
+    if (id == null) {
+      await _boxPreferencias.delete('lista_ativa_id');
+    } else {
+      await _boxPreferencias.put('lista_ativa_id', id);
+    }
+  }
+
   // ===== LISTAS M3U =====
 
   /// Salva ou atualiza uma lista pelo seu identificador (fonte).

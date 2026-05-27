@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../models/canal.dart';
+import '../services/player_ao_vivo.dart';
 
 class MiniPlayerProvider extends ChangeNotifier {
   // ── Tamanho do mini player no desktop ────────────────────────────────────
@@ -19,6 +20,9 @@ class MiniPlayerProvider extends ChangeNotifier {
   bool _mostrarAcoes = false;
   double _volumeAnterior = 100;
   double _larguraDesktop = _kLarguraDesktopInicial;
+  // True quando o player em uso é o singleton PlayerAoVivo — nesse caso
+  // _fecharPlayer deve chamar liberarSeAtual antes de dispor.
+  bool _fromSingleton = false;
 
   Canal? get canal => _canal;
   Player? get player => _player;
@@ -112,17 +116,46 @@ class MiniPlayerProvider extends ChangeNotifier {
     _player = null;
     _controller = null;
     _mostrarAcoes = false;
+    _fromSingleton = false;
     notifyListeners();
     return (c, p, vc);
   }
 
+  /// Inicia o mini player usando o singleton [PlayerAoVivo] e reabre o stream
+  /// de [canal]. Usado ao rotacionar de landscape para portrait no tablet —
+  /// nesse caso [PlayerEmbutidoDesktop] já foi descartado e o singleton está
+  /// parado mas válido.
+  Future<void> iniciarComSingleton(Canal canal) async {
+    _fecharPlayer();
+    final player = PlayerAoVivo.instancia.player;
+    final controller = PlayerAoVivo.instancia.controller;
+    _canal = canal;
+    _player = player;
+    _controller = controller;
+    _fromSingleton = true;
+    _mutado = false;
+    _mostrarAcoes = false;
+    notifyListeners();
+    try {
+      await player.open(
+        Media(canal.url, httpHeaders: {'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20'}),
+        play: true,
+      );
+    } catch (_) {}
+  }
+
   void _fecharPlayer() {
     final p = _player;
+    final wasSingleton = _fromSingleton;
     _canal = null;
     _player = null;
     _controller = null;
     _mostrarAcoes = false;
+    _fromSingleton = false;
     if (p != null) {
+      // Se o player veio do singleton, limpa o singleton antes de dispor —
+      // evita que PlayerAoVivo retorne um handle já descartado.
+      if (wasSingleton) PlayerAoVivo.instancia.liberarSeAtual(p);
       // stop() encerra áudio + vídeo na hora; dispose() libera o handle
       // nativo só depois. Sem o stop(), o áudio do libmpv pode continuar
       // tocando de fundo no Windows.
