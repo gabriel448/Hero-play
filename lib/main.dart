@@ -4,6 +4,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'app.dart';
 import 'services/armazenamento.dart';
+import 'services/servico_epg.dart';
 import 'services/tmdb_service.dart';
 import 'state/iptv_provider.dart';
 import 'state/mini_player_provider.dart';
@@ -25,7 +26,10 @@ Future<void> main() async {
   final armazenamento = Armazenamento();
   await armazenamento.inicializar();
 
-  final provider = IptvProvider(armazenamento: armazenamento);
+  final servicoEpg = ServicoEpg(armazenamento: armazenamento);
+
+  final provider =
+      IptvProvider(armazenamento: armazenamento, epg: servicoEpg);
   await provider.inicializar();
 
   final preferencias = PreferenciasProvider(armazenamento);
@@ -37,6 +41,7 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider<IptvProvider>.value(value: provider),
         ChangeNotifierProvider<PreferenciasProvider>.value(value: preferencias),
+        ChangeNotifierProvider<ServicoEpg>.value(value: servicoEpg),
         Provider<TmdbService>.value(value: tmdb),
         ChangeNotifierProvider<MiniPlayerProvider>(
           create: (_) => MiniPlayerProvider(),

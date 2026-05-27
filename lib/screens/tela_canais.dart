@@ -6,6 +6,7 @@ import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
+import '../widgets/player_embutido_desktop.dart';
 import '../widgets/seletor_categoria.dart';
 import 'tela_categoria.dart';
 import 'tela_categoria_personalizada.dart';
@@ -31,6 +32,49 @@ class _TelaCanaisState extends State<TelaCanais> {
   void dispose() {
     _buscaController.dispose();
     super.dispose();
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final busca = _buscando && _busca.isNotEmpty;
+
+    // Desktop: sempre 3 colunas.
+    if (isDesktop(context)) {
+      return _LayoutDesktopCanais(
+        categorias: widget.categorias,
+        categoriaAtiva: _categoriaAtiva,
+        onCategoriaSelecionada: (cat) => setState(() => _categoriaAtiva = cat),
+        resultadosBuscaGlobal: busca ? _resultadosBusca : null,
+      );
+    }
+
+    // Tablet landscape: 3 colunas com player embutido.
+    if (isTablet(context) && landscape) {
+      return _LayoutDesktopCanais(
+        categorias: widget.categorias,
+        categoriaAtiva: _categoriaAtiva,
+        onCategoriaSelecionada: (cat) => setState(() => _categoriaAtiva = cat),
+        resultadosBuscaGlobal: busca ? _resultadosBusca : null,
+      );
+    }
+
+    // Tablet portrait: 2 colunas (categorias + canais).
+    if (isTablet(context)) {
+      return busca
+          ? _ListaResultados(canais: _resultadosBusca)
+          : _LayoutTabletCanais(
+              categorias: widget.categorias,
+              categoriaAtiva: _categoriaAtiva,
+              onCategoriaSelecionada: (cat) =>
+                  setState(() => _categoriaAtiva = cat),
+            );
+    }
+
+    // Phone (qualquer orientacao): lista de categorias ou resultados.
+    return busca
+        ? _ListaResultados(canais: _resultadosBusca)
+        : _ListaCategorias(categorias: widget.categorias);
   }
 
   List<Canal> get _resultadosBusca {
@@ -87,16 +131,7 @@ class _TelaCanaisState extends State<TelaCanais> {
           ),
         ],
       ),
-      body: _buscando && _busca.isNotEmpty
-          ? _ListaResultados(canais: _resultadosBusca)
-          : isTablet(context)
-              ? _LayoutTabletCanais(
-                  categorias: widget.categorias,
-                  categoriaAtiva: _categoriaAtiva,
-                  onCategoriaSelecionada: (cat) =>
-                      setState(() => _categoriaAtiva = cat),
-                )
-              : _ListaCategorias(categorias: widget.categorias),
+      body: _buildBody(context),
     );
   }
 }
@@ -650,6 +685,13 @@ class _PainelCanaisTablet extends StatelessWidget {
   final List<Canal> canaisFiltrados;
   final TextEditingController buscaController;
   final ValueChanged<String> onFiltrar;
+  /// Callback opcional para troca de canal — quando informado, e chamado
+  /// no lugar do push padrao para TelaPlayer. Usado pelo layout desktop
+  /// para abrir o canal no player embutido.
+  final void Function(Canal canal)? onCanalTap;
+  /// Id do canal atualmente em destaque (selecionado). Usado pelo desktop.
+  final String? idCanalSelecionado;
+  final ScrollController? scrollController;
 
   const _PainelCanaisTablet({
     required this.nomeCategoria,
@@ -657,6 +699,9 @@ class _PainelCanaisTablet extends StatelessWidget {
     required this.canaisFiltrados,
     required this.buscaController,
     required this.onFiltrar,
+    this.onCanalTap,
+    this.idCanalSelecionado,
+    this.scrollController,
   });
 
   @override
@@ -733,6 +778,7 @@ class _PainelCanaisTablet extends StatelessWidget {
                   ),
                 )
               : ListView.builder(
+                  controller: scrollController,
                   itemExtent: 64,
                   itemCount: canaisFiltrados.length,
                   padding: const EdgeInsets.only(bottom: AppSpacing.lg),
@@ -741,12 +787,17 @@ class _PainelCanaisTablet extends StatelessWidget {
                     return ItemCanal(
                       canal: c,
                       ehFavorito: provider.ehFavorito(c),
+                      selecionado: idCanalSelecionado == c.id,
                       onTap: () {
                         provider.registrarVisualizacao(c);
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => TelaPlayer(canal: c)),
-                        );
+                        if (onCanalTap != null) {
+                          onCanalTap!(c);
+                        } else {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => TelaPlayer(canal: c)),
+                          );
+                        }
                       },
                       onToggleFavorito: () => provider.alternarFavorito(c),
                     );
@@ -762,11 +813,21 @@ class _PainelCanaisTablet extends StatelessWidget {
 
 class _ListaResultados extends StatelessWidget {
   final List<Canal> canais;
-  const _ListaResultados({required this.canais});
+  /// Quando fornecido, e chamado no lugar da navegacao padrao.
+  /// Permite que o layout 3-colunas encaminhe o toque para o player embutido.
+  final void Function(Canal)? onCanalTap;
+  final ScrollController? scrollController;
+
+  const _ListaResultados({
+    required this.canais,
+    this.onCanalTap,
+    this.scrollController,
+  });
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
+    final idSelecionado = provider.canalSelecionadoDesktop?.id;
 
     if (canais.isEmpty) {
       return Center(
@@ -781,6 +842,7 @@ class _ListaResultados extends StatelessWidget {
     }
 
     return ListView.builder(
+      controller: scrollController,
       itemCount: canais.length,
       itemExtent: 64,
       itemBuilder: (_, i) {
@@ -789,15 +851,313 @@ class _ListaResultados extends StatelessWidget {
           canal: c,
           ehFavorito: provider.ehFavorito(c),
           mostrarGrupo: true,
+          selecionado: onCanalTap != null ? idSelecionado == c.id : false,
           onTap: () {
             provider.registrarVisualizacao(c);
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
-            );
+            if (onCanalTap != null) {
+              onCanalTap!(c);
+            } else {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => TelaPlayer(canal: c)),
+              );
+            }
           },
           onToggleFavorito: () => provider.alternarFavorito(c),
         );
       },
+    );
+  }
+}
+
+// ─── Layout desktop: 3 colunas (categorias + canais + player embutido) ────────
+
+class _LayoutDesktopCanais extends StatefulWidget {
+  final Map<String, List<Canal>> categorias;
+  final String? categoriaAtiva;
+  final ValueChanged<String> onCategoriaSelecionada;
+  /// Quando nao-null, a coluna de canais exibe esses resultados de busca global
+  /// em vez do painel de categoria selecionada.
+  final List<Canal>? resultadosBuscaGlobal;
+
+  const _LayoutDesktopCanais({
+    required this.categorias,
+    required this.categoriaAtiva,
+    required this.onCategoriaSelecionada,
+    this.resultadosBuscaGlobal,
+  });
+
+  @override
+  State<_LayoutDesktopCanais> createState() => _LayoutDesktopCanaisState();
+}
+
+class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
+  final _buscaController = TextEditingController();
+  final _col1Ctrl = ScrollController();
+  final _col2Ctrl = ScrollController();
+  late List<Canal> _canaisFiltrados;
+  double _col1Width = 260.0;
+  double _col3Width = 420.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _canaisFiltrados = _canaisAtivos;
+  }
+
+  @override
+  void didUpdateWidget(_LayoutDesktopCanais old) {
+    super.didUpdateWidget(old);
+    if (old.categoriaAtiva != widget.categoriaAtiva) {
+      _buscaController.clear();
+      _canaisFiltrados = _canaisAtivos;
+    }
+  }
+
+  @override
+  void dispose() {
+    _buscaController.dispose();
+    _col1Ctrl.dispose();
+    _col2Ctrl.dispose();
+    super.dispose();
+  }
+
+  List<Canal> get _canaisAtivos => widget.categoriaAtiva != null
+      ? (widget.categorias[widget.categoriaAtiva] ?? [])
+      : [];
+
+  void _filtrar(String texto) {
+    final q = texto.trim().toLowerCase();
+    setState(() {
+      _canaisFiltrados = q.isEmpty
+          ? _canaisAtivos
+          : _canaisAtivos
+              .where((c) => c.nome.toLowerCase().contains(q))
+              .toList();
+    });
+  }
+
+  void _ajustarCol1(double dx) {
+    setState(() => _col1Width = (_col1Width + dx).clamp(120.0, 480.0));
+  }
+
+  void _ajustarCol3(double dx) {
+    setState(() => _col3Width = (_col3Width - dx).clamp(260.0, 720.0));
+  }
+
+  /// Tap em canal no desktop: ao vivo vai para o player embutido; filme/VOD
+  /// segue empilhando TelaPlayer (nao faz sentido embutir filmes).
+  void _onCanalTap(Canal canal) {
+    final provider = context.read<IptvProvider>();
+    provider.registrarVisualizacao(canal);
+    if (canal.tipo == TipoCanal.aoVivo) {
+      provider.selecionarCanalDesktop(canal);
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaPlayer(canal: canal)),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nomes = widget.categorias.keys.toList()..sort();
+    final provider = context.watch<IptvProvider>();
+    final personalizadas = provider.categoriasPersonalizadas;
+    final idCanalSelecionado = provider.canalSelecionadoDesktop?.id;
+
+    return Row(
+      children: [
+        // ── Coluna 1: sidebar de categorias ─────────────────────────────────
+        SizedBox(
+          width: _col1Width,
+          child: ListView(
+            controller: _col1Ctrl,
+            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.base,
+                  AppSpacing.md,
+                  AppSpacing.xs,
+                  AppSpacing.xs,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'MINHAS CATEGORIAS',
+                        style:
+                            Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: AppColors.textTertiary,
+                                  letterSpacing: 0.6,
+                                ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 32,
+                      height: 32,
+                      child: IconButton(
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        tooltip: 'Nova categoria',
+                        padding: EdgeInsets.zero,
+                        onPressed: () async {
+                          final nome = await dialogoCriarCategoria(context);
+                          if (nome != null) {
+                            await provider.criarCategoriaPersonalizada(nome);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (personalizadas.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.base,
+                    0,
+                    AppSpacing.base,
+                    AppSpacing.sm,
+                  ),
+                  child: Text(
+                    'Toque em + para criar.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textTertiary,
+                        ),
+                  ),
+                )
+              else
+                ...personalizadas.map(
+                  (cat) => Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                    ),
+                    child: _ItemCategoriaTablet(
+                      nome: cat.nome,
+                      quantidade: cat.canais.length,
+                      ativo: false,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => TelaCategoriaPersonalizada(
+                            idCategoria: cat.id,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.sm),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppSpacing.base),
+                child: Divider(height: 1, color: AppColors.divider),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.base,
+                  AppSpacing.md,
+                  AppSpacing.base,
+                  AppSpacing.xs,
+                ),
+                child: Text(
+                  'CATEGORIAS',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.textTertiary,
+                        letterSpacing: 0.6,
+                      ),
+                ),
+              ),
+              ...nomes.map((nome) {
+                final ativo = nome == widget.categoriaAtiva;
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                  child: _ItemCategoriaTablet(
+                    nome: nome,
+                    quantidade: widget.categorias[nome]!.length,
+                    ativo: ativo,
+                    onTap: () => widget.onCategoriaSelecionada(nome),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+        _DivisorRedimensionavel(onDrag: _ajustarCol1),
+
+        // ── Coluna 2: painel de canais ───────────────────────────────────────
+        Expanded(
+          child: widget.resultadosBuscaGlobal != null
+              ? _ListaResultados(
+                  canais: widget.resultadosBuscaGlobal!,
+                  onCanalTap: _onCanalTap,
+                  scrollController: _col2Ctrl,
+                )
+              : widget.categoriaAtiva == null
+                  ? _EmptyPainel()
+                  : _PainelCanaisTablet(
+                      nomeCategoria: widget.categoriaAtiva!,
+                      canais: _canaisAtivos,
+                      canaisFiltrados: _canaisFiltrados,
+                      buscaController: _buscaController,
+                      onFiltrar: _filtrar,
+                      onCanalTap: _onCanalTap,
+                      idCanalSelecionado: idCanalSelecionado,
+                      scrollController: _col2Ctrl,
+                    ),
+        ),
+        _DivisorRedimensionavel(onDrag: _ajustarCol3),
+
+        // ── Coluna 3: player embutido + EPG ─────────────────────────────────
+        SizedBox(
+          width: _col3Width,
+          child: const PlayerEmbutidoDesktop(),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Divisor arrastavel entre colunas (somente desktop) ──────────────────────
+
+class _DivisorRedimensionavel extends StatefulWidget {
+  final void Function(double dx) onDrag;
+  const _DivisorRedimensionavel({required this.onDrag});
+
+  @override
+  State<_DivisorRedimensionavel> createState() =>
+      _DivisorRedimensionavelState();
+}
+
+class _DivisorRedimensionavelState extends State<_DivisorRedimensionavel> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // Em tablet nao ha mouse — usa divisor simples sem interacao de drag.
+    if (!isDesktop(context)) {
+      return const VerticalDivider(
+          width: 1, thickness: 1, color: AppColors.divider);
+    }
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
+        child: SizedBox(
+          width: 8,
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              width: _hover ? 3 : 1,
+              color: _hover
+                  ? AppColors.accent.withValues(alpha: 0.65)
+                  : AppColors.divider,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

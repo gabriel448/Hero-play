@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,15 +12,22 @@ import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/layout.dart';
 import '../utils/qualidade.dart';
+import '../widgets/modal_programacao.dart';
+import '../widgets/painel_epg.dart';
 import '../widgets/seletor_categoria.dart';
 
 class TelaPlayer extends StatefulWidget {
   final Canal canal;
   final Duration? posicaoInicial;
-  // Quando vem do mini player, o player já existe e não deve ser recriado.
+  // Quando vem do mini player ou do player embutido, o player já existe.
   final Player? playerExterno;
   final VideoController? controllerExterno;
+  /// Quando true, o ciclo de vida do player nao pertence a este widget — ao
+  /// sair, o player NAO e parado nem disposto. Usado pelo player embutido
+  /// do desktop, que continua tocando depois que a TelaPlayer e fechada.
+  final bool mantemPlayerAoSair;
 
   const TelaPlayer({
     super.key,
@@ -28,14 +35,17 @@ class TelaPlayer extends StatefulWidget {
     this.posicaoInicial,
     this.playerExterno,
     this.controllerExterno,
+    this.mantemPlayerAoSair = false,
   });
 
-  /// Construtor usado ao maximizar o mini player (reutiliza player existente).
+  /// Construtor usado ao maximizar o mini player ou o player embutido do
+  /// desktop (reutiliza player existente).
   const TelaPlayer.comPlayer({
     super.key,
     required this.canal,
     required Player player,
     required VideoController controller,
+    this.mantemPlayerAoSair = false,
   })  : posicaoInicial = null,
         playerExterno = player,
         controllerExterno = controller;
@@ -113,7 +123,12 @@ class _TelaPlayerState extends State<TelaPlayer> {
   // Resetado apenas em chamadas diretas de _abrirStream() (não no auto-retry),
   // evitando loop infinito caso o stream falhe repetidamente.
   bool _tentouAutoRetry = false;
+  // True entre "retry agendado" e "retry iniciado": suprime eventos de erro
+  // adicionais que o libmpv dispara enquanto a conexão anterior ainda morre,
+  // evitando o flash da tela de erro antes do retry limpar o estado.
+  bool _retryPendente = false;
   // Garante que o seek de retomada aconteça uma única vez.
+  bool _streamAberto = false;
   bool _seekFeito = false;
 
   @override
@@ -317,16 +332,25 @@ class _TelaPlayerState extends State<TelaPlayer> {
       _timeoutTimer?.cancel();
       _atualizadorStatus?.cancel();
       if (!mounted) return;
-      // Retry silencioso na primeira falha, independente de playing=true já
-      // ter disparado. Com await _player.stop() em _abrirStream(), playing=true
-      // dispara antes do erro (player entra em estado "playing" antes de
-      // conectar de fato) — por isso a condição !_iniciado foi removida.
+      // Suprime erros adicionais enquanto o retry ainda não começou — o
+      // libmpv pode disparar vários eventos antes de a conexão anterior
+      // morrer, e exibi-los causaria um flash desnecessário.
+      if (!_streamAberto) {
+        _registrarLog('ERROR ignorado (anterior ao open)');
+        return;
+      }
+      if (_retryPendente) {
+        _registrarLog('ERROR suprimido (retry pendente)');
+        return;
+      }
+      // Retry silencioso na primeira falha.
       // deAutoRetry: true impede que o retry reset _tentouAutoRetry, evitando
       // loop infinito caso o stream falhe em todas as tentativas.
       if (!_tentouAutoRetry) {
         _tentouAutoRetry = true;
-        _registrarLog('Auto-retry em 300ms...');
-        Future.delayed(const Duration(milliseconds: 300), () {
+        _retryPendente = true;
+        _registrarLog('Auto-retry em 800ms...');
+        Future.delayed(const Duration(milliseconds: 800), () {
           if (mounted) _abrirStream(deAutoRetry: true);
         });
         return;
@@ -402,6 +426,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _cancelarTimersBuffering();
     _iniciado = false;
     _seekFeito = false;
+    _retryPendente = false;
+    _streamAberto = false;
     if (!deAutoRetry) _tentouAutoRetry = false;
     _inicioTentativa = DateTime.now();
 
@@ -442,7 +468,12 @@ class _TelaPlayerState extends State<TelaPlayer> {
       // quando open() for chamado, a transição stop→open emite erros transitórios
       // que seriam mostrados ao usuário. Aguardar stop() aqui absorve o stop
       // pendente e evita esses erros por completo.
-      if (_compartilhado) await _player.stop();
+      if (_compartilhado) {
+        await _player.stop();
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (!mounted) return;
+      }
+      _streamAberto = true;
 
       await _player.open(
         Media(url, httpHeaders: headers.isEmpty ? null : headers),
@@ -513,6 +544,17 @@ class _TelaPlayerState extends State<TelaPlayer> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  void _mostrarVolume([BuildContext? ctx]) {
+    showModalBottomSheet(
+      context: ctx ?? context,
+      backgroundColor: AppColors.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (_) => _PainelVolume(player: _player),
+    );
+  }
+
   void _mostrarFaixas([BuildContext? ctx]) {
     showModalBottomSheet(
       context: ctx ?? context,
@@ -533,6 +575,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   Widget _buildControlesAoVivo(VideoState state) {
+    final idLista = context.read<IptvProvider>().listaAtiva?.id;
+    final temEpg = idLista != null &&
+        widget.canal.tvgId != null &&
+        widget.canal.tvgId!.isNotEmpty;
     return _ControlesAoVivo(
       state: state,
       iniciado: _iniciado,
@@ -540,30 +586,68 @@ class _TelaPlayerState extends State<TelaPlayer> {
       temQualidades: widget.canal.agrupado,
       onFaixas: () => _mostrarFaixas(state.context),
       player: _player,
+      onEpg: temEpg
+          ? () => mostrarModalProgramacao(
+                state.context,
+                canal: widget.canal,
+                idLista: idLista,
+              )
+          : null,
     );
   }
 
   Widget _buildControls(VideoState state) {
-    return Stack(
-      children: [
-        AdaptiveVideoControls(state),
-        if (_iniciado && _tracks.audio.isNotEmpty)
-          Positioned(
-            top: 0,
-            right: 0,
-            child: SafeArea(
-              child: IconButton(
-                icon: const Icon(
-                  Icons.closed_caption_rounded,
-                  color: Colors.white,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
-                ),
-                tooltip: 'Faixas e legendas',
-                onPressed: () => _mostrarFaixas(state.context),
-              ),
-            ),
+    List<Widget> topBar() => [
+      const Spacer(),
+      IconButton(
+        icon: const Icon(
+          Icons.volume_up_rounded,
+          color: Colors.white,
+          shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+        ),
+        tooltip: 'Volume',
+        onPressed: () => _mostrarVolume(state.context),
+      ),
+      if (_iniciado && _tracks.audio.isNotEmpty)
+        IconButton(
+          icon: const Icon(
+            Icons.closed_caption_rounded,
+            color: Colors.white,
+            shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
           ),
-      ],
+          tooltip: 'Faixas e legendas',
+          onPressed: () => _mostrarFaixas(state.context),
+        ),
+    ];
+    return MaterialVideoControlsTheme(
+      normal: MaterialVideoControlsThemeData(
+        topButtonBar: topBar(),
+        controlsHoverDuration: const Duration(seconds: 10),
+        seekBarHeight: 4.5,
+        seekBarThumbSize: 14.0,
+        seekBarContainerHeight: 52.0,
+        seekBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 12),
+        bottomButtonBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 8),
+      ),
+      fullscreen: MaterialVideoControlsThemeData(
+        topButtonBar: topBar(),
+        controlsHoverDuration: const Duration(seconds: 10),
+        seekBarHeight: 4.5,
+        seekBarThumbSize: 14.0,
+        seekBarContainerHeight: 52.0,
+        seekBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 12),
+        bottomButtonBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 8),
+      ),
+      child: MaterialDesktopVideoControlsTheme(
+        normal: MaterialDesktopVideoControlsThemeData(topButtonBar: topBar()),
+        fullscreen: MaterialDesktopVideoControlsThemeData(topButtonBar: topBar()),
+        child: Stack(
+          children: [
+            AdaptiveVideoControls(state),
+            _DoubleTapSeek(player: _player),
+          ],
+        ),
+      ),
     );
   }
 
@@ -595,7 +679,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subTracks?.cancel();
     _subTrack?.cancel();
     _subDuration?.cancel();
-    if (_transferidoParaMini) {
+    if (widget.mantemPlayerAoSair) {
+      // O player nao pertence a esta tela — o widget que a abriu (ex.: player
+      // embutido do desktop) continua usando o stream apos o pop.
+    } else if (_transferidoParaMini) {
       // Player foi para o mini player — segue vivo lá, não mexe.
     } else if (_compartilhado) {
       // Player VOD compartilhado: só para, mantém vivo para o próximo filme.
@@ -611,104 +698,309 @@ class _TelaPlayerState extends State<TelaPlayer> {
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
     final favorito = provider.ehFavorito(widget.canal);
-    final conectando = _erro == null && !_iniciado;
-
     final aoVivo = widget.canal.tipo == TipoCanal.aoVivo;
+    final idLista = provider.listaAtiva?.id;
+    final temEpgPossivel = aoVivo &&
+        idLista != null &&
+        widget.canal.tvgId != null &&
+        widget.canal.tvgId!.isNotEmpty;
 
     return PopScope(
-      // Intercepta o back em canais ao vivo para minimizar em vez de fechar.
-      canPop: !aoVivo,
+      // Intercepta o back em canais ao vivo (mobile) para minimizar em vez de
+      // fechar. Quando o player foi recebido de fora (ex.: embutido do desktop),
+      // o pop e normal — quem chamou cuida do stream.
+      canPop: !aoVivo || widget.mantemPlayerAoSair,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && aoVivo) _minimizar();
+        if (!didPop && aoVivo && !widget.mantemPlayerAoSair) _minimizar();
       },
       child: Scaffold(
-      backgroundColor: AppColors.surface0,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.canal.nome, overflow: TextOverflow.ellipsis),
-            Text(
-              widget.canal.agrupado
-                  ? '$_status · ${_rotuloQualidade(_varianteAtual)}'
-                  : _status,
-              style: const TextStyle(fontSize: 11, color: Colors.white70),
+        backgroundColor: AppColors.surface0,
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.canal.nome, overflow: TextOverflow.ellipsis),
+              Text(
+                widget.canal.agrupado
+                    ? '$_status · ${_rotuloQualidade(_varianteAtual)}'
+                    : _status,
+                style: const TextStyle(fontSize: 11, color: Colors.white70),
+              ),
+            ],
+          ),
+          backgroundColor: AppColors.surface0,
+          foregroundColor: Colors.white,
+          actions: [
+            if (temEpgPossivel)
+              IconButton(
+                icon: const Icon(Icons.event_note_rounded, color: Colors.white),
+                tooltip: 'Programacao',
+                onPressed: () => mostrarModalProgramacao(
+                  context,
+                  canal: widget.canal,
+                  idLista: idLista,
+                ),
+              ),
+            IconButton(
+              icon: const Icon(Icons.copy, color: Colors.white),
+              tooltip: 'Copiar URL',
+              onPressed: _copiarUrl,
             ),
+            if (aoVivo) ...[ 
+              IconButton(
+                icon: const Icon(
+                  Icons.playlist_add_rounded,
+                  color: Colors.white,
+                ),
+                tooltip: 'Adicionar a categoria',
+                onPressed: () => mostrarSeletorCategoria(context, widget.canal),
+              ),
+              IconButton(
+                icon: Icon(
+                  favorito ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: favorito ? AppColors.accent : Colors.white,
+                ),
+                onPressed: () => provider.alternarFavorito(widget.canal),
+              ),
+            ],
           ],
         ),
-        backgroundColor: AppColors.surface0,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.copy, color: Colors.white),
-            tooltip: 'Copiar URL',
-            onPressed: _copiarUrl,
+        body: _erro != null
+            ? _ViewErro(
+                canal: _varianteAtual,
+                erro: _erro!,
+                estrategiaAtual: _estrategia,
+                log: _log,
+                onTentarMesmo: _abrirStream,
+                onTentarOutraEstrategia: _tentarProximaEstrategia,
+                onResetar: _resetarParaPadrao,
+                onCopiarUrl: _copiarUrl,
+              )
+            : _buildCorpo(context, aoVivo: aoVivo, idLista: idLista),
+      ),
+    );
+  }
+
+  /// Decide entre layout split (player + EPG embaixo) e layout fullscreen.
+  ///
+  /// Split: somente para canais ao vivo, em phone/tablet em portrait. Desktop
+  /// e landscape mantem o layout fullscreen tradicional.
+  Widget _buildCorpo(
+    BuildContext context, {
+    required bool aoVivo,
+    required String? idLista,
+  }) {
+    final orientacao = MediaQuery.orientationOf(context);
+    final formFator = formFactor(context);
+    final podeSplit = aoVivo &&
+        idLista != null &&
+        orientacao == Orientation.portrait &&
+        (formFator == FormFactor.phone || formFator == FormFactor.tablet) &&
+        widget.canal.tvgId != null &&
+        widget.canal.tvgId!.isNotEmpty;
+
+    if (!podeSplit) {
+      return SafeArea(top: false, child: _buildAreaPlayer(aoVivo: aoVivo));
+    }
+
+    // Layout estilo YouTube: video 16:9 no topo, EPG rolavel embaixo.
+    return SafeArea(
+      top: false,
+      child: Column(
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: _buildAreaPlayer(aoVivo: aoVivo, comAspectRatio: false),
           ),
-          IconButton(
-            icon: const Icon(
-              Icons.playlist_add_rounded,
-              color: Colors.white,
+          Expanded(
+            child: SingleChildScrollView(
+              child: PainelEpg(canal: widget.canal, idLista: idLista),
             ),
-            tooltip: 'Adicionar a categoria',
-            onPressed: () => mostrarSeletorCategoria(context, widget.canal),
-          ),
-          IconButton(
-            icon: Icon(
-              favorito ? Icons.star_rounded : Icons.star_outline_rounded,
-              color: favorito ? AppColors.accent : Colors.white,
-            ),
-            onPressed: () => provider.alternarFavorito(widget.canal),
           ),
         ],
       ),
-      body: _erro != null
-          ? _ViewErro(
-              canal: _varianteAtual,
-              erro: _erro!,
-              estrategiaAtual: _estrategia,
-              log: _log,
-              onTentarMesmo: _abrirStream,
-              onTentarOutraEstrategia: _tentarProximaEstrategia,
-              onResetar: _resetarParaPadrao,
-              onCopiarUrl: _copiarUrl,
-            )
-          : SafeArea(
-              top: false,
-              child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: Video(
-                      controller: _controller,
-                      controls: aoVivo
-                          ? _buildControlesAoVivo
-                          : _buildControls,
-                    ),
-                  ),
-                ),
-                if (conectando)
-                  _OverlayConectando(
-                    status: _status,
-                    estrategia: _estrategia,
-                    onCancelar: _cancelarTentativa,
-                    onProximaEstrategia: _tentarProximaEstrategia,
-                  ),
-                if (_msgAutoQualidade != null)
-                  Positioned(
-                    top: 12,
-                    right: 12,
-                    child: _BannerAutoQualidade(msg: _msgAutoQualidade!),
-                  ),
-              ],
-            ),
-            ),
-      ), // Scaffold
-    ); // PopScope
+    );
+  }
+
+  /// Constroi a area do video + overlays (conectando, banner auto-qualidade).
+  ///
+  /// Quando [comAspectRatio] e true, envolve o video num AspectRatio centrado
+  /// — comportamento original para layout fullscreen. Quando false, deixa
+  /// o pai (Column do split) controlar o tamanho.
+  Widget _buildAreaPlayer({
+    required bool aoVivo,
+    bool comAspectRatio = true,
+  }) {
+    final conectando = _erro == null && !_iniciado;
+    final video = Video(
+      controller: _controller,
+      controls: aoVivo ? _buildControlesAoVivo : _buildControls,
+    );
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        if (comAspectRatio)
+          Center(
+            child: AspectRatio(aspectRatio: 16 / 9, child: video),
+          )
+        else
+          Positioned.fill(child: video),
+        if (conectando)
+          _OverlayConectando(
+            status: _status,
+            estrategia: _estrategia,
+            onCancelar: _cancelarTentativa,
+            onProximaEstrategia: _tentarProximaEstrategia,
+          ),
+        if (_msgAutoQualidade != null)
+          Positioned(
+            top: 12,
+            right: 12,
+            child: _BannerAutoQualidade(msg: _msgAutoQualidade!),
+          ),
+      ],
+    );
   }
 }
 
+
+class _DoubleTapSeek extends StatefulWidget {
+  final Player player;
+  const _DoubleTapSeek({required this.player});
+
+  @override
+  State<_DoubleTapSeek> createState() => _DoubleTapSeekState();
+}
+
+class _DoubleTapSeekState extends State<_DoubleTapSeek> {
+  String? _label;
+  Timer? _timer;
+  int _accumSecs = 0;
+  bool _direita = true;
+  Duration? _seekBase;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onDoubleTapDown(TapDownDetails d) {
+    final width = MediaQuery.of(context).size.width;
+    final isRight = d.globalPosition.dx > width / 2;
+
+    if (_timer == null || isRight != _direita) {
+      _accumSecs = 0;
+      _seekBase = widget.player.state.position;
+      _direita = isRight;
+    }
+
+    _accumSecs += isRight ? 10 : -10;
+
+    final dur = widget.player.state.duration;
+    final nova = Duration(
+      milliseconds: (_seekBase! + Duration(seconds: _accumSecs))
+          .inMilliseconds
+          .clamp(0, dur.inMilliseconds),
+    );
+    widget.player.seek(nova);
+
+    _timer?.cancel();
+    setState(() => _label = _accumSecs > 0 ? '+${_accumSecs}s' : '${_accumSecs}s');
+    _timer = Timer(const Duration(milliseconds: 1000), () {
+      if (mounted) setState(() { _label = null; _accumSecs = 0; _seekBase = null; });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onDoubleTapDown: _onDoubleTapDown,
+      child: SizedBox.expand(
+        child: _label == null
+            ? const SizedBox.shrink()
+            : Center(
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      _label!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+}
+class _PainelVolume extends StatefulWidget {
+  final Player player;
+  const _PainelVolume({required this.player});
+
+  @override
+  State<_PainelVolume> createState() => _PainelVolumeState();
+}
+
+class _PainelVolumeState extends State<_PainelVolume> {
+  late double _volume;
+  StreamSubscription? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _volume = widget.player.state.volume;
+    _sub = widget.player.stream.volume.listen((v) {
+      if (mounted) setState(() => _volume = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (_volume / 150.0 * 100).round();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.volume_down_rounded),
+              Expanded(
+                child: Slider(
+                  value: _volume.clamp(0, 150),
+                  min: 0,
+                  max: 150,
+                  onChanged: (v) {
+                    widget.player.setVolume(v);
+                    setState(() => _volume = v);
+                  },
+                ),
+              ),
+              const Icon(Icons.volume_up_rounded),
+            ],
+          ),
+          Text('$pct%', style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
+}
 class _OverlayConectando extends StatelessWidget {
   final String status;
   final _Estrategia estrategia;
@@ -939,6 +1231,8 @@ class _ControlesAoVivo extends StatefulWidget {
   final bool temQualidades;
   final VoidCallback onFaixas;
   final Player player;
+  /// Quando nao-null, mostra botao de programacao no overlay de controles.
+  final VoidCallback? onEpg;
 
   const _ControlesAoVivo({
     required this.state,
@@ -947,6 +1241,7 @@ class _ControlesAoVivo extends StatefulWidget {
     required this.temQualidades,
     required this.onFaixas,
     required this.player,
+    this.onEpg,
   });
 
   @override
@@ -1046,7 +1341,16 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
                           ),
                         ),
                       ),
-                      // ── CC e Fullscreen ──────────────────────────────────
+                      // ── EPG / CC / Fullscreen ─────────────────────────────
+                      if (widget.onEpg != null)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.event_note_rounded,
+                            color: Colors.white,
+                          ),
+                          tooltip: 'Programacao',
+                          onPressed: widget.onEpg,
+                        ),
                       if (widget.iniciado &&
                           (widget.tracks.audio.isNotEmpty ||
                               widget.temQualidades))

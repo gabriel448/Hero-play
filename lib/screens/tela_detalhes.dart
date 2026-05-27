@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/serie.dart';
@@ -49,7 +49,6 @@ typedef _EpisodiosAgrupados = ({
 class _TelaDetalhesState extends State<TelaDetalhes> {
   late final Future<TmdbInfo> _infoFuture;
   Future<String?>? _posterSerieFuture;
-
   String get _nome => widget.ehSerie ? widget.serie!.nome : widget.filme!.nome;
 
   @override
@@ -828,8 +827,6 @@ class _ItemEpisodio extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
     final progresso = provider.obterProgresso(episodio);
-    final favorito = provider.ehFavorito(episodio);
-
     return InkWell(
       onTap: () {
         provider.registrarVisualizacao(episodio);
@@ -887,19 +884,7 @@ class _ItemEpisodio extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: AppSpacing.xs),
-            GestureDetector(
-              onTap: () => provider.alternarFavorito(episodio),
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xs),
-                child: Icon(
-                  favorito ? Icons.star_rounded : Icons.star_outline_rounded,
-                  size: 20,
-                  color: favorito ? AppColors.accent : AppColors.textTertiary,
-                ),
-              ),
-            ),
+
           ],
         ),
       ),

@@ -11,6 +11,8 @@ import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import 'tela_detalhes.dart';
 
+const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
+
 // Top-level: roda em Isolate separado via compute() para nao bloquear a UI.
 ({
   Map<String, List<Object>> conteudo,
@@ -307,11 +309,24 @@ class _ItemContinuar {
       : serie = null;
 }
 
-class _CarrosselContinuar extends StatelessWidget {
+class _CarrosselContinuar extends StatefulWidget {
   final List<_ItemContinuar> itens;
   final void Function(Object) onTap;
 
   const _CarrosselContinuar({required this.itens, required this.onTap});
+
+  @override
+  State<_CarrosselContinuar> createState() => _CarrosselContinuarState();
+}
+
+class _CarrosselContinuarState extends State<_CarrosselContinuar> {
+  final _ctrl = ScrollController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -340,28 +355,30 @@ class _CarrosselContinuar extends StatelessWidget {
             ],
           ),
         ),
-        SizedBox(
+        _CarrosselComBotoes(
+          ctrl: _ctrl,
           height: _kPosterHeight + _kPosterLabel,
           child: ListView.builder(
+            controller: _ctrl,
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: itens.length,
+            itemCount: widget.itens.length,
             itemExtent: _kItemExtent,
             itemBuilder: (_, i) {
-              final item = itens[i];
+              final item = widget.itens[i];
               final serie = item.serie;
               if (serie != null) {
                 return _PosterSerie(
                   key: ValueKey('cont:${serie.nome}'),
                   serie: serie,
-                  onTap: () => onTap(serie),
+                  onTap: () => widget.onTap(serie),
                 );
               }
               final filme = item.filme!;
               return _Poster(
                 canal: filme,
                 progresso: item.progresso,
-                onTap: () => onTap(filme),
+                onTap: () => widget.onTap(filme),
               );
             },
           ),
@@ -371,7 +388,7 @@ class _CarrosselContinuar extends StatelessWidget {
   }
 }
 
-class _CarrosselCategoria extends StatelessWidget {
+class _CarrosselCategoria extends StatefulWidget {
   final String nomeCategoria;
   final List<Object> itens;
   final void Function(Object) onTap;
@@ -383,6 +400,19 @@ class _CarrosselCategoria extends StatelessWidget {
   });
 
   @override
+  State<_CarrosselCategoria> createState() => _CarrosselCategoriaState();
+}
+
+class _CarrosselCategoriaState extends State<_CarrosselCategoria> {
+  final _ctrl = ScrollController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -391,8 +421,8 @@ class _CarrosselCategoria extends StatelessWidget {
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => _TelaCategoriaFilmes(
-                nomeCategoria: nomeCategoria,
-                itens: itens,
+                nomeCategoria: widget.nomeCategoria,
+                itens: widget.itens,
               ),
             ),
           ),
@@ -407,14 +437,14 @@ class _CarrosselCategoria extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    nomeCategoria,
+                    widget.nomeCategoria,
                     style: Theme.of(context).textTheme.titleSmall,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 Text(
-                  '${itens.length}',
+                  '${widget.itens.length}',
                   style: tabular(
                     Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: AppColors.textTertiary,
@@ -431,20 +461,144 @@ class _CarrosselCategoria extends StatelessWidget {
             ),
           ),
         ),
-        SizedBox(
+        _CarrosselComBotoes(
+          ctrl: _ctrl,
           height: _kPosterHeight + _kPosterLabel,
           child: ListView.builder(
+            controller: _ctrl,
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: itens.length,
+            itemCount: widget.itens.length,
             itemExtent: _kItemExtent,
             itemBuilder: (_, i) => _CardConteudo(
-              item: itens[i],
-              onTap: () => onTap(itens[i]),
+              item: widget.itens[i],
+              onTap: () => widget.onTap(widget.itens[i]),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Wrapper com botoes discretos de navegacao (desktop only) ─────────────────
+
+class _CarrosselComBotoes extends StatefulWidget {
+  final ScrollController ctrl;
+  final double height;
+  final Widget child;
+
+  const _CarrosselComBotoes({
+    required this.ctrl,
+    required this.height,
+    required this.child,
+  });
+
+  @override
+  State<_CarrosselComBotoes> createState() => _CarrosselComBotoesState();
+}
+
+class _CarrosselComBotoesState extends State<_CarrosselComBotoes> {
+  bool _podeEsquerda = false;
+  bool _podeDireita = true;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.ctrl.addListener(_atualizar);
+    // Checa apos o layout, quando maxScrollExtent esta disponivel.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _atualizar());
+  }
+
+  @override
+  void dispose() {
+    widget.ctrl.removeListener(_atualizar);
+    super.dispose();
+  }
+
+  void _atualizar() {
+    if (!widget.ctrl.hasClients) return;
+    final pos = widget.ctrl.position;
+    final esq = pos.pixels > 0;
+    final dir = pos.pixels < pos.maxScrollExtent;
+    if (esq != _podeEsquerda || dir != _podeDireita) {
+      setState(() {
+        _podeEsquerda = esq;
+        _podeDireita = dir;
+      });
+    }
+  }
+
+  void _rolar(double delta) {
+    if (!widget.ctrl.hasClients) return;
+    final pos = widget.ctrl.position;
+    widget.ctrl.animateTo(
+      (pos.pixels + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isDesktop(context)) {
+      return SizedBox(height: widget.height, child: widget.child);
+    }
+    return SizedBox(
+      height: widget.height,
+      child: Stack(
+        children: [
+          widget.child,
+          if (_podeEsquerda)
+            Positioned(
+              left: AppSpacing.sm,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _BotaoNavCarrossel(
+                  icone: Icons.chevron_left_rounded,
+                  onTap: () => _rolar(-_kScrollStep),
+                ),
+              ),
+            ),
+          if (_podeDireita)
+            Positioned(
+              right: AppSpacing.sm,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _BotaoNavCarrossel(
+                  icone: Icons.chevron_right_rounded,
+                  onTap: () => _rolar(_kScrollStep),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoNavCarrossel extends StatelessWidget {
+  final IconData icone;
+  final VoidCallback onTap;
+
+  const _BotaoNavCarrossel({required this.icone, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface2.withValues(alpha: 0.92),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(icone, size: 18, color: AppColors.textSecondary),
+        ),
+      ),
     );
   }
 }
@@ -771,6 +925,7 @@ class _TelaCategoriaFilmes extends StatefulWidget {
 class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
   late List<Object> _filtrados;
   final _buscaController = TextEditingController();
+  final _scrollCtrl = ScrollController();
   String _busca = '';
   late final int _numFilmes;
   late final int _numSeries;
@@ -786,6 +941,7 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
   @override
   void dispose() {
     _buscaController.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -881,6 +1037,7 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
               ),
             )
           : GridView.builder(
+              controller: _scrollCtrl,
               padding: const EdgeInsets.all(AppSpacing.base),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: posterColumns(context),

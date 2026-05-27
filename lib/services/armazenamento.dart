@@ -3,6 +3,7 @@ import '../models/canal.dart';
 import '../models/canal_assistido.dart';
 import '../models/categoria_personalizada.dart';
 import '../models/lista_m3u.dart';
+import '../models/programa.dart';
 import '../models/progresso_canal.dart';
 
 /// Camada de persistencia local usando Hive (banco NoSQL leve).
@@ -20,6 +21,7 @@ class Armazenamento {
   static const _nomeBoxPreferencias = 'preferencias';
   static const _nomeBoxQualidades = 'qualidades';
   static const _nomeBoxCategorias = 'categorias_personalizadas';
+  static const _nomeBoxEpg = 'epg';
 
   static const _limiteHistorico = 50;
 
@@ -30,6 +32,7 @@ class Armazenamento {
   late Box _boxPreferencias;
   late Box _boxQualidades;
   late Box _boxCategorias;
+  late Box _boxEpg;
 
   /// Inicializa o Hive e abre as boxes. Deve ser chamado UMA vez no main()
   /// antes de runApp.
@@ -42,7 +45,53 @@ class Armazenamento {
     _boxPreferencias = await Hive.openBox(_nomeBoxPreferencias);
     _boxQualidades = await Hive.openBox(_nomeBoxQualidades);
     _boxCategorias = await Hive.openBox(_nomeBoxCategorias);
+    _boxEpg = await Hive.openBox(_nomeBoxEpg);
   }
+
+  // ===== EPG (programacao por lista) =====
+
+  /// Salva a grade EPG inteira (mapa tvgId -> programas) para uma lista,
+  /// junto com a data em que foi baixada. A chave da box e o id da lista.
+  Future<void> salvarEpg(
+    String idLista,
+    Map<String, List<Programa>> grade,
+    DateTime atualizadoEm,
+  ) {
+    final canais = <String, dynamic>{};
+    grade.forEach((tvgId, programas) {
+      canais[tvgId] = programas.map((p) => p.toMap()).toList();
+    });
+    return _boxEpg.put(idLista, {
+      'atualizadoEm': atualizadoEm.toIso8601String(),
+      'canais': canais,
+    });
+  }
+
+  /// Carrega a grade EPG salva para uma lista, ou null se nao houver.
+  Map<String, List<Programa>>? carregarEpg(String idLista) {
+    final raw = _boxEpg.get(idLista);
+    if (raw == null) return null;
+    final canais = (raw as Map)['canais'];
+    if (canais is! Map) return null;
+    final mapa = <String, List<Programa>>{};
+    canais.forEach((tvgId, lista) {
+      if (lista is! List) return;
+      mapa[tvgId.toString()] = lista
+          .map((m) => Programa.fromMap(m as Map))
+          .toList();
+    });
+    return mapa;
+  }
+
+  /// Data da ultima atualizacao do EPG salvo para a lista, ou null.
+  DateTime? carregarEpgAtualizadoEm(String idLista) {
+    final raw = _boxEpg.get(idLista);
+    if (raw == null) return null;
+    final iso = (raw as Map)['atualizadoEm'] as String?;
+    return iso == null ? null : DateTime.tryParse(iso);
+  }
+
+  Future<void> removerEpg(String idLista) => _boxEpg.delete(idLista);
 
   // ===== CATEGORIAS PERSONALIZADAS =====
 

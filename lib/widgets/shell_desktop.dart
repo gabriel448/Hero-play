@@ -10,6 +10,7 @@ import '../screens/tela_favoritos.dart';
 import '../screens/tela_historico.dart';
 import '../screens/tela_importar.dart';
 import '../screens/tela_selecao.dart';
+import 'dialogo_editar_epg.dart';
 
 /// Shell para PC: sidebar persistente + área de conteúdo com Navigator aninhado.
 ///
@@ -30,20 +31,45 @@ class _ShellDesktopState extends State<ShellDesktop> {
 
   // ─── navegação do conteúdo ────────────────────────────────────────────────
 
+  /// Nome da rota atualmente no topo do Navigator de conteudo, ou null.
+  /// Usado para impedir empilhamento de uma mesma tela em cliques repetidos.
+  String? _rotaTopoConteudo() {
+    String? nome;
+    desktopContentNavigatorKey.currentState?.popUntil((r) {
+      nome = r.settings.name;
+      return true;
+    });
+    return nome;
+  }
+
   void _abrirLista(ListaM3U lista) {
-    context.read<IptvProvider>().selecionarLista(lista);
+    final provider = context.read<IptvProvider>();
+    final mesmaListaAtiva = provider.listaAtiva?.id == lista.id;
+    // Mesma lista ja selecionada e na tela de selecao → no-op.
+    if (mesmaListaAtiva &&
+        _secao == _Secao.lista &&
+        _rotaTopoConteudo() == 'selecao') {
+      return;
+    }
+    provider.selecionarLista(lista);
     setState(() => _secao = _Secao.lista);
-    _replacePrincipal(const TelaSelecao());
+    _replacePrincipal(const TelaSelecao(), nome: 'selecao');
   }
 
   void _irFavoritos() {
+    if (_secao == _Secao.favoritos && _rotaTopoConteudo() == 'favoritos') {
+      return;
+    }
     setState(() => _secao = _Secao.favoritos);
-    _replacePrincipal(const TelaFavoritos());
+    _replacePrincipal(const TelaFavoritos(), nome: 'favoritos');
   }
 
   void _irHistorico() {
+    if (_secao == _Secao.historico && _rotaTopoConteudo() == 'historico') {
+      return;
+    }
     setState(() => _secao = _Secao.historico);
-    _replacePrincipal(const TelaHistorico());
+    _replacePrincipal(const TelaHistorico(), nome: 'historico');
   }
 
   void _removerLista(ListaM3U lista) {
@@ -51,27 +77,43 @@ class _ShellDesktopState extends State<ShellDesktop> {
         context.read<IptvProvider>().listaAtiva?.id == lista.id;
     if (foiAtiva) {
       setState(() => _secao = _Secao.lista);
-      _replacePrincipal(const _BemVindoDesktop());
+      _replacePrincipal(const _BemVindoDesktop(), nome: 'bem_vindo');
     }
   }
 
   void _irImportar() {
-    // Importar empilha sobre o que está mostrando (não troca a seção ativa).
+    // No-op se ja esta em Importar — evita empilhar a mesma tela.
+    if (_rotaTopoConteudo() == 'importar') return;
     desktopContentNavigatorKey.currentState?.push(
-      MaterialPageRoute(builder: (_) => const TelaImportar()),
+      MaterialPageRoute(
+        builder: (_) => const TelaImportar(),
+        settings: const RouteSettings(name: 'importar'),
+      ),
     );
   }
 
   void _irConfiguracoes() {
+    // No-op se ja esta em Configuracoes.
+    if (_rotaTopoConteudo() == 'configuracoes') return;
     desktopContentNavigatorKey.currentState?.push(
-      MaterialPageRoute(builder: (_) => const TelaConfiguracoes()),
+      MaterialPageRoute(
+        builder: (_) => const TelaConfiguracoes(),
+        settings: const RouteSettings(name: 'configuracoes'),
+      ),
     );
   }
 
+  Future<void> _editarEpg(ListaM3U lista) async {
+    await dialogoEditarEpg(context, lista);
+  }
+
   /// Substitui toda a pilha do Navigator de conteúdo por [screen].
-  void _replacePrincipal(Widget screen) {
+  void _replacePrincipal(Widget screen, {String? nome}) {
     desktopContentNavigatorKey.currentState?.pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => screen),
+      MaterialPageRoute(
+        builder: (_) => screen,
+        settings: RouteSettings(name: nome),
+      ),
       (r) => false,
     );
   }
@@ -91,6 +133,7 @@ class _ShellDesktopState extends State<ShellDesktop> {
             secao: _secao,
             onLista: _abrirLista,
             onRemoverLista: _removerLista,
+            onEditarEpg: _editarEpg,
             onFavoritos: _irFavoritos,
             onHistorico: _irHistorico,
             onImportar: _irImportar,
@@ -106,6 +149,7 @@ class _ShellDesktopState extends State<ShellDesktop> {
               key: desktopContentNavigatorKey,
               onGenerateRoute: (_) => MaterialPageRoute(
                 builder: (_) => const _BemVindoDesktop(),
+                settings: const RouteSettings(name: 'bem_vindo'),
               ),
             ),
           ),
@@ -171,6 +215,7 @@ class _SidebarDesktop extends StatelessWidget {
   final _Secao secao;
   final ValueChanged<ListaM3U> onLista;
   final ValueChanged<ListaM3U> onRemoverLista;
+  final ValueChanged<ListaM3U> onEditarEpg;
   final VoidCallback onFavoritos;
   final VoidCallback onHistorico;
   final VoidCallback onImportar;
@@ -182,6 +227,7 @@ class _SidebarDesktop extends StatelessWidget {
     required this.secao,
     required this.onLista,
     required this.onRemoverLista,
+    required this.onEditarEpg,
     required this.onFavoritos,
     required this.onHistorico,
     required this.onImportar,
@@ -294,6 +340,7 @@ class _SidebarDesktop extends StatelessWidget {
                           ativo: ativo,
                           onTap: () => onLista(lista),
                           onRemovida: () => onRemoverLista(lista),
+                          onEditarEpg: () => onEditarEpg(lista),
                         );
                       },
                     ),
@@ -384,12 +431,14 @@ class _ItemLista extends StatefulWidget {
   final bool ativo;
   final VoidCallback onTap;
   final VoidCallback onRemovida;
+  final VoidCallback onEditarEpg;
 
   const _ItemLista({
     required this.lista,
     required this.ativo,
     required this.onTap,
     required this.onRemovida,
+    required this.onEditarEpg,
   });
 
   @override
@@ -413,6 +462,8 @@ class _ItemListaState extends State<_ItemLista> {
           const SnackBar(content: Text('Lista atualizada')),
         );
       }
+    } else if (acao == 'editar_epg') {
+      widget.onEditarEpg();
     } else if (acao == 'remover') {
       final confirmar = await showDialog<bool>(
         context: context,
@@ -526,6 +577,25 @@ class _ItemListaState extends State<_ItemLista> {
                               ],
                             ),
                           ),
+                        PopupMenuItem(
+                          value: 'editar_epg',
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.event_note_rounded,
+                                size: 18,
+                                color: AppColors.accent,
+                              ),
+                              const SizedBox(width: AppSpacing.md),
+                              Text(
+                                widget.lista.epgUrl == null ||
+                                        widget.lista.epgUrl!.isEmpty
+                                    ? 'Adicionar EPG'
+                                    : 'Editar EPG',
+                              ),
+                            ],
+                          ),
+                        ),
                         const PopupMenuItem(
                           value: 'remover',
                           child: Row(

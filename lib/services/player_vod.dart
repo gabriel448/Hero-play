@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -18,9 +20,22 @@ class PlayerVod {
   Player? _player;
   VideoController? _controller;
 
-  /// Player compartilhado — criado na primeira reprodução de VOD.
-  Player get player => _player ??= Player();
+  /// Player compartilhado — criado na primeira reproducao de VOD.
+  Player get player {
+    if (_player == null) {
+      _player = Player();
+      _configurar(_player!);
+    }
+    return _player!;
+  }
 
   /// VideoController compartilhado — uma única superfície de vídeo.
   VideoController get controller => _controller ??= VideoController(player);
+
+  void _configurar(Player p) {
+    final native = p.platform;
+    if (native is! NativePlayer) return;
+    native.setProperty('cache', 'no');
+    if (Platform.isAndroid) native.setProperty('hwdec', 'mediacodec-copy');
+  }
 }

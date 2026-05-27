@@ -16,7 +16,7 @@ class _TelaImportarState extends State<TelaImportar> {
   final _formKey = GlobalKey<FormState>();
   final _nomeController = TextEditingController();
   final _urlController = TextEditingController();
-
+  final _epgController = TextEditingController();
   // Tipo de formato não suportado detectado ('hls', 'epg', ou null).
   String? _formatoErro;
 
@@ -24,6 +24,7 @@ class _TelaImportarState extends State<TelaImportar> {
   void dispose() {
     _nomeController.dispose();
     _urlController.dispose();
+    _epgController.dispose();
     super.dispose();
   }
 
@@ -37,6 +38,9 @@ class _TelaImportarState extends State<TelaImportar> {
     await provider.importarPorUrl(
       nome: _nomeController.text.trim(),
       url: _urlController.text.trim(),
+      epgUrl: _epgController.text.trim().isEmpty
+          ? null
+          : _epgController.text.trim(),
     );
 
     if (!mounted) return;
@@ -123,6 +127,78 @@ class _TelaImportarState extends State<TelaImportar> {
                       }
                       return null;
                     },
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  // ── EPG (opcional) ────────────────────────────────────────
+                  // Bloco destacado pra deixar claro que tambem da pra mandar
+                  // a URL da programacao junto na importacao.
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.base),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(AppRadius.base),
+                      border: Border.all(
+                        color: AppColors.accent.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.event_note_rounded,
+                              size: 18,
+                              color: AppColors.accent,
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                'URL DO EPG (OPCIONAL)',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: AppColors.accent,
+                                      letterSpacing: 0.5,
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Grade de programacao dos canais ao vivo. Aceita XMLTV (.xml ou .xml.gz). Voce pode adicionar depois pelo menu da lista.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: AppColors.textSecondary,
+                                height: 1.4,
+                              ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        TextFormField(
+                          controller: _epgController,
+                          decoration: const InputDecoration(
+                            hintText:
+                                'https://exemplo.com/epg.xml ou .xml.gz',
+                          ),
+                          keyboardType: TextInputType.url,
+                          validator: (v) {
+                            final texto = v?.trim() ?? '';
+                            if (texto.isEmpty) return null; // opcional
+                            final uri = Uri.tryParse(texto);
+                            if (uri == null ||
+                                !uri.hasScheme ||
+                                !uri.hasAuthority) {
+                              return 'URL invalida';
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   FilledButton.icon(

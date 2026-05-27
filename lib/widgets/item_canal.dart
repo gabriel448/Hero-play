@@ -13,6 +13,10 @@ class ItemCanal extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onToggleFavorito;
   final bool mostrarGrupo;
+  /// Quando true, o item ganha um destaque accent (tinta + barra lateral)
+  /// indicando que e o canal atualmente em reproducao. Usado no player
+  /// embutido do desktop.
+  final bool selecionado;
 
   const ItemCanal({
     super.key,
@@ -21,12 +25,17 @@ class ItemCanal extends StatelessWidget {
     required this.onTap,
     required this.onToggleFavorito,
     this.mostrarGrupo = false,
+    this.selecionado = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final ehLive = canal.tipo == TipoCanal.aoVivo;
-    return InkWell(
+    return Material(
+      color: selecionado
+          ? AppColors.accentDim.withValues(alpha: 0.5)
+          : Colors.transparent,
+      child: InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -37,6 +46,16 @@ class ItemCanal extends StatelessWidget {
         ),
         child: Row(
           children: [
+            if (selecionado)
+              Container(
+                width: 3,
+                height: 40,
+                margin: const EdgeInsets.only(right: AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
             _Logo(url: canal.logoUrl, ehLive: ehLive),
             const SizedBox(width: AppSpacing.md),
             Expanded(
@@ -90,6 +109,7 @@ class ItemCanal extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

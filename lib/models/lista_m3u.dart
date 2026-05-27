@@ -24,12 +24,17 @@ class ListaM3U {
   /// Quando a lista foi importada/atualizada pela ultima vez.
   final DateTime atualizadaEm;
 
+  /// URL do guia de programacao eletronico (EPG/XMLTV) associado, opcional.
+  /// Quando definida, o EpgService usa para baixar a grade dos canais ao vivo.
+  final String? epgUrl;
+
   const ListaM3U({
     required this.nome,
     required this.fonte,
     required this.origem,
     required this.canais,
     required this.atualizadaEm,
+    this.epgUrl,
   });
 
   /// Total de canais nesta lista.
@@ -71,6 +76,7 @@ class ListaM3U {
         'origem': origem.name,
         'canais': canais.map((c) => c.toMap()).toList(),
         'atualizadaEm': atualizadaEm.toIso8601String(),
+        if (epgUrl != null) 'epgUrl': epgUrl,
       };
 
   factory ListaM3U.fromMap(Map map) => ListaM3U(
@@ -85,6 +91,7 @@ class ListaM3U {
             .toList(),
         atualizadaEm: DateTime.tryParse(map['atualizadaEm'] as String? ?? '') ??
             DateTime.now(),
+        epgUrl: map['epgUrl'] as String?,
       );
 
   /// Cria uma copia modificando alguns campos. Util para "atualizar" a lista
@@ -93,6 +100,7 @@ class ListaM3U {
     String? nome,
     List<Canal>? canais,
     DateTime? atualizadaEm,
+    String? epgUrl,
   }) =>
       ListaM3U(
         nome: nome ?? this.nome,
@@ -100,5 +108,6 @@ class ListaM3U {
         origem: origem,
         canais: canais ?? this.canais,
         atualizadaEm: atualizadaEm ?? this.atualizadaEm,
+        epgUrl: epgUrl ?? this.epgUrl,
       );
 }

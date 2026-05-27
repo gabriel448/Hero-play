@@ -7,6 +7,7 @@ import '../models/progresso_canal.dart';
 import '../services/armazenamento.dart';
 import '../services/carregador_lista.dart';
 import '../services/parser_m3u.dart';
+import '../services/servico_epg.dart';
 
 /// Provider central do app: mantem o estado e expoe acoes para a UI.
 ///
@@ -16,16 +17,19 @@ class IptvProvider extends ChangeNotifier {
   final Armazenamento _armazenamento;
   final CarregadorLista _carregador;
   final ParserM3U _parser;
+  final ServicoEpg? _epg;
 
   IptvProvider({
     required Armazenamento armazenamento,
     CarregadorLista? carregador,
     ParserM3U? parser,
+    ServicoEpg? epg,
   })  :
         // ignore: prefer_initializing_formals
         _armazenamento = armazenamento,
         _carregador = carregador ?? CarregadorLista(),
-        _parser = parser ?? ParserM3U();
+        _parser = parser ?? ParserM3U(),
+        _epg = epg;
 
   // ===== ESTADO =====
 
@@ -40,6 +44,9 @@ class IptvProvider extends ChangeNotifier {
   String? _erro;
   // Tipo do formato não suportado detectado pelo parser ('hls', 'epg', ou null).
   String? _formatoNaoSuportado;
+  // Canal que o player embutido do desktop esta exibindo. Null = nenhum
+  // (player nao aparece). Usado apenas no layout desktop de TelaCanais.
+  Canal? _canalSelecionadoDesktop;
 
   List<ListaM3U> get listas => _listas;
   List<Canal> get favoritos => _favoritos;
@@ -53,6 +60,17 @@ class IptvProvider extends ChangeNotifier {
   String? get erro => _erro;
   /// Tipo do formato não suportado ('hls', 'epg') ou null se não houve esse erro.
   String? get formatoNaoSuportado => _formatoNaoSuportado;
+
+  /// Canal que esta tocando no player embutido do desktop. Null se nenhum.
+  Canal? get canalSelecionadoDesktop => _canalSelecionadoDesktop;
+
+  /// Define o canal a tocar no player embutido do desktop. Passar null fecha
+  /// o player. Trocar o canal interrompe o stream anterior e abre o novo.
+  void selecionarCanalDesktop(Canal? canal) {
+    if (_canalSelecionadoDesktop?.id == canal?.id) return;
+    _canalSelecionadoDesktop = canal;
+    notifyListeners();
+  }
 
   /// Carrega tudo do armazenamento local. Chamar uma vez no startup.
   Future<void> inicializar() async {
@@ -70,49 +88,102 @@ class IptvProvider extends ChangeNotifier {
   /// Importa uma lista por URL.
   /// Se ja existir lista com a mesma URL, ela e ATUALIZADA (canais sao
   /// reparseados) - util para refresh.
-  Future<void> importarPorUrl({required String nome, required String url}) async {
+  ///
+  /// O [epgUrl] e opcional — quando informado, dispara um download em
+  /// background para que a grade fique pronta antes do usuario abrir um canal.
+  Future<void> importarPorUrl({
+    required String nome,
+    required String url,
+    String? epgUrl,
+  }) async {
     await _executarComLoading(() async {
       final conteudo = await _carregador.baixarDeUrl(url);
       final canais = _parser.parse(conteudo);
+      final epgNormalizado =
+          (epgUrl == null || epgUrl.trim().isEmpty) ? null : epgUrl.trim();
       final lista = ListaM3U(
         nome: nome,
         fonte: url,
         origem: OrigemLista.url,
         canais: canais,
         atualizadaEm: DateTime.now(),
+        epgUrl: epgNormalizado,
       );
       await _armazenamento.salvarLista(lista);
       _listas = _armazenamento.carregarListas();
+      _baixarEpgEmBackground(lista);
     });
   }
 
   /// Importa uma lista de um arquivo local.
-  Future<void> importarPorArquivo({required String nome, required String caminho}) async {
+  Future<void> importarPorArquivo({
+    required String nome,
+    required String caminho,
+    String? epgUrl,
+  }) async {
     await _executarComLoading(() async {
       final conteudo = await _carregador.lerDeArquivo(caminho);
       final canais = _parser.parse(conteudo);
+      final epgNormalizado =
+          (epgUrl == null || epgUrl.trim().isEmpty) ? null : epgUrl.trim();
       final lista = ListaM3U(
         nome: nome,
         fonte: caminho,
         origem: OrigemLista.arquivo,
         canais: canais,
         atualizadaEm: DateTime.now(),
+        epgUrl: epgNormalizado,
       );
       await _armazenamento.salvarLista(lista);
       _listas = _armazenamento.carregarListas();
+      _baixarEpgEmBackground(lista);
     });
   }
 
   /// Atualiza uma lista existente (so faz sentido para listas por URL).
-  Future<void> atualizarLista(ListaM3U lista) async {
+  /// Preserva o epgUrl atual a menos que [novoEpgUrl] seja informado
+  /// explicitamente.
+  Future<void> atualizarLista(ListaM3U lista, {String? novoEpgUrl}) async {
     if (lista.origem != OrigemLista.url) {
       throw Exception('So e possivel atualizar listas importadas por URL.');
     }
-    await importarPorUrl(nome: lista.nome, url: lista.fonte);
+    await importarPorUrl(
+      nome: lista.nome,
+      url: lista.fonte,
+      epgUrl: novoEpgUrl ?? lista.epgUrl,
+    );
+  }
+
+  /// Atualiza apenas a URL do EPG de uma lista existente, sem reimportar os
+  /// canais. Se [novoEpgUrl] for null ou vazio, o EPG e removido.
+  Future<void> atualizarEpgUrl(ListaM3U lista, String? novoEpgUrl) async {
+    final limpo = (novoEpgUrl == null || novoEpgUrl.trim().isEmpty)
+        ? null
+        : novoEpgUrl.trim();
+    // Instancia diretamente porque copyWith nao consegue setar null em campos
+    // opcionais (usa `?? this.epgUrl`).
+    final atualizada = ListaM3U(
+      nome: lista.nome,
+      fonte: lista.fonte,
+      origem: lista.origem,
+      canais: lista.canais,
+      atualizadaEm: lista.atualizadaEm,
+      epgUrl: limpo,
+    );
+    await _armazenamento.salvarLista(atualizada);
+    _listas = _armazenamento.carregarListas();
+    if (_listaAtiva?.id == lista.id) _listaAtiva = atualizada;
+    if (limpo == null) {
+      await _epg?.remover(lista.id);
+    } else {
+      _baixarEpgEmBackground(atualizada);
+    }
+    notifyListeners();
   }
 
   Future<void> removerLista(ListaM3U lista) async {
     await _armazenamento.removerLista(lista.id);
+    await _epg?.remover(lista.id);
     if (_listaAtiva?.id == lista.id) _listaAtiva = null;
     _listas = _armazenamento.carregarListas();
     notifyListeners();
@@ -121,7 +192,22 @@ class IptvProvider extends ChangeNotifier {
   void selecionarLista(ListaM3U lista) {
     _listaAtiva = lista;
     _busca = '';
+    _canalSelecionadoDesktop = null;
+    // Carrega EPG salvo do disco e dispara refresh em background se houver URL.
+    _epg?.carregarDoDisco(lista.id);
+    _baixarEpgEmBackground(lista);
     notifyListeners();
+  }
+
+  /// Dispara um download/refresh do EPG sem bloquear a UI. Erros sao
+  /// silenciados — EPG nao deve quebrar o fluxo principal.
+  void _baixarEpgEmBackground(ListaM3U lista) {
+    final url = lista.epgUrl;
+    final epg = _epg;
+    if (url == null || url.isEmpty || epg == null) return;
+    epg
+        .baixarEAtualizar(idLista: lista.id, url: url)
+        .catchError((_) {/* silencioso */});
   }
 
   void limparListaAtiva() {
