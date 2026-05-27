@@ -91,7 +91,18 @@ class _TelaCanaisState extends State<TelaCanais> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_buscando,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          setState(() {
+            _buscando = false;
+            _buscaController.clear();
+            _busca = '';
+          });
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         title: _buscando
@@ -132,6 +143,7 @@ class _TelaCanaisState extends State<TelaCanais> {
         ],
       ),
       body: _buildBody(context),
+      ),
     );
   }
 }

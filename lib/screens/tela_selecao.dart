@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/lista_m3u.dart';
+import '../models/serie.dart';
 import '../services/agrupador_canais.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import 'tela_canais.dart';
 import 'tela_filmes.dart';
+import 'tela_series.dart';
 
 /// Tela intermediaria apos selecionar uma lista: escolher entre Canais ao vivo
 /// ou Filmes. Cada opcao leva a uma experiencia de navegacao diferente.
@@ -22,12 +24,28 @@ class _TelaSelecaoState extends State<TelaSelecao> {
   Map<String, List<Canal>>? _cacheAoVivo;
   Map<String, List<Canal>>? _cacheFilmes;
   String? _idListaCacheada;
+  int _totalMovies = 0;
+  int _totalSeries = 0;
 
   void _atualizarCache(ListaM3U lista) {
     if (_idListaCacheada == lista.id) return;
     _cacheAoVivo = agruparCanaisAoVivo(lista.canaisAoVivo);
     _cacheFilmes = lista.agruparPorCategoria(TipoCanal.filme);
     _idListaCacheada = lista.id;
+    final seriesNomes = <String>{};
+    int movies = 0;
+    for (final canais in _cacheFilmes!.values) {
+      for (final c in canais) {
+        final nome = Serie.nomeSerie(c.nome);
+        if (nome != null) {
+          seriesNomes.add(nome);
+        } else {
+          movies++;
+        }
+      }
+    }
+    _totalMovies = movies;
+    _totalSeries = seriesNomes.length;
   }
 
   @override
@@ -45,7 +63,6 @@ class _TelaSelecaoState extends State<TelaSelecao> {
     final cacheAoVivo = _cacheAoVivo!;
     final cacheFilmes = _cacheFilmes!;
     final totalLive = lista.canaisAoVivo.length;
-    final totalFilmes = lista.filmes.length;
 
     final tablet = isTablet(context);
     final cardAoVivo = _CardOpcao(
@@ -60,12 +77,22 @@ class _TelaSelecaoState extends State<TelaSelecao> {
     );
     final cardFilmes = _CardOpcao(
       icone: Icons.movie_creation_outlined,
-      titulo: 'Filmes e Séries',
-      contagem: totalFilmes,
-      unidade: 'item',
+      titulo: 'Filmes',
+      contagem: _totalMovies,
+      unidade: 'filme',
       destaque: false,
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => TelaFilmes(categorias: cacheFilmes)),
+      ),
+    );
+    final cardSeries = _CardOpcao(
+      icone: Icons.tv_rounded,
+      titulo: 'Séries',
+      contagem: _totalSeries,
+      unidade: 'série',
+      destaque: false,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TelaSeries(categorias: cacheFilmes)),
       ),
     );
 
@@ -74,7 +101,7 @@ class _TelaSelecaoState extends State<TelaSelecao> {
       appBar: AppBar(title: Text(lista.nome)),
       body: Center(
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: tablet ? 800 : double.infinity),
+          constraints: BoxConstraints(maxWidth: tablet ? 1000 : double.infinity),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
             child: tablet
@@ -86,6 +113,8 @@ class _TelaSelecaoState extends State<TelaSelecao> {
                         Expanded(child: cardAoVivo),
                         const SizedBox(width: AppSpacing.base),
                         Expanded(child: cardFilmes),
+                        const SizedBox(width: AppSpacing.base),
+                        Expanded(child: cardSeries),
                       ],
                     ),
                   )
@@ -95,6 +124,8 @@ class _TelaSelecaoState extends State<TelaSelecao> {
                       cardAoVivo,
                       const SizedBox(height: AppSpacing.base),
                       cardFilmes,
+                      const SizedBox(height: AppSpacing.base),
+                      cardSeries,
                     ],
                   ),
           ),

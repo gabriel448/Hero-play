@@ -11,6 +11,8 @@ import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import 'tela_detalhes.dart';
 
+enum TipoVod { filmes, series }
+
 const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
 
 // Top-level: roda em Isolate separado via compute() para nao bloquear a UI.
@@ -18,18 +20,20 @@ const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
   Map<String, List<Object>> conteudo,
   List<String> nomes,
   List<Object> todosConteudos,
-}) _computarConteudoFilmes(Map<String, List<Canal>> categorias) {
+}) _computarConteudoVod((Map<String, List<Canal>>, TipoVod) args) {
+  final (categorias, tipo) = args;
   final conteudo = <String, List<Object>>{};
-  final nomes = categorias.keys.toList()..sort();
   final visto = <String>{};
   final todos = <Object>[];
 
   String nomeItem(Object item) =>
       item is Canal ? item.nome : (item as Serie).nome;
 
-  for (final cat in nomes) {
+  for (final cat in categorias.keys) {
     final ag = Serie.agrupar(categorias[cat]!);
-    final lista = <Object>[...ag.filmes, ...ag.series]
+    final items = tipo == TipoVod.filmes ? ag.filmes : ag.series;
+    if (items.isEmpty) continue;
+    final lista = <Object>[...items]
       ..sort((a, b) => nomeItem(a).compareTo(nomeItem(b)));
     conteudo[cat] = lista;
 
@@ -40,7 +44,11 @@ const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
     }
   }
 
-  return (conteudo: conteudo, nomes: nomes, todosConteudos: todos);
+  return (
+    conteudo: conteudo,
+    nomes: conteudo.keys.toList()..sort(),
+    todosConteudos: todos,
+  );
 }
 
 const double _kPosterWidth = 100.0;
@@ -48,11 +56,11 @@ const double _kPosterHeight = 150.0;
 const double _kPosterLabel = 28.0;
 const double _kItemExtent = _kPosterWidth + AppSpacing.sm;
 
-/// Tela estilo streaming: carrosseis por categoria com filmes e series agrupadas.
-/// Series sao detectadas pelo padrao SxxExx no nome e agrupadas em um unico card.
+/// Tela estilo streaming: carrosseis por categoria — filmes ou séries.
 class TelaFilmes extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
-  const TelaFilmes({super.key, required this.categorias});
+  final TipoVod tipo;
+  const TelaFilmes({super.key, required this.categorias, this.tipo = TipoVod.filmes});
 
   @override
   State<TelaFilmes> createState() => _TelaFilmesState();
@@ -75,7 +83,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
   @override
   void initState() {
     super.initState();
-    compute(_computarConteudoFilmes, widget.categorias).then((r) {
+    compute(_computarConteudoVod, (widget.categorias, widget.tipo)).then((r) {
       if (!mounted) return;
       final lookup = <String, Canal>{};
       final seriesPorEp = <String, Serie>{};
@@ -135,12 +143,23 @@ class _TelaFilmesState extends State<TelaFilmes> {
   Widget build(BuildContext context) {
     if (!_pronto) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Filmes e Séries')),
+        appBar: AppBar(title: Text(widget.tipo == TipoVod.filmes ? 'Filmes' : 'Séries')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_buscando,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          setState(() {
+            _buscando = false;
+            _buscaController.clear();
+            _busca = '';
+          });
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         title: _buscando
@@ -149,8 +168,10 @@ class _TelaFilmesState extends State<TelaFilmes> {
                 child: TextField(
                   controller: _buscaController,
                   autofocus: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Buscar filmes e séries',
+                  decoration: InputDecoration(
+                    hintText: widget.tipo == TipoVod.filmes
+                        ? 'Buscar filmes'
+                        : 'Buscar séries',
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
@@ -161,7 +182,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
                   onChanged: (v) => setState(() => _busca = v),
                 ),
               )
-            : const Text('Filmes e Séries'),
+            : Text(widget.tipo == TipoVod.filmes ? 'Filmes' : 'Séries'),
         actions: [
           IconButton(
             icon: Icon(
@@ -186,7 +207,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
               onTap: (item) => _navegar(context, item),
             )
           : _conteudo.isEmpty
-              ? const _Vazio()
+              ? _Vazio(tipo: widget.tipo)
               : _BodyComCarrosseis(
                   nomes: _nomes,
                   conteudo: _conteudo,
@@ -195,12 +216,14 @@ class _TelaFilmesState extends State<TelaFilmes> {
                   progressos: context.watch<IptvProvider>().progressos,
                   onTap: (item) => _navegar(context, item),
                 ),
+      ),
     );
   }
 }
 
 class _Vazio extends StatelessWidget {
-  const _Vazio();
+  final TipoVod tipo;
+  const _Vazio({required this.tipo});
 
   @override
   Widget build(BuildContext context) {
@@ -210,14 +233,18 @@ class _Vazio extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.movie_creation_outlined,
+            Icon(
+              tipo == TipoVod.filmes
+                  ? Icons.movie_creation_outlined
+                  : Icons.tv_rounded,
               size: 36,
               color: AppColors.textTertiary,
             ),
             const SizedBox(height: AppSpacing.base),
             Text(
-              'Sem filmes ou séries nesta lista',
+              tipo == TipoVod.filmes
+                  ? 'Sem filmes nesta lista'
+                  : 'Sem séries nesta lista',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.textSecondary,
                   ),
