@@ -137,6 +137,23 @@ class Armazenamento {
   Future<void> salvarAutoQualidade(bool valor) =>
       _boxPreferencias.put('auto_qualidade', valor);
 
+  /// Modo de ordenacao da lista de categorias ao vivo: 'popularidade' (padrao)
+  /// ou 'az'. Persistido entre sessoes.
+  String obterOrdemCategorias() =>
+      _boxPreferencias.get('ordem_categorias', defaultValue: 'popularidade')
+          as String;
+
+  Future<void> salvarOrdemCategorias(String valor) =>
+      _boxPreferencias.put('ordem_categorias', valor);
+
+  /// Modo de ordenacao dos canais dentro de uma categoria: 'padrao' (ordem
+  /// original da lista M3U) ou 'az'.
+  String obterOrdemCanais() =>
+      _boxPreferencias.get('ordem_canais', defaultValue: 'padrao') as String;
+
+  Future<void> salvarOrdemCanais(String valor) =>
+      _boxPreferencias.put('ordem_canais', valor);
+
   /// Id da lista marcada como ativa pelo usuario (a que abre por padrao ao
   /// iniciar o app). Apenas UMA lista pode estar ativa de cada vez.
   String? obterIdListaAtiva() =>

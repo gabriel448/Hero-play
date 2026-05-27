@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../state/iptv_provider.dart';
+import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../widgets/item_canal.dart';
@@ -28,14 +29,8 @@ class TelaCategoria extends StatefulWidget {
 }
 
 class _TelaCategoriaState extends State<TelaCategoria> {
-  late List<Canal> _canaisFiltrados;
+  String _busca = '';
   final _buscaController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _canaisFiltrados = widget.canais;
-  }
 
   @override
   void dispose() {
@@ -44,19 +39,31 @@ class _TelaCategoriaState extends State<TelaCategoria> {
   }
 
   void _filtrar(String texto) {
-    final q = texto.trim().toLowerCase();
-    setState(() {
-      _canaisFiltrados = q.isEmpty
-          ? widget.canais
-          : widget.canais
-              .where((c) => c.nome.toLowerCase().contains(q))
-              .toList();
-    });
+    setState(() => _busca = texto.trim().toLowerCase());
+  }
+
+  /// Aplica filtro de busca + ordenacao escolhida. Recomputado a cada build
+  /// porque ordem e busca podem mudar; ListView com itemExtent mantem a UI
+  /// fluida mesmo com 10k+ itens.
+  List<Canal> _canaisVisiveis(OrdemCanais ordem) {
+    final filtrados = _busca.isEmpty
+        ? widget.canais
+        : widget.canais
+            .where((c) => c.nome.toLowerCase().contains(_busca))
+            .toList();
+    if (ordem == OrdemCanais.az) {
+      final sorted = [...filtrados]
+        ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
+      return sorted;
+    }
+    return filtrados;
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
+    final ordem = context.watch<PreferenciasProvider>().ordemCanais;
+    final canais = _canaisVisiveis(ordem);
 
     return Scaffold(
       appBar: AppBar(
@@ -76,6 +83,10 @@ class _TelaCategoriaState extends State<TelaCategoria> {
             ),
           ],
         ),
+        actions: const [
+          _BotaoOrdenarCanais(),
+          SizedBox(width: AppSpacing.xs),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(64),
           child: Padding(
@@ -105,7 +116,7 @@ class _TelaCategoriaState extends State<TelaCategoria> {
           ),
         ),
       ),
-      body: _canaisFiltrados.isEmpty
+      body: canais.isEmpty
           ? Center(
               child: Text(
                 'Nenhum canal encontrado',
@@ -118,10 +129,10 @@ class _TelaCategoriaState extends State<TelaCategoria> {
               context,
               ListView.builder(
                 itemExtent: 64,
-                itemCount: _canaisFiltrados.length,
+                itemCount: canais.length,
                 padding: const EdgeInsets.only(bottom: AppSpacing.lg),
                 itemBuilder: (_, i) {
-                  final c = _canaisFiltrados[i];
+                  final c = canais[i];
                   return ItemCanal(
                     canal: c,
                     ehFavorito: provider.ehFavorito(c),
@@ -137,6 +148,41 @@ class _TelaCategoriaState extends State<TelaCategoria> {
                 },
               ),
             ),
+    );
+  }
+}
+
+class _BotaoOrdenarCanais extends StatelessWidget {
+  const _BotaoOrdenarCanais();
+
+  @override
+  Widget build(BuildContext context) {
+    final prefs = context.watch<PreferenciasProvider>();
+    final atual = prefs.ordemCanais;
+    return PopupMenuButton<OrdemCanais>(
+      tooltip: 'Ordenar por',
+      position: PopupMenuPosition.under,
+      icon: const Icon(Icons.sort_rounded, size: 20),
+      onSelected: prefs.definirOrdemCanais,
+      itemBuilder: (_) => [
+        for (final o in OrdemCanais.values)
+          PopupMenuItem(
+            value: o,
+            child: Row(
+              children: [
+                Icon(
+                  atual == o ? Icons.check_rounded : Icons.remove,
+                  size: 16,
+                  color: atual == o
+                      ? AppColors.accent
+                      : Colors.transparent,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(o.label),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

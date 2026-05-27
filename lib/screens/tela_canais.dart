@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/categoria_personalizada.dart';
+import '../services/agrupador_canais.dart';
 import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
+import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
+import '../utils/popularidade_categorias.dart';
 import '../widgets/item_canal.dart';
 import '../widgets/player_embutido_desktop.dart';
 import '../widgets/seletor_categoria.dart';
@@ -30,6 +33,15 @@ class _TelaCanaisState extends State<TelaCanais> {
   String _busca = '';
   String? _categoriaAtiva;
   Orientation? _orientacaoAnterior;
+  late final Map<String, List<Canal>> _categoriasQualidade;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pseudo-categorias SD/HD/FHD com canais apontando para a variante exata.
+    // Calculado uma vez — categorias originais sao imutaveis.
+    _categoriasQualidade = agruparPorQualidade(widget.categorias);
+  }
 
   @override
   void dispose() {
@@ -46,6 +58,7 @@ class _TelaCanaisState extends State<TelaCanais> {
     if (isDesktop(context)) {
       return _LayoutDesktopCanais(
         categorias: widget.categorias,
+        categoriasQualidade: _categoriasQualidade,
         categoriaAtiva: _categoriaAtiva,
         onCategoriaSelecionada: (cat) => setState(() => _categoriaAtiva = cat),
         resultadosBuscaGlobal: busca ? _resultadosBusca : null,
@@ -56,6 +69,7 @@ class _TelaCanaisState extends State<TelaCanais> {
     if (isTablet(context) && landscape) {
       return _LayoutDesktopCanais(
         categorias: widget.categorias,
+        categoriasQualidade: _categoriasQualidade,
         categoriaAtiva: _categoriaAtiva,
         onCategoriaSelecionada: (cat) => setState(() => _categoriaAtiva = cat),
         resultadosBuscaGlobal: busca ? _resultadosBusca : null,
@@ -68,6 +82,7 @@ class _TelaCanaisState extends State<TelaCanais> {
           ? _ListaResultados(canais: _resultadosBusca)
           : _LayoutTabletCanais(
               categorias: widget.categorias,
+              categoriasQualidade: _categoriasQualidade,
               categoriaAtiva: _categoriaAtiva,
               onCategoriaSelecionada: (cat) =>
                   setState(() => _categoriaAtiva = cat),
@@ -77,7 +92,10 @@ class _TelaCanaisState extends State<TelaCanais> {
     // Phone (qualquer orientacao): lista de categorias ou resultados.
     return busca
         ? _ListaResultados(canais: _resultadosBusca)
-        : _ListaCategorias(categorias: widget.categorias);
+        : _ListaCategorias(
+            categorias: widget.categorias,
+            categoriasQualidade: _categoriasQualidade,
+          );
   }
 
   List<Canal> get _resultadosBusca {
@@ -193,18 +211,26 @@ class _TelaCanaisState extends State<TelaCanais> {
 
 class _ListaCategorias extends StatelessWidget {
   final Map<String, List<Canal>> categorias;
-  const _ListaCategorias({required this.categorias});
+  final Map<String, List<Canal>> categoriasQualidade;
+  const _ListaCategorias({
+    required this.categorias,
+    required this.categoriasQualidade,
+  });
 
   @override
   Widget build(BuildContext context) {
     final personalizadas =
         context.watch<IptvProvider>().categoriasPersonalizadas;
-    final nomes = categorias.keys.toList()..sort();
+    final ordem = context.watch<PreferenciasProvider>().ordemCategorias;
+    final nomes = _ordenarCategorias(categorias.keys, ordem);
 
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: _SecaoMinhasCategoriasPhone(personalizadas: personalizadas),
+          child: _SecaoMinhasCategoriasPhone(
+            personalizadas: personalizadas,
+            categoriasQualidade: categoriasQualidade,
+          ),
         ),
         if (nomes.isNotEmpty) ...[
           SliverToBoxAdapter(
@@ -212,15 +238,22 @@ class _ListaCategorias extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.lg,
                 AppSpacing.md,
-                AppSpacing.lg,
+                AppSpacing.sm,
                 AppSpacing.xs,
               ),
-              child: Text(
-                'CATEGORIAS',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: AppColors.textTertiary,
-                      letterSpacing: 0.6,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'CATEGORIAS',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: AppColors.textTertiary,
+                            letterSpacing: 0.6,
+                          ),
                     ),
+                  ),
+                  const _BotaoOrdenarCategorias(),
+                ],
               ),
             ),
           ),
@@ -256,9 +289,87 @@ class _ListaCategorias extends StatelessWidget {
   }
 }
 
+// Helper compartilhado pelos 3 layouts (phone, tablet, desktop).
+List<String> _ordenarCategorias(Iterable<String> nomes, OrdemCategorias ordem) {
+  switch (ordem) {
+    case OrdemCategorias.popularidade:
+      return ordenarPorPopularidade(nomes);
+    case OrdemCategorias.az:
+      return nomes.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+}
+
+class _BotaoOrdenarCategorias extends StatelessWidget {
+  const _BotaoOrdenarCategorias();
+
+  @override
+  Widget build(BuildContext context) {
+    final prefs = context.watch<PreferenciasProvider>();
+    final atual = prefs.ordemCategorias;
+    return PopupMenuButton<OrdemCategorias>(
+      tooltip: 'Ordenar por',
+      position: PopupMenuPosition.under,
+      onSelected: prefs.definirOrdemCategorias,
+      itemBuilder: (_) => [
+        for (final o in OrdemCategorias.values)
+          PopupMenuItem(
+            value: o,
+            child: Row(
+              children: [
+                Icon(
+                  atual == o ? Icons.check_rounded : Icons.remove,
+                  size: 16,
+                  color: atual == o
+                      ? AppColors.accent
+                      : Colors.transparent,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(o.label),
+              ],
+            ),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.sort_rounded,
+              size: 16,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              atual.label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(
+              Icons.arrow_drop_down_rounded,
+              size: 16,
+              color: AppColors.textSecondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SecaoMinhasCategoriasPhone extends StatelessWidget {
   final List<CategoriaPersonalizada> personalizadas;
-  const _SecaoMinhasCategoriasPhone({required this.personalizadas});
+  final Map<String, List<Canal>> categoriasQualidade;
+  const _SecaoMinhasCategoriasPhone({
+    required this.personalizadas,
+    required this.categoriasQualidade,
+  });
 
   Future<void> _criar(BuildContext context) async {
     final provider = context.read<IptvProvider>();
@@ -303,6 +414,23 @@ class _SecaoMinhasCategoriasPhone extends StatelessWidget {
           icone: Icons.star_rounded,
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const TelaFavoritos()),
+          ),
+        ),
+        // Pseudo-categorias de qualidade — abrem TelaCategoria filtrada.
+        ...categoriasQualidade.entries.map(
+          (e) => _ItemCategoria(
+            nome: e.key,
+            quantidade: e.value.length,
+            icone: Icons.high_quality_rounded,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => TelaCategoria(
+                  nomeCategoria: e.key,
+                  canais: e.value,
+                  tipo: TipoCanal.aoVivo,
+                ),
+              ),
+            ),
           ),
         ),
         if (personalizadas.isEmpty)
@@ -444,11 +572,13 @@ class _ItemCategoria extends StatelessWidget {
 
 class _LayoutTabletCanais extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
+  final Map<String, List<Canal>> categoriasQualidade;
   final String? categoriaAtiva;
   final ValueChanged<String> onCategoriaSelecionada;
 
   const _LayoutTabletCanais({
     required this.categorias,
+    required this.categoriasQualidade,
     required this.categoriaAtiva,
     required this.onCategoriaSelecionada,
   });
@@ -498,7 +628,8 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
 
   @override
   Widget build(BuildContext context) {
-    final nomes = widget.categorias.keys.toList()..sort();
+    final ordem = context.watch<PreferenciasProvider>().ordemCategorias;
+    final nomes = _ordenarCategorias(widget.categorias.keys, ordem);
     final personalizadas =
         context.watch<IptvProvider>().categoriasPersonalizadas;
 
@@ -566,6 +697,29 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                   ),
                 ),
               ),
+              // Pseudo-categorias de qualidade.
+              ...widget.categoriasQualidade.entries.map(
+                (e) => Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                  child: _ItemCategoriaTablet(
+                    nome: e.key,
+                    quantidade: e.value.length,
+                    ativo: false,
+                    leadingIcon: Icons.high_quality_rounded,
+                    leadingIconColor: AppColors.accent,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => TelaCategoria(
+                          nomeCategoria: e.key,
+                          canais: e.value,
+                          tipo: TipoCanal.aoVivo,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               if (personalizadas.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -611,15 +765,22 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.base,
                   AppSpacing.md,
-                  AppSpacing.base,
+                  AppSpacing.xs,
                   AppSpacing.xs,
                 ),
-                child: Text(
-                  'CATEGORIAS',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: AppColors.textTertiary,
-                        letterSpacing: 0.6,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'CATEGORIAS',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: AppColors.textTertiary,
+                              letterSpacing: 0.6,
+                            ),
                       ),
+                    ),
+                    const _BotaoOrdenarCategorias(),
+                  ],
                 ),
               ),
               ...nomes.map((nome) {
@@ -965,6 +1126,7 @@ class _ListaResultados extends StatelessWidget {
 
 class _LayoutDesktopCanais extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
+  final Map<String, List<Canal>> categoriasQualidade;
   final String? categoriaAtiva;
   final ValueChanged<String> onCategoriaSelecionada;
   /// Quando nao-null, a coluna de canais exibe esses resultados de busca global
@@ -973,6 +1135,7 @@ class _LayoutDesktopCanais extends StatefulWidget {
 
   const _LayoutDesktopCanais({
     required this.categorias,
+    required this.categoriasQualidade,
     required this.categoriaAtiva,
     required this.onCategoriaSelecionada,
     this.resultadosBuscaGlobal,
@@ -1052,7 +1215,8 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
 
   @override
   Widget build(BuildContext context) {
-    final nomes = widget.categorias.keys.toList()..sort();
+    final ordem = context.watch<PreferenciasProvider>().ordemCategorias;
+    final nomes = _ordenarCategorias(widget.categorias.keys, ordem);
     final provider = context.watch<IptvProvider>();
     final personalizadas = provider.categoriasPersonalizadas;
     final idCanalSelecionado = provider.canalSelecionadoDesktop?.id;
@@ -1119,6 +1283,28 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                   ),
                 ),
               ),
+              ...widget.categoriasQualidade.entries.map(
+                (e) => Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                  child: _ItemCategoriaTablet(
+                    nome: e.key,
+                    quantidade: e.value.length,
+                    ativo: false,
+                    leadingIcon: Icons.high_quality_rounded,
+                    leadingIconColor: AppColors.accent,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => TelaCategoria(
+                          nomeCategoria: e.key,
+                          canais: e.value,
+                          tipo: TipoCanal.aoVivo,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               if (personalizadas.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -1163,15 +1349,22 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.base,
                   AppSpacing.md,
-                  AppSpacing.base,
+                  AppSpacing.xs,
                   AppSpacing.xs,
                 ),
-                child: Text(
-                  'CATEGORIAS',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: AppColors.textTertiary,
-                        letterSpacing: 0.6,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'CATEGORIAS',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: AppColors.textTertiary,
+                              letterSpacing: 0.6,
+                            ),
                       ),
+                    ),
+                    const _BotaoOrdenarCategorias(),
+                  ],
                 ),
               ),
               ...nomes.map((nome) {

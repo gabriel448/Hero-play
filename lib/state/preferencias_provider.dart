@@ -38,4 +38,58 @@ class PreferenciasProvider extends ChangeNotifier {
     await _armazenamento.salvarAutoQualidade(valor);
     notifyListeners();
   }
+
+  // ── Ordenacao da lista de categorias ao vivo ────────────────────────────
+
+  OrdemCategorias get ordemCategorias =>
+      OrdemCategorias._fromKey(_armazenamento.obterOrdemCategorias());
+
+  Future<void> definirOrdemCategorias(OrdemCategorias valor) async {
+    await _armazenamento.salvarOrdemCategorias(valor.key);
+    notifyListeners();
+  }
+
+  // ── Ordenacao dos canais dentro de uma categoria ────────────────────────
+
+  OrdemCanais get ordemCanais =>
+      OrdemCanais._fromKey(_armazenamento.obterOrdemCanais());
+
+  Future<void> definirOrdemCanais(OrdemCanais valor) async {
+    await _armazenamento.salvarOrdemCanais(valor.key);
+    notifyListeners();
+  }
+}
+
+/// Modos de ordenacao da LISTA de categorias.
+enum OrdemCategorias {
+  popularidade('popularidade', 'Popularidade'),
+  az('az', 'A-Z');
+
+  final String key;
+  final String label;
+  const OrdemCategorias(this.key, this.label);
+
+  static OrdemCategorias _fromKey(String k) {
+    for (final v in values) {
+      if (v.key == k) return v;
+    }
+    return OrdemCategorias.popularidade;
+  }
+}
+
+/// Modos de ordenacao dos CANAIS dentro de uma categoria.
+enum OrdemCanais {
+  padrao('padrao', 'Padrão'),
+  az('az', 'A-Z');
+
+  final String key;
+  final String label;
+  const OrdemCanais(this.key, this.label);
+
+  static OrdemCanais _fromKey(String k) {
+    for (final v in values) {
+      if (v.key == k) return v;
+    }
+    return OrdemCanais.padrao;
+  }
 }

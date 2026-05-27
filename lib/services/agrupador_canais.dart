@@ -1,6 +1,69 @@
 import '../models/canal.dart';
 import '../utils/qualidade.dart';
 
+/// Categorias virtuais de qualidade. Mapa qualidade -> lista de canais que
+/// existem naquela resolucao, com a URL apontando para a variante daquela
+/// qualidade especifica. Util para o usuario abrir um canal direto em SD/HD/
+/// FHD a partir do menu MINHAS CATEGORIAS, sem precisar trocar a qualidade
+/// dentro do player.
+///
+/// Para canais nao agrupados (sem variantes), classifica pelo nome (ex.:
+/// "Globo HD" -> HD). Para canais agrupados, gera uma entrada por variante
+/// daquela qualidade, com a URL da variante correta.
+///
+/// O retorno preserva apenas qualidades com canais (categorias vazias sao
+/// omitidas) e segue a ordem FHD -> HD -> SD.
+Map<String, List<Canal>> agruparPorQualidade(
+  Map<String, List<Canal>> categoriasAoVivo,
+) {
+  final buckets = <Qualidade, List<Canal>>{
+    Qualidade.fhd: [],
+    Qualidade.hd: [],
+    Qualidade.sd: [],
+  };
+
+  for (final canais in categoriasAoVivo.values) {
+    for (final c in canais) {
+      if (c.variantes.isEmpty) {
+        final q = detectarQualidade(c.nome);
+        final balde = buckets[q];
+        if (balde == null) continue;
+        // Reaproveita o canal — toca direto na URL principal.
+        balde.add(c);
+      } else {
+        for (final v in c.variantes) {
+          final q = detectarQualidade(v.nome);
+          final balde = buckets[q];
+          if (balde == null) continue;
+          // Cria uma "vista" do canal apontando para a variante exata, sem
+          // o array variantes — assim o player toca direto a qualidade alvo
+          // sem oferecer troca.
+          balde.add(Canal(
+            nome: c.nome,
+            url: v.url,
+            logoUrl: c.logoUrl,
+            grupo: q.rotulo,
+            tvgId: c.tvgId,
+            tipo: TipoCanal.aoVivo,
+            idGrupo: '${c.idGrupo ?? c.id}|${q.name}',
+          ));
+        }
+      }
+    }
+  }
+
+  final resultado = <String, List<Canal>>{};
+  for (final q in [Qualidade.fhd, Qualidade.hd, Qualidade.sd]) {
+    final lista = buckets[q]!;
+    if (lista.isEmpty) continue;
+    // Ordena alfabeticamente dentro de cada qualidade — melhora descoberta
+    // ja que essa pseudo-categoria mistura canais de varios grupos originais.
+    lista.sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
+    resultado[q.rotulo] = lista;
+  }
+  return resultado;
+}
+
 /// Agrupa canais ao vivo que representam o mesmo canal em qualidades
 /// diferentes, e funde categorias que so diferem por tag de qualidade.
 ///
