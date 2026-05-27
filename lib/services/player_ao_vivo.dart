@@ -48,6 +48,9 @@ class PlayerAoVivo {
     final native = p.platform;
     if (native is! NativePlayer) return;
     native.setProperty('cache', 'no');
+    native.setProperty('demuxer-readahead-secs', '4');
+    native.setProperty('demuxer-max-bytes', '32MiB');
+    native.setProperty('network-timeout', '5');
     if (Platform.isAndroid) native.setProperty('hwdec', 'mediacodec-copy');
   }
 
