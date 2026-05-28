@@ -4,6 +4,7 @@ import '../models/canal_assistido.dart';
 import '../models/categoria_personalizada.dart';
 import '../models/lista_m3u.dart';
 import '../models/progresso_canal.dart';
+import '../models/serie.dart';
 import '../services/armazenamento.dart';
 import '../services/carregador_lista.dart';
 import '../services/parser_m3u.dart';
@@ -38,6 +39,7 @@ class IptvProvider extends ChangeNotifier {
   List<CanalAssistido> _historico = [];
   List<ProgressoCanal> _progressos = [];
   List<CategoriaPersonalizada> _categoriasPersonalizadas = [];
+  List<String> _minhaListaChaves = [];
   ListaM3U? _listaAtiva;
   String _busca = '';
   bool _carregando = false;
@@ -54,6 +56,7 @@ class IptvProvider extends ChangeNotifier {
   List<ProgressoCanal> get progressos => _progressos;
   List<CategoriaPersonalizada> get categoriasPersonalizadas =>
       _categoriasPersonalizadas;
+  List<String> get minhaListaChaves => _minhaListaChaves;
   ListaM3U? get listaAtiva => _listaAtiva;
   String get busca => _busca;
   bool get carregando => _carregando;
@@ -80,6 +83,7 @@ class IptvProvider extends ChangeNotifier {
     _progressos = _armazenamento.carregarProgressos();
     _categoriasPersonalizadas =
         _armazenamento.carregarCategoriasPersonalizadas();
+    _minhaListaChaves = _armazenamento.carregarMinhaLista();
     _restaurarListaAtiva();
     notifyListeners();
   }
@@ -473,6 +477,27 @@ class IptvProvider extends ChangeNotifier {
   Future<void> removerProgresso(Canal canal) async {
     await _armazenamento.removerProgresso(canal.url);
     _progressos = _armazenamento.carregarProgressos();
+    notifyListeners();
+  }
+
+  // ===== MINHA LISTA =====
+
+  static String _chaveMinhaLista(Object item) {
+    if (item is Canal) return 'c:${item.url}';
+    return 's:${(item as Serie).nome}';
+  }
+
+  bool ehMinhaLista(Object item) =>
+      _minhaListaChaves.contains(_chaveMinhaLista(item));
+
+  Future<void> alternarMinhaLista(Object item) async {
+    final chave = _chaveMinhaLista(item);
+    if (_minhaListaChaves.contains(chave)) {
+      await _armazenamento.removerDeMinhaLista(chave);
+    } else {
+      await _armazenamento.adicionarAMinhaLista(chave);
+    }
+    _minhaListaChaves = _armazenamento.carregarMinhaLista();
     notifyListeners();
   }
 }

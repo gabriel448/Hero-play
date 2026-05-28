@@ -49,6 +49,9 @@ typedef _EpisodiosAgrupados = ({
 class _TelaDetalhesState extends State<TelaDetalhes> {
   late final Future<TmdbInfo> _infoFuture;
   Future<String?>? _posterSerieFuture;
+  _EpisodiosAgrupados? _agrup;
+  int? _temporadaSelecionada;
+
   String get _nome => widget.ehSerie ? widget.serie!.nome : widget.filme!.nome;
 
   @override
@@ -57,15 +60,16 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
     final tmdb = context.read<TmdbService>();
     final idioma = context.read<PreferenciasProvider>().idiomaEfetivo.codigo;
 
-    // Disparado uma unica vez — a tela ja foi montada, isto roda em paralelo.
     _infoFuture = tmdb.info(
       nome: _nome,
       ehSerie: widget.ehSerie,
       idioma: idioma,
     );
-    // Series: poster do TMDB (normalmente ja em cache, vindo do carrossel).
     if (widget.ehSerie) {
       _posterSerieFuture = tmdb.posterSerie(widget.serie!.nome);
+      _agrup = _agruparEpisodios(widget.serie!);
+      _temporadaSelecionada =
+          _agrup!.temporadas.isNotEmpty ? _agrup!.temporadas.first : null;
     }
   }
 
@@ -120,7 +124,9 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
 
   Widget _buildSerieMobile() {
     final serie = widget.serie!;
-    final agrup = _agruparEpisodios(serie);
+    final agrup = _agrup!;
+    final temporada = _temporadaSelecionada ?? agrup.temporadas.first;
+    final episodios = agrup.porTemporada[temporada] ?? [];
 
     return CustomScrollView(
       slivers: [
@@ -143,22 +149,17 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
               const _Divisoria(),
               _SecaoSinopse(infoFuture: _infoFuture),
               _SecaoElenco(infoFuture: _infoFuture),
-              const _TituloSecao('Episódios'),
+              _SeletorTemporada(
+                temporadas: agrup.temporadas,
+                selecionada: temporada,
+                onSelecionada: (t) => setState(() => _temporadaSelecionada = t),
+              ),
             ],
           ),
         ),
         SliverList.builder(
-          itemCount: agrup.itens.length,
-          itemBuilder: (_, i) {
-            final item = agrup.itens[i];
-            if (item is int) {
-              return _HeaderTemporada(
-                numero: item,
-                total: agrup.porTemporada[item]!.length,
-              );
-            }
-            return _ItemEpisodio(episodio: item as Canal);
-          },
+          itemCount: episodios.length,
+          itemBuilder: (_, i) => _ItemEpisodio(episodio: episodios[i]),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
       ],
@@ -169,7 +170,7 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
 
   Widget _buildDesktop(BuildContext context) {
     final serie = widget.serie;
-    final agrup = serie != null ? _agruparEpisodios(serie) : null;
+    final agrup = _agrup;
 
     // Pôster grande com sombra suave.
     final banner = Container(
@@ -245,7 +246,10 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
       );
     }
 
-    // Série: cabeçalho + lista de episódios por temporada.
+    // Série: cabeçalho + seletor + lista da temporada ativa.
+    final temporada = _temporadaSelecionada ?? agrup.temporadas.first;
+    final episodios = agrup.porTemporada[temporada] ?? [];
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _kMaxLarguraDesktop),
@@ -260,27 +264,24 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
               ),
               sliver: SliverToBoxAdapter(child: cabecalho),
             ),
-            const SliverPadding(
-              padding: EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
               sliver: SliverToBoxAdapter(
-                child: _TituloSecao('Episódios', padH: 0),
+                child: _SeletorTemporada(
+                  temporadas: agrup.temporadas,
+                  selecionada: temporada,
+                  onSelecionada: (t) => setState(() => _temporadaSelecionada = t),
+                  padH: 0,
+                  desktop: true,
+                ),
               ),
             ),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
               sliver: SliverList.builder(
-                itemCount: agrup.itens.length,
-                itemBuilder: (_, i) {
-                  final item = agrup.itens[i];
-                  if (item is int) {
-                    return _HeaderTemporada(
-                      numero: item,
-                      total: agrup.porTemporada[item]!.length,
-                      padH: 0,
-                    );
-                  }
-                  return _ItemEpisodio(episodio: item as Canal, padH: 0);
-                },
+                itemCount: episodios.length,
+                itemBuilder: (_, i) =>
+                    _ItemEpisodio(episodio: episodios[i], padH: 0, desktop: true),
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
@@ -394,9 +395,12 @@ class _AcaoFilme extends StatelessWidget {
     final provider = context.watch<IptvProvider>();
     final progresso = provider.obterProgresso(filme);
     final continuar = progresso != null;
+    final naLista = provider.ehMinhaLista(filme);
 
     return _BotoesAcao(
       label: continuar ? 'Continuar' : 'Assistir',
+      naMinhaLista: naLista,
+      onMinhaLista: () => provider.alternarMinhaLista(filme),
       onAssistir: () {
         provider.registrarVisualizacao(filme);
         Navigator.of(context).push(
@@ -422,6 +426,7 @@ class _AcaoSerie extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
     final retomada = _calcularRetomada(serie, provider);
+    final naLista = provider.ehMinhaLista(serie);
 
     final label = retomada.continuar
         ? 'Continuar T${Serie.seasonOf(retomada.episodio)}'
@@ -430,6 +435,8 @@ class _AcaoSerie extends StatelessWidget {
 
     return _BotoesAcao(
       label: label,
+      naMinhaLista: naLista,
+      onMinhaLista: () => provider.alternarMinhaLista(serie),
       onAssistir: () {
         provider.registrarVisualizacao(retomada.episodio);
         Navigator.of(context).push(
@@ -450,8 +457,15 @@ class _AcaoSerie extends StatelessWidget {
 class _BotoesAcao extends StatelessWidget {
   final String label;
   final VoidCallback onAssistir;
+  final bool naMinhaLista;
+  final VoidCallback onMinhaLista;
 
-  const _BotoesAcao({required this.label, required this.onAssistir});
+  const _BotoesAcao({
+    required this.label,
+    required this.onAssistir,
+    required this.naMinhaLista,
+    required this.onMinhaLista,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -462,6 +476,19 @@ class _BotoesAcao extends StatelessWidget {
           onPressed: onAssistir,
           icon: const Icon(Icons.play_arrow_rounded, size: 20),
           label: Text(label),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        OutlinedButton.icon(
+          onPressed: onMinhaLista,
+          icon: Icon(
+            naMinhaLista
+                ? Icons.bookmark_rounded
+                : Icons.bookmark_border_rounded,
+            size: 18,
+          ),
+          label: Text(
+            naMinhaLista ? 'Remover da minha lista' : 'Adicionar à minha lista',
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         OutlinedButton(
@@ -766,62 +793,147 @@ class _ChipAtor extends StatelessWidget {
   }
 }
 
-// ─── Episodios da serie ────────────────────────────────────────────────────
+// ─── Seletor de temporada (estilo Prime Video) ────────────────────────────
 
-class _HeaderTemporada extends StatelessWidget {
-  final int numero;
-  final int total;
+class _SeletorTemporada extends StatelessWidget {
+  final List<int> temporadas;
+  final int selecionada;
+  final ValueChanged<int> onSelecionada;
   final double padH;
+  final bool desktop;
 
-  const _HeaderTemporada({
-    required this.numero,
-    required this.total,
+  const _SeletorTemporada({
+    required this.temporadas,
+    required this.selecionada,
+    required this.onSelecionada,
     this.padH = AppSpacing.lg,
+    this.desktop = false,
   });
+
+  static String _rotulo(int t) => t == 0 ? 'Especiais' : 'Temporada $t';
+
+  void _abrirPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.symmetric(vertical: AppSpacing.base),
+              decoration: BoxDecoration(
+                color: AppColors.outlineSubtle,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
+            ),
+            for (final t in temporadas)
+              ListTile(
+                title: Text(_rotulo(t)),
+                trailing: t == selecionada
+                    ? const Icon(Icons.check_rounded, color: AppColors.accent)
+                    : null,
+                selected: t == selecionada,
+                selectedColor: AppColors.textPrimary,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSelecionada(t);
+                },
+              ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final temVarias = temporadas.length > 1;
+    final labelStyle = desktop
+        ? Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: AppColors.textTertiary,
+              letterSpacing: 0.8,
+            )
+        : Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: AppColors.textTertiary,
+              letterSpacing: 0.6,
+            );
+    final botaoStyle = desktop
+        ? Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppColors.accent,
+              fontWeight: FontWeight.w600,
+            )
+        : Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.accent,
+              fontWeight: FontWeight.w600,
+            );
+    final botaoPadding = desktop
+        ? const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm)
+        : const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs);
+    final iconSize = desktop ? 22.0 : 18.0;
+
     return Padding(
       padding: EdgeInsets.fromLTRB(padH, AppSpacing.base, padH, AppSpacing.xs),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
-              vertical: 2,
-            ),
-            decoration: BoxDecoration(
-              color: AppColors.accentDim,
+          Expanded(
+            child: Text('EPISÓDIOS', style: labelStyle),
+          ),
+          if (temVarias)
+            InkWell(
+              onTap: () => _abrirPicker(context),
               borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Padding(
+                padding: botaoPadding,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_rotulo(selecionada), style: botaoStyle),
+                    const SizedBox(width: 2),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: iconSize,
+                      color: AppColors.accent,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Text(
+              _rotulo(selecionada),
+              style: desktop
+                  ? Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textTertiary,
+                      )
+                  : Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiary,
+                      ),
             ),
-            child: Text(
-              numero == 0 ? 'ESPECIAIS' : 'TEMPORADA $numero',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: AppColors.accentBright,
-                    letterSpacing: 0.5,
-                  ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Text(
-            '$total ep.',
-            style: tabular(
-              Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.textTertiary,
-                  ),
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
+// ─── Episodios da serie ────────────────────────────────────────────────────
+
 class _ItemEpisodio extends StatelessWidget {
   final Canal episodio;
   final double padH;
+  final bool desktop;
 
-  const _ItemEpisodio({required this.episodio, this.padH = AppSpacing.lg});
+  const _ItemEpisodio({
+    required this.episodio,
+    this.padH = AppSpacing.lg,
+    this.desktop = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -844,15 +956,15 @@ class _ItemEpisodio extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.symmetric(
           horizontal: padH,
-          vertical: AppSpacing.sm,
+          vertical: desktop ? AppSpacing.base : AppSpacing.sm,
         ),
         child: Row(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadius.sm),
               child: SizedBox(
-                width: 80,
-                height: 46,
+                width: desktop ? 120 : 80,
+                height: desktop ? 69 : 46,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -879,12 +991,13 @@ class _ItemEpisodio extends StatelessWidget {
             Expanded(
               child: Text(
                 Serie.episodeLabel(episodio),
-                style: Theme.of(context).textTheme.bodyMedium,
+                style: desktop
+                    ? Theme.of(context).textTheme.bodyLarge
+                    : Theme.of(context).textTheme.bodyMedium,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-
           ],
         ),
       ),

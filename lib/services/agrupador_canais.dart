@@ -102,7 +102,77 @@ Map<String, List<Canal>> agruparCanaisAoVivo(List<Canal> canais) {
         _montarCanal(categoria, mapa[categoria]![chave]!),
     ];
   }
+  return _agruparFontes(resultado);
+}
+
+/// Segundo passo de agrupamento: funde canais que sao fontes alternativas do
+/// mesmo canal (ex.: "Globo SP", "Globo SP*", "Globo SP 2") em um unico
+/// [Canal] com [Canal.fontes] preenchido. Cada fonte mantem suas proprias
+/// variantes de qualidade — ao trocar de fonte o player reutiliza a logica
+/// de qualidade da nova fonte.
+Map<String, List<Canal>> _agruparFontes(Map<String, List<Canal>> categorias) {
+  final resultado = <String, List<Canal>>{};
+  for (final entry in categorias.entries) {
+    final categoria = entry.key;
+    final canais = entry.value;
+
+    final grupos = <String, List<Canal>>{};
+    final ordem = <String>[];
+
+    for (final c in canais) {
+      final chave = nomeFonte(c.nome).toLowerCase();
+      if (!grupos.containsKey(chave)) {
+        grupos[chave] = [];
+        ordem.add(chave);
+      }
+      grupos[chave]!.add(c);
+    }
+
+    resultado[categoria] = [
+      for (final chave in ordem) _montarFontes(grupos[chave]!),
+    ];
+  }
   return resultado;
+}
+
+Canal _montarFontes(List<Canal> fontes) {
+  if (fontes.length == 1) return fontes.first;
+
+  // A fonte principal e aquela cujo nome nao tem asterisco nem numero no fim.
+  // Em empate, a de nome mais curto (mais generica).
+  final ordenadas = [...fontes]..sort((a, b) {
+      final aPrincipal = _ehFontePrincipal(a.nome);
+      final bPrincipal = _ehFontePrincipal(b.nome);
+      if (aPrincipal && !bPrincipal) return -1;
+      if (!aPrincipal && bPrincipal) return 1;
+      return a.nome.length.compareTo(b.nome.length);
+    });
+
+  final principal = ordenadas.first;
+  final comLogo = ordenadas.firstWhere(
+    (f) => f.logoUrl != null && f.logoUrl!.isNotEmpty,
+    orElse: () => principal,
+  );
+
+  final idGrupo = principal.idGrupo ??
+      'f:${principal.grupo.toLowerCase()}|${nomeFonte(principal.nome).toLowerCase()}';
+
+  return Canal(
+    nome: principal.nome,
+    url: principal.url,
+    logoUrl: comLogo.logoUrl,
+    grupo: principal.grupo,
+    tvgId: principal.tvgId,
+    tipo: principal.tipo,
+    variantes: principal.variantes,
+    idGrupo: idGrupo,
+    fontes: ordenadas,
+  );
+}
+
+bool _ehFontePrincipal(String nome) {
+  final base = nomeBase(nome);
+  return !base.contains('*');
 }
 
 /// Monta o [Canal] final a partir das variantes de um mesmo canal.

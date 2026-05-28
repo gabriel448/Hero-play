@@ -81,6 +81,29 @@ String nomeBase(String nome) => _semTags(nome);
 /// Funde categorias que so diferem pela qualidade.
 String categoriaBase(String grupo) => _semTags(grupo);
 
+// Digitos sobrescritos Unicode usados como marcadores de backup em listas IPTV.
+final _regexSobrescritos = RegExp(r'[²³¹⁰-⁹]+$');
+
+/// Nome-chave para agrupar fontes alternativas do mesmo canal.
+/// Remove tags de qualidade e marcadores de backup comuns em listas IPTV
+/// brasileiras: asteriscos, sufixo " BR" e digitos sobrescritos (²³...).
+/// "Globo SP HD*" → "Globo SP", "Globo SP BR" → "Globo SP",
+/// "GB Brasilia HD²" → "GB Brasilia".
+/// Numeros normais sem asterisco (ex.: "ESPN 2") NAO sao afetados.
+String nomeFonte(String nome) {
+  var s = nomeBase(nome);
+  final temAsterisco = s.contains('*');
+  s = s.replaceAll(RegExp(r'\*+'), '').trim();
+  if (temAsterisco) {
+    s = s.replaceAll(RegExp(r'\s+\d+$'), '').trim();
+  }
+  // Digitos sobrescritos no fim (ex.: "²" que sobra apos remover "HD").
+  s = s.replaceAll(_regexSobrescritos, '').trim();
+  // " BR" no fim e marcador de fonte alternativa/regional em listas IPTV BR.
+  s = s.replaceAll(RegExp(r'\s+BR$', caseSensitive: false), '').trim();
+  return s.isEmpty ? nomeBase(nome) : s;
+}
+
 String _semTags(String texto) {
   var s = texto.replaceAll(_regexTags, ' ');
   s = s.replaceAll(_regexParenteses, ' ');

@@ -22,6 +22,7 @@ class Armazenamento {
   static const _nomeBoxQualidades = 'qualidades';
   static const _nomeBoxCategorias = 'categorias_personalizadas';
   static const _nomeBoxEpg = 'epg';
+  static const _nomeBoxMinhaLista = 'minha_lista';
 
   static const _limiteHistorico = 50;
 
@@ -33,6 +34,7 @@ class Armazenamento {
   late Box _boxQualidades;
   late Box _boxCategorias;
   late Box _boxEpg;
+  late Box _boxMinhaLista;
 
   /// Inicializa o Hive e abre as boxes. Deve ser chamado UMA vez no main()
   /// antes de runApp.
@@ -46,6 +48,7 @@ class Armazenamento {
     _boxQualidades = await Hive.openBox(_nomeBoxQualidades);
     _boxCategorias = await Hive.openBox(_nomeBoxCategorias);
     _boxEpg = await Hive.openBox(_nomeBoxEpg);
+    _boxMinhaLista = await Hive.openBox(_nomeBoxMinhaLista);
   }
 
   // ===== EPG (programacao por lista) =====
@@ -266,4 +269,32 @@ class Armazenamento {
     lista.sort((a, b) => b.atualizadoEm.compareTo(a.atualizadoEm));
     return lista;
   }
+
+  // ===== MINHA LISTA =====
+
+  // Chaves no formato "c:{url}" (Canal/filme) ou "s:{nome}" (Serie).
+  static const _keyMinhaLista = 'keys';
+
+  List<String> carregarMinhaLista() {
+    final raw = _boxMinhaLista.get(_keyMinhaLista);
+    if (raw == null) return [];
+    return List<String>.from(raw as List);
+  }
+
+  Future<void> adicionarAMinhaLista(String chave) async {
+    final lista = carregarMinhaLista();
+    if (!lista.contains(chave)) {
+      lista.add(chave);
+      await _boxMinhaLista.put(_keyMinhaLista, lista);
+    }
+  }
+
+  Future<void> removerDeMinhaLista(String chave) async {
+    final lista = carregarMinhaLista();
+    if (lista.remove(chave)) {
+      await _boxMinhaLista.put(_keyMinhaLista, lista);
+    }
+  }
+
+  bool ehMinhaLista(String chave) => carregarMinhaLista().contains(chave);
 }

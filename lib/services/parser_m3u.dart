@@ -89,6 +89,7 @@ class ParserM3U {
     String? logoAtual;
     String? grupoAtual;
     String? tvgIdAtual;
+    int? duracaoAtual;
     bool aguardandoUrl = false;
 
     for (final linhaRaw in linhas) {
@@ -102,6 +103,7 @@ class ParserM3U {
         logoAtual = dados.logoUrl;
         grupoAtual = dados.grupo;
         tvgIdAtual = dados.tvgId;
+        duracaoAtual = dados.duracao;
         aguardandoUrl = true;
         continue;
       }
@@ -117,11 +119,15 @@ class ParserM3U {
           grupo: grupo,
           tvgId: tvgIdAtual,
           tipo: _classificarTipo(url: linha, grupo: grupo),
+          duracaoSegundos: (duracaoAtual != null && duracaoAtual > 0)
+              ? duracaoAtual
+              : null,
         ));
         nomeAtual = null;
         logoAtual = null;
         grupoAtual = null;
         tvgIdAtual = null;
+        duracaoAtual = null;
         aguardandoUrl = false;
       }
     }
@@ -168,6 +174,11 @@ class ParserM3U {
       antesVirgula = linha.substring(0, indexVirgula);
     }
 
+    // Extrai o numero de duracao logo apos "#EXTINF:" (ex: "7200" ou "-1").
+    final bodyExtinf = linha.substring('#EXTINF:'.length).trimLeft();
+    final durStr = bodyExtinf.split(RegExp(r'[\s,]')).first;
+    final duracao = int.tryParse(durStr);
+
     final atributos = <String, String>{};
     for (final match in _regexAtributos.allMatches(antesVirgula)) {
       final chave = match.group(1)!.toLowerCase();
@@ -180,6 +191,7 @@ class ParserM3U {
       logoUrl: atributos['tvg-logo'],
       grupo: atributos['group-title'],
       tvgId: atributos['tvg-id'],
+      duracao: duracao,
     );
   }
 }
@@ -189,11 +201,13 @@ class _DadosExtinf {
   final String? logoUrl;
   final String? grupo;
   final String? tvgId;
+  final int? duracao;
 
   _DadosExtinf({
     required this.nome,
     this.logoUrl,
     this.grupo,
     this.tvgId,
+    this.duracao,
   });
 }

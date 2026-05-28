@@ -42,6 +42,15 @@ class Canal {
   /// null para canais comuns, que usam a [url] como id.
   final String? idGrupo;
 
+  /// Fontes alternativas do mesmo canal (streams de backup com URLs
+  /// diferentes). Vazio quando o canal tem apenas uma fonte. Cada entrada
+  /// pode ter suas proprias variantes de qualidade.
+  final List<Canal> fontes;
+
+  /// Duracao do conteudo em segundos, extraida da linha EXTINF do M3U.
+  /// null ou -1 quando o provedor nao informou a duracao real.
+  final int? duracaoSegundos;
+
   const Canal({
     required this.nome,
     required this.url,
@@ -51,6 +60,8 @@ class Canal {
     this.tipo = TipoCanal.aoVivo,
     this.variantes = const [],
     this.idGrupo,
+    this.fontes = const [],
+    this.duracaoSegundos,
   });
 
   /// Identificador do canal. Para canais agrupados e um id estavel; para
@@ -59,6 +70,9 @@ class Canal {
 
   /// `true` quando este canal reune 2+ variantes de qualidade.
   bool get agrupado => variantes.length > 1;
+
+  /// `true` quando ha fontes alternativas alem da principal.
+  bool get temFontes => fontes.isNotEmpty;
 
   Map<String, dynamic> toMap() => {
         'nome': nome,
@@ -70,6 +84,9 @@ class Canal {
         if (variantes.isNotEmpty)
           'variantes': variantes.map((v) => v.toMap()).toList(),
         if (idGrupo != null) 'idGrupo': idGrupo,
+        if (fontes.isNotEmpty)
+          'fontes': fontes.map((f) => f.toMap()).toList(),
+        if (duracaoSegundos != null) 'duracaoSegundos': duracaoSegundos,
       };
 
   factory Canal.fromMap(Map map) => Canal(
@@ -87,6 +104,11 @@ class Canal {
                 .toList() ??
             const [],
         idGrupo: map['idGrupo'] as String?,
+        fontes: (map['fontes'] as List?)
+                ?.map((m) => Canal.fromMap(m as Map))
+                .toList() ??
+            const [],
+        duracaoSegundos: map['duracaoSegundos'] as int?,
       );
 
   @override

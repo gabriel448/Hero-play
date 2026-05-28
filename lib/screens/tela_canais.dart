@@ -32,6 +32,9 @@ class _TelaCanaisState extends State<TelaCanais> {
   bool _buscando = false;
   String _busca = '';
   String? _categoriaAtiva;
+  // Quando a categoria ativa é de MINHAS CATEGORIAS (favoritos, qualidade,
+  // personalizada), os canais vêm daqui em vez do mapa de categorias.
+  List<Canal>? _canaisOverride;
   Orientation? _orientacaoAnterior;
   late final Map<String, List<Canal>> _categoriasQualidade;
 
@@ -54,13 +57,20 @@ class _TelaCanaisState extends State<TelaCanais> {
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final busca = _buscando && _busca.isNotEmpty;
 
+    void onSelecionada(String nome, {List<Canal>? canaisOverride}) =>
+        setState(() {
+          _categoriaAtiva = nome;
+          _canaisOverride = canaisOverride;
+        });
+
     // Desktop: sempre 3 colunas.
     if (isDesktop(context)) {
       return _LayoutDesktopCanais(
         categorias: widget.categorias,
         categoriasQualidade: _categoriasQualidade,
         categoriaAtiva: _categoriaAtiva,
-        onCategoriaSelecionada: (cat) => setState(() => _categoriaAtiva = cat),
+        canaisOverride: _canaisOverride,
+        onCategoriaSelecionada: onSelecionada,
         resultadosBuscaGlobal: busca ? _resultadosBusca : null,
       );
     }
@@ -71,7 +81,8 @@ class _TelaCanaisState extends State<TelaCanais> {
         categorias: widget.categorias,
         categoriasQualidade: _categoriasQualidade,
         categoriaAtiva: _categoriaAtiva,
-        onCategoriaSelecionada: (cat) => setState(() => _categoriaAtiva = cat),
+        canaisOverride: _canaisOverride,
+        onCategoriaSelecionada: onSelecionada,
         resultadosBuscaGlobal: busca ? _resultadosBusca : null,
       );
     }
@@ -84,8 +95,8 @@ class _TelaCanaisState extends State<TelaCanais> {
               categorias: widget.categorias,
               categoriasQualidade: _categoriasQualidade,
               categoriaAtiva: _categoriaAtiva,
-              onCategoriaSelecionada: (cat) =>
-                  setState(() => _categoriaAtiva = cat),
+              canaisOverride: _canaisOverride,
+              onCategoriaSelecionada: onSelecionada,
             );
     }
 
@@ -223,6 +234,8 @@ class _ListaCategorias extends StatelessWidget {
         context.watch<IptvProvider>().categoriasPersonalizadas;
     final ordem = context.watch<PreferenciasProvider>().ordemCategorias;
     final nomes = _ordenarCategorias(categorias.keys, ordem);
+    final todosOsCanais = categorias.values.expand((l) => l).toList()
+      ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
 
     return CustomScrollView(
       slivers: [
@@ -255,6 +268,29 @@ class _ListaCategorias extends StatelessWidget {
                   const _BotaoOrdenarCategorias(),
                 ],
               ),
+            ),
+          ),
+          // "Todos" — sempre no topo da lista de categorias.
+          SliverToBoxAdapter(
+            child: _ItemCategoria(
+              nome: 'Todos',
+              quantidade: todosOsCanais.length,
+              icone: Icons.grid_view_rounded,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TelaCategoria(
+                    nomeCategoria: 'Todos',
+                    canais: todosOsCanais,
+                    tipo: TipoCanal.aoVivo,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: Divider(height: 1),
             ),
           ),
           SliverList.separated(
@@ -574,13 +610,15 @@ class _LayoutTabletCanais extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
   final Map<String, List<Canal>> categoriasQualidade;
   final String? categoriaAtiva;
-  final ValueChanged<String> onCategoriaSelecionada;
+  final List<Canal>? canaisOverride;
+  final void Function(String nome, {List<Canal>? canaisOverride}) onCategoriaSelecionada;
 
   const _LayoutTabletCanais({
     required this.categorias,
     required this.categoriasQualidade,
     required this.categoriaAtiva,
     required this.onCategoriaSelecionada,
+    this.canaisOverride,
   });
 
   @override
@@ -590,17 +628,21 @@ class _LayoutTabletCanais extends StatefulWidget {
 class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
   final _buscaController = TextEditingController();
   late List<Canal> _canaisFiltrados;
+  late final List<Canal> _todosOsCanais;
 
   @override
   void initState() {
     super.initState();
+    _todosOsCanais = widget.categorias.values.expand((l) => l).toList()
+      ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
     _canaisFiltrados = _canaisAtivos;
   }
 
   @override
   void didUpdateWidget(_LayoutTabletCanais old) {
     super.didUpdateWidget(old);
-    if (old.categoriaAtiva != widget.categoriaAtiva) {
+    if (old.categoriaAtiva != widget.categoriaAtiva ||
+        old.canaisOverride != widget.canaisOverride) {
       _buscaController.clear();
       _canaisFiltrados = _canaisAtivos;
     }
@@ -612,10 +654,13 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
     super.dispose();
   }
 
-  List<Canal> get _canaisAtivos =>
-      widget.categoriaAtiva != null
-          ? (widget.categorias[widget.categoriaAtiva] ?? [])
-          : [];
+  List<Canal> get _canaisAtivos {
+    if (widget.canaisOverride != null) return widget.canaisOverride!;
+    if (widget.categoriaAtiva == null) return [];
+    return widget.categorias[widget.categoriaAtiva] ??
+        widget.categoriasQualidade[widget.categoriaAtiva] ??
+        [];
+  }
 
   void _filtrar(String texto) {
     final q = texto.trim().toLowerCase();
@@ -687,17 +732,17 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                   nome: 'Favoritos',
                   quantidade:
                       context.watch<IptvProvider>().favoritos.length,
-                  ativo: false,
+                  ativo: widget.categoriaAtiva == 'Favoritos' &&
+                      widget.canaisOverride != null,
                   leadingIcon: Icons.star_rounded,
                   leadingIconColor: AppColors.accent,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const TelaFavoritos(),
-                    ),
+                  onTap: () => widget.onCategoriaSelecionada(
+                    'Favoritos',
+                    canaisOverride: context.read<IptvProvider>().favoritos,
                   ),
                 ),
               ),
-              // Pseudo-categorias de qualidade.
+              // Pseudo-categorias de qualidade — mostram canais na coluna.
               ...widget.categoriasQualidade.entries.map(
                 (e) => Padding(
                   padding:
@@ -705,18 +750,11 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                   child: _ItemCategoriaTablet(
                     nome: e.key,
                     quantidade: e.value.length,
-                    ativo: false,
+                    ativo: e.key == widget.categoriaAtiva &&
+                        widget.canaisOverride == null,
                     leadingIcon: Icons.high_quality_rounded,
                     leadingIconColor: AppColors.accent,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => TelaCategoria(
-                          nomeCategoria: e.key,
-                          canais: e.value,
-                          tipo: TipoCanal.aoVivo,
-                        ),
-                      ),
-                    ),
+                    onTap: () => widget.onCategoriaSelecionada(e.key),
                   ),
                 ),
               ),
@@ -744,13 +782,11 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                     child: _ItemCategoriaTablet(
                       nome: cat.nome,
                       quantidade: cat.canais.length,
-                      ativo: false,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => TelaCategoriaPersonalizada(
-                            idCategoria: cat.id,
-                          ),
-                        ),
+                      ativo: widget.categoriaAtiva == cat.nome &&
+                          widget.canaisOverride != null,
+                      onTap: () => widget.onCategoriaSelecionada(
+                        cat.nome,
+                        canaisOverride: cat.canais,
                       ),
                     ),
                   ),
@@ -781,6 +817,21 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                     ),
                     const _BotaoOrdenarCategorias(),
                   ],
+                ),
+              ),
+              // "Todos" — agrega todos os canais, sempre no topo das categorias.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                child: _ItemCategoriaTablet(
+                  nome: 'Todos',
+                  quantidade: _todosOsCanais.length,
+                  ativo: widget.categoriaAtiva == 'Todos' &&
+                      widget.canaisOverride != null,
+                  leadingIcon: Icons.grid_view_rounded,
+                  onTap: () => widget.onCategoriaSelecionada(
+                    'Todos',
+                    canaisOverride: _todosOsCanais,
+                  ),
                 ),
               ),
               ...nomes.map((nome) {
@@ -1128,7 +1179,8 @@ class _LayoutDesktopCanais extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
   final Map<String, List<Canal>> categoriasQualidade;
   final String? categoriaAtiva;
-  final ValueChanged<String> onCategoriaSelecionada;
+  final List<Canal>? canaisOverride;
+  final void Function(String nome, {List<Canal>? canaisOverride}) onCategoriaSelecionada;
   /// Quando nao-null, a coluna de canais exibe esses resultados de busca global
   /// em vez do painel de categoria selecionada.
   final List<Canal>? resultadosBuscaGlobal;
@@ -1138,6 +1190,7 @@ class _LayoutDesktopCanais extends StatefulWidget {
     required this.categoriasQualidade,
     required this.categoriaAtiva,
     required this.onCategoriaSelecionada,
+    this.canaisOverride,
     this.resultadosBuscaGlobal,
   });
 
@@ -1150,19 +1203,23 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
   final _col1Ctrl = ScrollController();
   final _col2Ctrl = ScrollController();
   late List<Canal> _canaisFiltrados;
+  late final List<Canal> _todosOsCanais;
   double _col1Width = 260.0;
   double _col3Width = 420.0;
 
   @override
   void initState() {
     super.initState();
+    _todosOsCanais = widget.categorias.values.expand((l) => l).toList()
+      ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
     _canaisFiltrados = _canaisAtivos;
   }
 
   @override
   void didUpdateWidget(_LayoutDesktopCanais old) {
     super.didUpdateWidget(old);
-    if (old.categoriaAtiva != widget.categoriaAtiva) {
+    if (old.categoriaAtiva != widget.categoriaAtiva ||
+        old.canaisOverride != widget.canaisOverride) {
       _buscaController.clear();
       _canaisFiltrados = _canaisAtivos;
     }
@@ -1176,9 +1233,13 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
     super.dispose();
   }
 
-  List<Canal> get _canaisAtivos => widget.categoriaAtiva != null
-      ? (widget.categorias[widget.categoriaAtiva] ?? [])
-      : [];
+  List<Canal> get _canaisAtivos {
+    if (widget.canaisOverride != null) return widget.canaisOverride!;
+    if (widget.categoriaAtiva == null) return [];
+    return widget.categorias[widget.categoriaAtiva] ??
+        widget.categoriasQualidade[widget.categoriaAtiva] ??
+        [];
+  }
 
   void _filtrar(String texto) {
     final q = texto.trim().toLowerCase();
@@ -1273,13 +1334,13 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                 child: _ItemCategoriaTablet(
                   nome: 'Favoritos',
                   quantidade: provider.favoritos.length,
-                  ativo: false,
+                  ativo: widget.categoriaAtiva == 'Favoritos' &&
+                      widget.canaisOverride != null,
                   leadingIcon: Icons.star_rounded,
                   leadingIconColor: AppColors.accent,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const TelaFavoritos(),
-                    ),
+                  onTap: () => widget.onCategoriaSelecionada(
+                    'Favoritos',
+                    canaisOverride: provider.favoritos,
                   ),
                 ),
               ),
@@ -1290,18 +1351,11 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                   child: _ItemCategoriaTablet(
                     nome: e.key,
                     quantidade: e.value.length,
-                    ativo: false,
+                    ativo: e.key == widget.categoriaAtiva &&
+                        widget.canaisOverride == null,
                     leadingIcon: Icons.high_quality_rounded,
                     leadingIconColor: AppColors.accent,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => TelaCategoria(
-                          nomeCategoria: e.key,
-                          canais: e.value,
-                          tipo: TipoCanal.aoVivo,
-                        ),
-                      ),
-                    ),
+                    onTap: () => widget.onCategoriaSelecionada(e.key),
                   ),
                 ),
               ),
@@ -1329,13 +1383,11 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                     child: _ItemCategoriaTablet(
                       nome: cat.nome,
                       quantidade: cat.canais.length,
-                      ativo: false,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => TelaCategoriaPersonalizada(
-                            idCategoria: cat.id,
-                          ),
-                        ),
+                      ativo: widget.categoriaAtiva == cat.nome &&
+                          widget.canaisOverride != null,
+                      onTap: () => widget.onCategoriaSelecionada(
+                        cat.nome,
+                        canaisOverride: cat.canais,
                       ),
                     ),
                   ),
@@ -1365,6 +1417,21 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                     ),
                     const _BotaoOrdenarCategorias(),
                   ],
+                ),
+              ),
+              // "Todos" — agrega todos os canais, sempre no topo das categorias.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                child: _ItemCategoriaTablet(
+                  nome: 'Todos',
+                  quantidade: _todosOsCanais.length,
+                  ativo: widget.categoriaAtiva == 'Todos' &&
+                      widget.canaisOverride != null,
+                  leadingIcon: Icons.grid_view_rounded,
+                  onTap: () => widget.onCategoriaSelecionada(
+                    'Todos',
+                    canaisOverride: _todosOsCanais,
+                  ),
                 ),
               ),
               ...nomes.map((nome) {

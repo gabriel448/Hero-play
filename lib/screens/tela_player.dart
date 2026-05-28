@@ -80,6 +80,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
   late Player _player;
   late VideoController _controller;
 
+  // Fonte em uso. Para canais sem fontes alternativas e o proprio widget.canal;
+  // para canais com fontes e uma das entradas de Canal.fontes.
+  late Canal _fonteAtual;
+
   // Variante de qualidade em reproducao. Para canais comuns e o proprio
   // widget.canal; para canais agrupados e uma das variantes.
   late Canal _varianteAtual;
@@ -134,6 +138,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   @override
   void initState() {
     super.initState();
+    _fonteAtual = widget.canal.temFontes ? widget.canal.fontes.first : widget.canal;
     _varianteAtual = _varianteInicial();
     if (widget.playerExterno != null) {
       // Veio do mini player: reutiliza o player que já está tocando.
@@ -174,22 +179,21 @@ class _TelaPlayerState extends State<TelaPlayer> {
     }
   }
 
-  /// Decide qual variante de qualidade abrir. Canal comum: ele mesmo.
-  /// Canal agrupado: a qualidade lembrada da ultima vez, ou — na primeira
-  /// vez — a melhor qualidade disponivel.
+  /// Decide qual variante de qualidade abrir para a [_fonteAtual].
+  /// Canal comum: ele mesmo. Canal agrupado: qualidade lembrada ou a melhor.
   Canal _varianteInicial() {
-    final canal = widget.canal;
-    if (!canal.agrupado) return canal;
-    final idGrupo = canal.idGrupo;
+    final fonte = _fonteAtual;
+    if (!fonte.agrupado) return fonte;
+    final idGrupo = widget.canal.idGrupo;
     if (idGrupo != null) {
       final urlSalva = context.read<IptvProvider>().qualidadePreferida(idGrupo);
       if (urlSalva != null) {
-        for (final v in canal.variantes) {
+        for (final v in fonte.variantes) {
           if (v.url == urlSalva) return v;
         }
       }
     }
-    return canal.variantes.first; // melhor qualidade
+    return fonte.variantes.first;
   }
 
   /// Troca a qualidade do canal agrupado, reabrindo o stream na variante
@@ -205,6 +209,18 @@ class _TelaPlayerState extends State<TelaPlayer> {
     await _abrirStream();
   }
 
+  /// Troca para uma fonte alternativa, reabrindo o stream.
+  /// Ao trocar de fonte, escolhe a melhor qualidade disponivel naquela fonte.
+  Future<void> _trocarFonte(Canal novaFonte) async {
+    if (novaFonte.url == _fonteAtual.url && novaFonte.nome == _fonteAtual.nome) return;
+    _cancelarTimersBuffering();
+    setState(() {
+      _fonteAtual = novaFonte;
+      _varianteAtual = novaFonte.agrupado ? novaFonte.variantes.first : novaFonte;
+    });
+    await _abrirStream();
+  }
+
   void _cancelarTimersBuffering() {
     _timerBufferingLongo?.cancel();
     _timerBufferingLongo = null;
@@ -216,8 +232,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   void _tentarReduzirQualidade(String motivo) {
-    if (!mounted || !widget.canal.agrupado) return;
-    final variantes = widget.canal.variantes;
+    if (!mounted || !_fonteAtual.agrupado) return;
+    final variantes = _fonteAtual.variantes;
     final indexAtual = variantes.indexWhere((v) => v.url == _varianteAtual.url);
     if (indexAtual < 0 || indexAtual >= variantes.length - 1) return;
 
@@ -256,6 +272,16 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   String _rotuloQualidade(Canal v) => detectarQualidade(v.nome).rotulo;
+
+  String get _subtituloPlayer {
+    final partes = [_status];
+    if (widget.canal.temFontes) {
+      final idx = widget.canal.fontes.indexWhere((f) => f.nome == _fonteAtual.nome);
+      if (idx > 0) partes.add('Fonte ${idx + 1}');
+    }
+    if (_fonteAtual.agrupado) partes.add(_rotuloQualidade(_varianteAtual));
+    return partes.join(' · ');
+  }
 
   // Chamado pelo PopScope quando o canal é ao vivo: envia para mini player.
   void _minimizar() {
@@ -304,7 +330,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       if (bufferando) {
         setState(() => _status = 'Buffering...');
         if (_iniciado &&
-            widget.canal.agrupado &&
+            _fonteAtual.agrupado &&
             widget.canal.tipo == TipoCanal.aoVivo &&
             _preferencias.autoQualidade) {
           // 8s contínuos de buffering → troca imediata
@@ -568,7 +594,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
         tracks: _tracks,
         track: _track,
         canal: widget.canal,
+        fonteAtualNome: _fonteAtual.nome,
         varianteAtualUrl: _varianteAtual.url,
+        onTrocarFonte: _trocarFonte,
         onTrocarQualidade: _trocarQualidade,
       ),
     );
@@ -583,7 +611,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       state: state,
       iniciado: _iniciado,
       tracks: _tracks,
-      temQualidades: widget.canal.agrupado,
+      temQualidades: widget.canal.agrupado || widget.canal.temFontes,
       onFaixas: () => _mostrarFaixas(state.context),
       player: _player,
       onEpg: temEpg
@@ -721,9 +749,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
             children: [
               Text(widget.canal.nome, overflow: TextOverflow.ellipsis),
               Text(
-                widget.canal.agrupado
-                    ? '$_status · ${_rotuloQualidade(_varianteAtual)}'
-                    : _status,
+                _subtituloPlayer,
                 style: const TextStyle(fontSize: 11, color: Colors.white70),
               ),
             ],
@@ -1430,7 +1456,9 @@ class _PainelFaixas extends StatefulWidget {
   final Tracks tracks;
   final Track track;
   final Canal canal;
+  final String fonteAtualNome;
   final String varianteAtualUrl;
+  final ValueChanged<Canal> onTrocarFonte;
   final ValueChanged<Canal> onTrocarQualidade;
 
   const _PainelFaixas({
@@ -1438,7 +1466,9 @@ class _PainelFaixas extends StatefulWidget {
     required this.tracks,
     required this.track,
     required this.canal,
+    required this.fonteAtualNome,
     required this.varianteAtualUrl,
+    required this.onTrocarFonte,
     required this.onTrocarQualidade,
   });
 
@@ -1510,26 +1540,61 @@ class _PainelFaixasState extends State<_PainelFaixas> {
               ),
             ),
             Text(
-              widget.canal.agrupado ? 'Qualidade e Faixas' : 'Faixas e Legendas',
+              widget.canal.agrupado || widget.canal.temFontes
+                  ? 'Qualidade, Fontes e Faixas'
+                  : 'Faixas e Legendas',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: AppSpacing.lg),
 
-            // ── Qualidade (canais agrupados) ──────────────────────────────
-            if (widget.canal.agrupado) ...[
-              _SecaoLabel('QUALIDADE'),
+            // ── Fontes alternativas ───────────────────────────────────────
+            if (widget.canal.temFontes) ...[
+              _SecaoLabel('FONTES'),
               const SizedBox(height: AppSpacing.xs),
-              ...widget.canal.variantes.map((v) {
-                final q = detectarQualidade(v.nome);
+              ...widget.canal.fontes.map((f) {
+                final qualidade = f.agrupado
+                    ? detectarQualidade(f.variantes.first.nome).rotulo
+                    : detectarQualidade(f.nome).rotulo;
+                final temQualidade = qualidade != 'Padrao';
                 return _ItemFaixa(
-                  rotulo: q == Qualidade.desconhecida ? v.nome : q.rotulo,
-                  selecionado: v.url == widget.varianteAtualUrl,
+                  rotulo: temQualidade ? '${f.nome}  ·  $qualidade' : f.nome,
+                  selecionado: f.nome == widget.fonteAtualNome,
                   onTap: () {
                     Navigator.pop(context);
-                    widget.onTrocarQualidade(v);
+                    widget.onTrocarFonte(f);
                   },
                 );
               }),
+              const SizedBox(height: AppSpacing.base),
+            ],
+
+            // ── Qualidade (fonte atual, se agrupada) ──────────────────────
+            if (widget.canal.temFontes
+                ? widget.canal.fontes
+                    .firstWhere((f) => f.nome == widget.fonteAtualNome,
+                        orElse: () => widget.canal.fontes.first)
+                    .agrupado
+                : widget.canal.agrupado) ...[
+              _SecaoLabel('QUALIDADE'),
+              const SizedBox(height: AppSpacing.xs),
+              ...() {
+                final fonte = widget.canal.temFontes
+                    ? widget.canal.fontes.firstWhere(
+                        (f) => f.nome == widget.fonteAtualNome,
+                        orElse: () => widget.canal.fontes.first)
+                    : widget.canal;
+                return fonte.variantes.map((v) {
+                  final q = detectarQualidade(v.nome);
+                  return _ItemFaixa(
+                    rotulo: q == Qualidade.desconhecida ? v.nome : q.rotulo,
+                    selecionado: v.url == widget.varianteAtualUrl,
+                    onTap: () {
+                      Navigator.pop(context);
+                      widget.onTrocarQualidade(v);
+                    },
+                  );
+                });
+              }(),
               const SizedBox(height: AppSpacing.base),
             ],
 
@@ -1585,7 +1650,7 @@ class _PainelFaixasState extends State<_PainelFaixas> {
               ),
             ],
 
-            if (!temAudio && !temLegenda && !widget.canal.agrupado)
+            if (!temAudio && !temLegenda && !widget.canal.agrupado && !widget.canal.temFontes)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
                 child: Center(

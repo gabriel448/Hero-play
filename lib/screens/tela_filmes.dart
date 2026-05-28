@@ -56,6 +56,42 @@ const double _kPosterHeight = 150.0;
 const double _kPosterLabel = 28.0;
 const double _kItemExtent = _kPosterWidth + AppSpacing.sm;
 
+const int _kDesktopVisibleCount = 14;
+
+double _computeDesktopItemWidth(double availableWidth) =>
+    (availableWidth - AppSpacing.lg * 2) / _kDesktopVisibleCount - AppSpacing.sm;
+
+// Remove acentos e converte para minúsculas para comparação robusta.
+String _normalizar(String s) => s
+    .toLowerCase()
+    .replaceAll(RegExp(r'[àáâãä]'), 'a')
+    .replaceAll(RegExp(r'[èéêë]'), 'e')
+    .replaceAll(RegExp(r'[ìíîï]'), 'i')
+    .replaceAll(RegExp(r'[òóôõö]'), 'o')
+    .replaceAll(RegExp(r'[ùúûü]'), 'u')
+    .replaceAll('ç', 'c')
+    .replaceAll('ñ', 'n');
+
+// Palavras-chave que identificam categorias de lançamentos.
+const _kwLancamento = ['lanca', 'cinema', 'estreia', 'cartaz', 'em alta'];
+
+bool _ehCategoriaLancamento(String nome) {
+  final n = _normalizar(nome);
+  return _kwLancamento.any((k) => n.contains(k));
+}
+
+enum _OrdemCategoria { az, anoDesc, anoAsc, duracaoOuEp }
+
+// Extrai o ano de lancamento do titulo (ex: "Avatar (2009)" -> 2009).
+// Prefere o ultimo ano encontrado para evitar falso positivo em titulos
+// como "2001: A Space Odyssey".
+int? _extrairAno(String nome) {
+  final matches =
+      RegExp(r'\b(19[5-9]\d|20[0-3]\d)\b').allMatches(nome).toList();
+  if (matches.isEmpty) return null;
+  return int.tryParse(matches.last.group(0)!);
+}
+
 /// Tela estilo streaming: carrosseis por categoria — filmes ou séries.
 class TelaFilmes extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
@@ -79,6 +115,8 @@ class _TelaFilmesState extends State<TelaFilmes> {
   Map<String, Canal> _canaisPorUrl = const {};
   // Lookup url-do-episódio → Serie a que ele pertence
   Map<String, Serie> _seriesPorUrlEpisodio = const {};
+  // Lookup chave ("c:url" ou "s:nome") → item (Canal ou Serie)
+  Map<String, Object> _todosPorChave = const {};
 
   @override
   void initState() {
@@ -98,12 +136,22 @@ class _TelaFilmesState extends State<TelaFilmes> {
           }
         }
       }
+      final porChave = <String, Object>{};
+      for (final item in r.todosConteudos) {
+        if (item is Canal) {
+          porChave['c:${item.url}'] = item;
+        } else {
+          final s = item as Serie;
+          porChave['s:${s.nome}'] = s;
+        }
+      }
       setState(() {
         _conteudo = r.conteudo;
         _nomes = r.nomes;
         _todosConteudos = r.todosConteudos;
         _canaisPorUrl = lookup;
         _seriesPorUrlEpisodio = seriesPorEp;
+        _todosPorChave = porChave;
         _pronto = true;
       });
     });
@@ -208,14 +256,24 @@ class _TelaFilmesState extends State<TelaFilmes> {
             )
           : _conteudo.isEmpty
               ? _Vazio(tipo: widget.tipo)
-              : _BodyComCarrosseis(
-                  nomes: _nomes,
-                  conteudo: _conteudo,
-                  canaisPorUrl: _canaisPorUrl,
-                  seriesPorUrlEpisodio: _seriesPorUrlEpisodio,
-                  progressos: context.watch<IptvProvider>().progressos,
-                  onTap: (item) => _navegar(context, item),
-                ),
+              : Builder(builder: (context) {
+                  final provider = context.watch<IptvProvider>();
+                  final minhaListaItens = provider.minhaListaChaves
+                      .map((k) => _todosPorChave[k])
+                      .whereType<Object>()
+                      .toList();
+                  return _BodyComCarrosseis(
+                    nomes: _nomes,
+                    conteudo: _conteudo,
+                    canaisPorUrl: _canaisPorUrl,
+                    seriesPorUrlEpisodio: _seriesPorUrlEpisodio,
+                    progressos: provider.progressos,
+                    minhaListaItens: minhaListaItens,
+                    todosItens: _todosConteudos,
+                    tipo: widget.tipo,
+                    onTap: (item) => _navegar(context, item),
+                  );
+                }),
       ),
     );
   }
@@ -264,6 +322,9 @@ class _BodyComCarrosseis extends StatelessWidget {
   final Map<String, Canal> canaisPorUrl;
   final Map<String, Serie> seriesPorUrlEpisodio;
   final List<ProgressoCanal> progressos;
+  final List<Object> minhaListaItens;
+  final List<Object> todosItens;
+  final TipoVod tipo;
   final void Function(Object) onTap;
 
   const _BodyComCarrosseis({
@@ -272,6 +333,9 @@ class _BodyComCarrosseis extends StatelessWidget {
     required this.canaisPorUrl,
     required this.seriesPorUrlEpisodio,
     required this.progressos,
+    required this.minhaListaItens,
+    required this.todosItens,
+    required this.tipo,
     required this.onTap,
   });
 
@@ -297,7 +361,28 @@ class _BodyComCarrosseis extends StatelessWidget {
     }
 
     final temAndamento = continuar.isNotEmpty;
-    final total = nomes.length + (temAndamento ? 1 : 0);
+    final temMinhaLista = minhaListaItens.isNotEmpty;
+    final nomeTodos = tipo == TipoVod.series ? 'Todas' : 'Todos';
+    // Todos ordenados alfabeticamente para o carrossel fixo do topo.
+    final todosOrdenados = [...todosItens]..sort((a, b) {
+        String n(Object o) => o is Canal ? o.nome : (o as Serie).nome;
+        return n(a).toLowerCase().compareTo(n(b).toLowerCase());
+      });
+
+    // Lançamentos sempre ficam logo após os carrosseis especiais.
+    // Normaliza acentos antes de comparar (listas IPTV costumam omiti-los).
+    final ordemCategorias = [
+      ...nomes.where(_ehCategoriaLancamento),
+      ...nomes.where((n) => !_ehCategoriaLancamento(n)),
+    ];
+
+    // Carrosseis especiais no topo: Continuar → Minha lista → Todos/Todas.
+    int especialCount = 0;
+    if (temAndamento) especialCount++;
+    if (temMinhaLista) especialCount++;
+    especialCount++; // "Todos"/"Todas" sempre presente
+
+    final total = ordemCategorias.length + especialCount;
 
     return ListView.builder(
       padding: const EdgeInsets.only(
@@ -309,8 +394,23 @@ class _BodyComCarrosseis extends StatelessWidget {
         if (temAndamento && i == 0) {
           return _CarrosselContinuar(itens: continuar, onTap: onTap);
         }
-        final idx = temAndamento ? i - 1 : i;
-        final nome = nomes[idx];
+        if (temMinhaLista && i == (temAndamento ? 1 : 0)) {
+          return _CarrosselCategoria(
+            nomeCategoria: 'Minha lista',
+            itens: minhaListaItens,
+            onTap: onTap,
+          );
+        }
+        // Carrossel "Todos"/"Todas" — sempre no topo após os especiais acima.
+        if (i == especialCount - 1) {
+          return _CarrosselCategoria(
+            nomeCategoria: nomeTodos,
+            itens: todosOrdenados,
+            onTap: onTap,
+          );
+        }
+        final idx = i - especialCount;
+        final nome = ordemCategorias[idx];
         return _CarrosselCategoria(
           nomeCategoria: nome,
           itens: conteudo[nome]!,
@@ -357,6 +457,7 @@ class _CarrosselContinuarState extends State<_CarrosselContinuar> {
 
   @override
   Widget build(BuildContext context) {
+    final desktop = isDesktop(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -382,33 +483,47 @@ class _CarrosselContinuarState extends State<_CarrosselContinuar> {
             ],
           ),
         ),
-        _CarrosselComBotoes(
-          ctrl: _ctrl,
-          height: _kPosterHeight + _kPosterLabel,
-          child: ListView.builder(
-            controller: _ctrl,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: widget.itens.length,
-            itemExtent: _kItemExtent,
-            itemBuilder: (_, i) {
-              final item = widget.itens[i];
-              final serie = item.serie;
-              if (serie != null) {
-                return _PosterSerie(
-                  key: ValueKey('cont:${serie.nome}'),
-                  serie: serie,
-                  onTap: () => widget.onTap(serie),
-                );
-              }
-              final filme = item.filme!;
-              return _Poster(
-                canal: filme,
-                progresso: item.progresso,
-                onTap: () => widget.onTap(filme),
-              );
-            },
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final itemW = desktop
+                ? _computeDesktopItemWidth(constraints.maxWidth)
+                : _kPosterWidth;
+            final posterH = desktop
+                ? itemW * (_kPosterHeight / _kPosterWidth)
+                : _kPosterHeight;
+            final itemExtent = itemW + AppSpacing.sm;
+            return _CarrosselComBotoes(
+              ctrl: _ctrl,
+              height: posterH + _kPosterLabel,
+              scrollStep: itemExtent * 3,
+              child: ListView.builder(
+                controller: _ctrl,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                itemCount: widget.itens.length,
+                itemExtent: itemExtent,
+                itemBuilder: (_, i) {
+                  final item = widget.itens[i];
+                  final serie = item.serie;
+                  if (serie != null) {
+                    return _PosterSerie(
+                      key: ValueKey('cont:${serie.nome}'),
+                      serie: serie,
+                      width: itemW,
+                      onTap: () => widget.onTap(serie),
+                    );
+                  }
+                  final filme = item.filme!;
+                  return _Poster(
+                    canal: filme,
+                    progresso: item.progresso,
+                    width: itemW,
+                    onTap: () => widget.onTap(filme),
+                  );
+                },
+              ),
+            );
+          },
         ),
       ],
     );
@@ -488,20 +603,35 @@ class _CarrosselCategoriaState extends State<_CarrosselCategoria> {
             ),
           ),
         ),
-        _CarrosselComBotoes(
-          ctrl: _ctrl,
-          height: _kPosterHeight + _kPosterLabel,
-          child: ListView.builder(
-            controller: _ctrl,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: widget.itens.length,
-            itemExtent: _kItemExtent,
-            itemBuilder: (_, i) => _CardConteudo(
-              item: widget.itens[i],
-              onTap: () => widget.onTap(widget.itens[i]),
-            ),
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final desktop = isDesktop(context);
+            final itemW = desktop
+                ? _computeDesktopItemWidth(constraints.maxWidth)
+                : _kPosterWidth;
+            final posterH = desktop
+                ? itemW * (_kPosterHeight / _kPosterWidth)
+                : _kPosterHeight;
+            final itemExtent = itemW + AppSpacing.sm;
+            return _CarrosselComBotoes(
+              ctrl: _ctrl,
+              height: posterH + _kPosterLabel,
+              scrollStep: itemExtent * 3,
+              child: ListView.builder(
+                controller: _ctrl,
+                scrollDirection: Axis.horizontal,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                itemCount: widget.itens.length,
+                itemExtent: itemExtent,
+                itemBuilder: (_, i) => _CardConteudo(
+                  item: widget.itens[i],
+                  width: itemW,
+                  onTap: () => widget.onTap(widget.itens[i]),
+                ),
+              ),
+            );
+          },
         ),
       ],
     );
@@ -514,11 +644,13 @@ class _CarrosselComBotoes extends StatefulWidget {
   final ScrollController ctrl;
   final double height;
   final Widget child;
+  final double scrollStep;
 
   const _CarrosselComBotoes({
     required this.ctrl,
     required this.height,
     required this.child,
+    this.scrollStep = _kScrollStep,
   });
 
   @override
@@ -584,7 +716,7 @@ class _CarrosselComBotoesState extends State<_CarrosselComBotoes> {
               child: Center(
                 child: _BotaoNavCarrossel(
                   icone: Icons.chevron_left_rounded,
-                  onTap: () => _rolar(-_kScrollStep),
+                  onTap: () => _rolar(-widget.scrollStep),
                 ),
               ),
             ),
@@ -596,7 +728,7 @@ class _CarrosselComBotoesState extends State<_CarrosselComBotoes> {
               child: Center(
                 child: _BotaoNavCarrossel(
                   icone: Icons.chevron_right_rounded,
-                  onTap: () => _rolar(_kScrollStep),
+                  onTap: () => _rolar(widget.scrollStep),
                 ),
               ),
             ),
@@ -635,13 +767,25 @@ class _BotaoNavCarrossel extends StatelessWidget {
 class _CardConteudo extends StatelessWidget {
   final Object item;
   final VoidCallback onTap;
-  const _CardConteudo({required this.item, required this.onTap});
+  final double width;
+  const _CardConteudo({
+    required this.item,
+    required this.onTap,
+    this.width = _kPosterWidth,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (item is Canal) return _Poster(canal: item as Canal, onTap: onTap);
+    if (item is Canal) {
+      return _Poster(canal: item as Canal, onTap: onTap, width: width);
+    }
     final serie = item as Serie;
-    return _PosterSerie(key: ValueKey(serie.nome), serie: serie, onTap: onTap);
+    return _PosterSerie(
+      key: ValueKey(serie.nome),
+      serie: serie,
+      onTap: onTap,
+      width: width,
+    );
   }
 }
 
@@ -649,14 +793,20 @@ class _Poster extends StatelessWidget {
   final Canal canal;
   final VoidCallback onTap;
   final ProgressoCanal? progresso;
-  const _Poster({required this.canal, required this.onTap, this.progresso});
+  final double width;
+  const _Poster({
+    required this.canal,
+    required this.onTap,
+    this.progresso,
+    this.width = _kPosterWidth,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
-        width: _kPosterWidth,
+        width: width,
         child: Material(
           color: AppColors.surface1,
           borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -734,7 +884,13 @@ class _Poster extends StatelessWidget {
 class _PosterSerie extends StatefulWidget {
   final Serie serie;
   final VoidCallback onTap;
-  const _PosterSerie({super.key, required this.serie, required this.onTap});
+  final double width;
+  const _PosterSerie({
+    super.key,
+    required this.serie,
+    required this.onTap,
+    this.width = _kPosterWidth,
+  });
 
   @override
   State<_PosterSerie> createState() => _PosterSerieState();
@@ -755,7 +911,7 @@ class _PosterSerieState extends State<_PosterSerie> {
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
-        width: _kPosterWidth,
+        width: widget.width,
         child: Material(
           color: AppColors.surface1,
           borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -956,6 +1112,8 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
   String _busca = '';
   late final int _numFilmes;
   late final int _numSeries;
+  late final bool _ehSeries;
+  _OrdemCategoria _ordem = _OrdemCategoria.az;
 
   @override
   void initState() {
@@ -963,6 +1121,7 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
     _filtrados = widget.itens;
     _numFilmes = widget.itens.whereType<Canal>().length;
     _numSeries = widget.itens.whereType<Serie>().length;
+    _ehSeries = _numSeries > _numFilmes;
   }
 
   @override
@@ -981,6 +1140,51 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
       parts.add('$_numSeries ${_numSeries == 1 ? "série" : "séries"}');
     }
     return parts.join(' · ');
+  }
+
+  String _nomeItem(Object o) => o is Canal ? o.nome : (o as Serie).nome;
+
+  List<Object> _ordenar(List<Object> lista) {
+    final copia = [...lista];
+    switch (_ordem) {
+      case _OrdemCategoria.az:
+        copia.sort((a, b) =>
+            _normalizar(_nomeItem(a)).compareTo(_normalizar(_nomeItem(b))));
+      case _OrdemCategoria.anoDesc:
+      case _OrdemCategoria.anoAsc:
+        copia.sort((a, b) {
+          final ya = _extrairAno(_nomeItem(a));
+          final yb = _extrairAno(_nomeItem(b));
+          if (ya == null && yb == null) {
+            return _normalizar(_nomeItem(a))
+                .compareTo(_normalizar(_nomeItem(b)));
+          }
+          if (ya == null) return 1;
+          if (yb == null) return -1;
+          return _ordem == _OrdemCategoria.anoDesc
+              ? yb.compareTo(ya)
+              : ya.compareTo(yb);
+        });
+      case _OrdemCategoria.duracaoOuEp:
+        copia.sort((a, b) {
+          if (a is Serie && b is Serie) {
+            final diff = b.totalEpisodios.compareTo(a.totalEpisodios);
+            return diff != 0
+                ? diff
+                : _normalizar(a.nome).compareTo(_normalizar(b.nome));
+          }
+          if (a is Canal && b is Canal) {
+            final da = a.duracaoSegundos ?? 0;
+            final db = b.duracaoSegundos ?? 0;
+            final diff = db.compareTo(da);
+            return diff != 0
+                ? diff
+                : _normalizar(a.nome).compareTo(_normalizar(b.nome));
+          }
+          return _normalizar(_nomeItem(a)).compareTo(_normalizar(_nomeItem(b)));
+        });
+    }
+    return copia;
   }
 
   void _filtrar(String q) {
@@ -1007,8 +1211,56 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
     );
   }
 
+  String get _labelOrdem {
+    switch (_ordem) {
+      case _OrdemCategoria.az:
+        return 'A-Z';
+      case _OrdemCategoria.anoDesc:
+        return 'Mais recentes';
+      case _OrdemCategoria.anoAsc:
+        return 'Mais antigos';
+      case _OrdemCategoria.duracaoOuEp:
+        return _ehSeries ? 'Mais episódios' : 'Duração';
+    }
+  }
+
+  PopupMenuItem<_OrdemCategoria> _itemOrdem(
+    _OrdemCategoria valor,
+    String label,
+    IconData icone,
+  ) {
+    final selecionado = _ordem == valor;
+    return PopupMenuItem(
+      value: valor,
+      child: Row(
+        children: [
+          Icon(
+            icone,
+            size: 18,
+            color: selecionado ? AppColors.accent : AppColors.textSecondary,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selecionado ? AppColors.accent : null,
+                fontWeight:
+                    selecionado ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          if (selecionado)
+            const Icon(Icons.check_rounded,
+                size: 16, color: AppColors.accent),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final exibidos = _ordenar(_filtrados);
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -1025,6 +1277,52 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
             ),
           ],
         ),
+        actions: [
+          PopupMenuButton<_OrdemCategoria>(
+            tooltip: 'Ordenar por',
+            initialValue: _ordem,
+            onSelected: (v) => setState(() => _ordem = v),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.sort_rounded, size: 20),
+                  const SizedBox(width: 4),
+                  Text(
+                    _labelOrdem,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            ),
+            itemBuilder: (_) => [
+              _itemOrdem(
+                _OrdemCategoria.az,
+                'A-Z',
+                Icons.sort_by_alpha_rounded,
+              ),
+              _itemOrdem(
+                _OrdemCategoria.anoDesc,
+                'Mais recentes',
+                Icons.calendar_today_rounded,
+              ),
+              _itemOrdem(
+                _OrdemCategoria.anoAsc,
+                'Mais antigos',
+                Icons.history_rounded,
+              ),
+              _itemOrdem(
+                _OrdemCategoria.duracaoOuEp,
+                _ehSeries ? 'Mais episódios' : 'Duração',
+                _ehSeries
+                    ? Icons.format_list_numbered_rounded
+                    : Icons.timelapse_rounded,
+              ),
+            ],
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(64),
           child: Padding(
@@ -1054,7 +1352,7 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
           ),
         ),
       ),
-      body: _filtrados.isEmpty
+      body: exibidos.isEmpty
           ? Center(
               child: Text(
                 'Nenhum resultado encontrado',
@@ -1073,10 +1371,10 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
                 crossAxisSpacing: AppSpacing.sm,
                 mainAxisSpacing: AppSpacing.sm,
               ),
-              itemCount: _filtrados.length,
+              itemCount: exibidos.length,
               itemBuilder: (_, i) => _CardConteudo(
-                item: _filtrados[i],
-                onTap: () => _navegar(_filtrados[i]),
+                item: exibidos[i],
+                onTap: () => _navegar(exibidos[i]),
               ),
             ),
     );
