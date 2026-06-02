@@ -589,6 +589,24 @@
       font-family: monospace;
       color: var(--text-secondary);
     }
+    .step-desc a {
+      color: var(--accent-bright);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .step-desc a:hover { text-decoration: underline; }
+    .step-note {
+      display: block;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--divider);
+      border-radius: 10px;
+      font-size: 13px;
+      color: var(--text-tertiary);
+      line-height: 1.6;
+    }
+    .step-note strong { color: var(--text-secondary); font-weight: 600; }
 
     /* ── FOOTER ──────────────────────────────────────────────────────── */
     footer {
@@ -966,7 +984,7 @@
   <div class="section-header fade-in">
     <p class="section-eyebrow">Como usar</p>
     <h2 class="section-title">Configure em minutos</h2>
-    <p class="section-subtitle">Siga os passos abaixo para começar a assistir com sua lista IPTV.</p>
+    <p class="section-subtitle">Crie uma conta gratuita para sincronizar suas listas em todos os seus dispositivos automaticamente.</p>
   </div>
 
   <div class="steps">
@@ -975,9 +993,8 @@
       <div class="step-body">
         <h3 class="step-title">Obtenha o link da sua lista</h3>
         <p class="step-desc">
-          Solicite ao seu <strong>fornecedor de IPTV</strong> o link da lista no formato <strong>M3U</strong>. Ele será uma URL ou um arquivo com extensão
+          Solicite ao seu <strong>fornecedor de IPTV</strong> o link no formato <strong>M3U</strong> — uma URL ou arquivo com extensão
           <span class="inline-code">.m3u</span> ou <span class="inline-code">.m3u8</span>.
-          Se não tiver o link, entre em contato com seu fornecedor e solicite-o diretamente.
         </p>
       </div>
     </div>
@@ -985,10 +1002,10 @@
     <div class="step fade-in">
       <div class="step-num">2</div>
       <div class="step-body">
-        <h3 class="step-title">Instale o Hero Play</h3>
+        <h3 class="step-title">Crie sua conta gratuita</h3>
         <p class="step-desc">
-          Baixe o instalador na seção de <strong>Download</strong> acima. No Android, se necessário, habilite a instalação de fontes desconhecidas em
-          <strong>Configurações → Segurança</strong> antes de instalar o APK.
+          <a href="login.html">Cadastre-se</a> com e-mail e senha em segundos. Com uma conta, suas listas ficam salvas
+          na nuvem e aparecem automaticamente em todos os seus dispositivos — celular, tablet e desktop.
         </p>
       </div>
     </div>
@@ -996,10 +1013,10 @@
     <div class="step fade-in">
       <div class="step-num">3</div>
       <div class="step-body">
-        <h3 class="step-title">Importe sua lista</h3>
+        <h3 class="step-title">Adicione sua lista no painel</h3>
         <p class="step-desc">
-          Abra o Hero Play e toque em <strong>"Importar lista"</strong>. Cole o link M3U no campo indicado ou selecione o arquivo do dispositivo.
-          Dê um nome para a lista e confirme — os canais são carregados automaticamente.
+          Acesse o <a href="painel.html">painel web</a>, clique em <strong>"+ Nova lista"</strong>,
+          cole o link M3U e dê um nome. Você pode cadastrar e gerenciar quantas listas quiser.
         </p>
       </div>
     </div>
@@ -1007,10 +1024,26 @@
     <div class="step fade-in">
       <div class="step-num">4</div>
       <div class="step-body">
-        <h3 class="step-title">Pronto! Comece a assistir</h3>
+        <h3 class="step-title">Instale o Hero Play</h3>
         <p class="step-desc">
-          Navegue pelos canais, use a busca para encontrar o que procura, marque favoritos e crie suas próprias categorias.
-          No desktop, você pode assistir em mini player enquanto navega pela lista. Aproveite!
+          Baixe o instalador na seção <a href="#download">Download</a> acima. No Android, se necessário, habilite
+          a instalação de fontes desconhecidas em <strong>Configurações → Segurança</strong> antes de instalar o APK.
+        </p>
+      </div>
+    </div>
+
+    <div class="step fade-in">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h3 class="step-title">Faça login e comece a assistir</h3>
+        <p class="step-desc">
+          Abra o Hero Play, toque em <strong>"Entrar"</strong> e acesse com sua conta. As listas que você
+          cadastrou no painel aparecem automaticamente — sem precisar importar nada. Navegue pelos canais,
+          use a busca, marque favoritos e aproveite.
+          <span class="step-note">
+            <strong>Prefere usar sem conta?</strong> Toque em "Continuar sem conta" e importe sua lista
+            diretamente no app pelo botão <strong>"Importar lista"</strong>.
+          </span>
         </p>
       </div>
     </div>

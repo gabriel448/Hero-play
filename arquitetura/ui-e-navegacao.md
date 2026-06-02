@@ -25,13 +25,18 @@ de item e a presença de player embutido vs. mini player flutuante.
 ## Bootstrap e roteamento inicial
 
 [`app.dart`](../lib/app.dart) monta o `MaterialApp` (tema dark forçado,
-`navigatorKey: rootNavigatorKey`) e decide a home:
+`navigatorKey: rootNavigatorKey`) e decide a tela raiz via `_TelaRaiz` —
+um `StatelessWidget` que observa múltiplos providers com `context.select`:
 
-```dart
-final temIdioma = context.watch<PreferenciasProvider>().idiomaDefinido;
-home: !temIdioma ? const TelaOnboarding() : const TelaInicial();
-builder: (context, child) => MiniPlayerOverlay(child: child!), // overlay global
 ```
+onboarding (sem idioma)
+  → login (conta disponível + não logado + não pulou)
+      → TelaImportandoListas (logado + primeiraSync == true)
+          → TelaInicial
+```
+
+Transições são feitas com `AnimatedSwitcher` + `FadeTransition` (320 ms) para
+evitar substituição abrupta de tela.
 
 O `MiniPlayerOverlay` envolve **toda** a árvore via `MaterialApp.builder`, então
 o mini player vive fora de qualquer `Navigator`. Por isso existe o
@@ -41,11 +46,16 @@ player acesso ao Navigator certo para empilhar telas (ex.: botão "expandir").
 A navegação é **imperativa** com `Navigator.push(MaterialPageRoute(...))` — não
 há router declarativo.
 
+A navegação é **imperativa** com `Navigator.push(MaterialPageRoute(...))` — não
+há router declarativo.
+
 ## Telas (`lib/screens/`)
 
 | Tela | Papel |
 |---|---|
 | `TelaOnboarding` | Escolha de idioma na primeira abertura |
+| `TelaLogin` | Login / cadastro + "continuar sem conta" (gate de conta) |
+| `TelaImportandoListas` | Progresso da 1ª sincronização pós-login |
 | `TelaInicial` | Home: hub entre Canais / Filmes / Séries + gerenciar/config |
 | `TelaCanais` | Canais ao vivo (3 layouts: phone, tablet, desktop) |
 | `TelaFilmes` / `TelaSeries` | Carrosséis VOD por categoria (`TipoVod`) |
@@ -53,8 +63,8 @@ há router declarativo.
 | `TelaDetalhes` | Detalhe de filme/série (sinopse TMDB, episódios, "minha lista") |
 | `TelaPlayer` | Player em tela cheia (ao vivo e VOD) |
 | `TelaFavoritos` / `TelaHistorico` | Listas persistidas |
-| `TelaImportar` / `TelaGerenciarListas` | Gestão de listas M3U |
-| `TelaConfiguracoes` | Idioma, ordenações, EPG |
+| `TelaGerenciarListas` | Gestão de listas M3U (importar, editar, remover, sync) |
+| `TelaConfiguracoes` | Idioma, ordenações, EPG, seção Conta (logout) |
 | `TelaCategoriaPersonalizada` | Categorias criadas pelo usuário |
 
 ### `TelaInicial` — cache de agrupamento
@@ -101,6 +111,7 @@ o **handle nativo** do vídeo vem dos singletons `PlayerAoVivo`/`PlayerVod` — 
 | `PainelEpg` / `ModalProgramacao` | UI do guia de programação |
 | `DialogoEditarLista` | Modal de edição de lista |
 | `Skeleton` | Placeholders de carregamento |
+| `AnimadoEntrada` | Fade + slide de entrada reutilizável (usado em `TelaLogin` e `TelaImportandoListas`) |
 
 ## Tema
 

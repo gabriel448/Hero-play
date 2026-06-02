@@ -96,3 +96,36 @@ proxy** (a chave de API fica server-side — ver [build-e-deploy.md](build-e-dep
 Fachada única sobre o Hive. Abre todas as boxes em `inicializar()` (chamado uma
 vez no `main`). Toda leitura/escrita de disco passa por aqui. Detalhe das boxes e
 chaves em [persistencia.md](persistencia.md).
+
+## Contas e sincronização
+
+### `ServicoConta` — [servico_conta.dart](../lib/services/servico_conta.dart)
+Camada de I/O para a conta do usuário e a sincronização de listas via Supabase.
+Instanciado apenas quando `SUPABASE_URL` e `SUPABASE_ANON_KEY` estão no `.env`;
+sem eles, `ServicoConta` fica `null` e o app roda em modo local-only.
+
+**Autenticação (email/senha):**
+- `entrar`, `criarConta`, `sair` — delegam ao `SupabaseClient.auth`.
+- `mudancasAuth` — stream de `AuthState`; o `ContaProvider` o escuta para
+  notificar a UI quando o usuário entra ou sai.
+
+**CRUD de listas — via Edge Function `iptv`:**
+
+Toda escrita/leitura de listas passa pela Edge Function Deno
+(`supabase/functions/iptv/`), **não** diretamente pela tabela. A razão:
+listas Xtream embutem `username=` / `password=` na URL — a Edge Function
+**extrai e cifra** essas credenciais com AES-256-CBC antes de gravar, e
+**reconstrói** a URL completa na leitura. Assim o banco nunca armazena senhas
+em texto puro.
+
+| Método HTTP | Ação |
+|---|---|
+| `GET` | `listarListas()` — retorna `List<ListaRemota>` com URLs reconstruídas |
+| `POST` | `salvarLista(nome, fonteUrl, epgUrl?)` — upsert por `(user_id, fonte_url_sanitizada)` |
+| `DELETE` | `removerLista(fonteUrl)` — remove por URL (Edge Function sanitiza antes de buscar) |
+
+`trocarFonteLista` faz `removerLista` + `salvarLista` — usada quando o usuário
+edita a URL de uma lista existente.
+
+> **Invariante:** o app nunca faz `supabase.from('listas').insert(...)` direto.
+> Sempre usa `ServicoConta`, que roteia pela Edge Function.

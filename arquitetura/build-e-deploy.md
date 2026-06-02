@@ -89,20 +89,95 @@ Pasta [`API/`](../API/) — proxy serverless Node.js, deploy no **Vercel**.
 Sem o proxy configurado, o `TmdbService` retorna vazio e o app funciona normal
 (sem sinopse/poster TMDB).
 
-## Site (landing page)
+## Supabase (contas e sincronização)
 
-[`website/index.html`](../website/index.html) — página estática, deploy no
-Vercel. O [`vercel.json`](../vercel.json) da raiz aponta `outputDirectory:
-website`. Os links de download na seção "Download" apontam para os assets do
-release no GitHub — **precisam ser atualizados a cada nova versão** se o nome do
-arquivo mudar (o padrão `vX.Y.Z` muda a cada release).
+### Estrutura
+
+```
+supabase/
+├── config.toml            # Configuração do projeto Supabase CLI (local dev)
+├── schema.sql             # DDL da tabela `listas` + RLS + constraint unique(user_id, fonte_url)
+├── .env                   # ENCRYPTION_KEY (AES-256-CBC) — NÃO versionado
+├── functions/
+│   └── iptv/              # Edge Function Deno — CRUD de listas com cifragem Xtream
+└── templates/
+    ├── mfa-ativado.html   # Email enviado quando MFA é ativado
+    └── senha-alterada.html # Email enviado quando senha é alterada
+```
+
+### Edge Function `iptv`
+
+Roda no Deno (runtime Supabase). Responsável por:
+- **Cifragem:** extrai `username=` / `password=` da URL Xtream e cifra com
+  AES-256-CBC usando `ENCRYPTION_KEY` do `supabase/.env`.
+- **Escrita:** grava `fonte_url` sanitizada (sem credenciais) + `credenciais_enc`
+  (cifradas) na tabela.
+- **Leitura:** descriptografa `credenciais_enc` e reconstrói a URL completa
+  antes de retornar ao app.
+
+Deploy:
+```bash
+supabase functions deploy iptv --project-ref <ref>
+```
+
+### Configuração local
+
+Preencher `supabase/.env` com:
+```env
+ENCRYPTION_KEY=<chave-hex-64-chars>
+```
+
+### Variáveis no app Flutter
+
+No `.env` da raiz:
+```env
+SUPABASE_URL=https://<ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-key-publica>
+```
+Sem essas variáveis, o app roda em modo local-only (login não aparece).
+
+### Schema
+
+```sql
+CREATE TABLE listas (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  nome          TEXT NOT NULL,
+  fonte_url     TEXT NOT NULL,       -- URL sanitizada (sem credenciais)
+  credenciais_enc TEXT,              -- credenciais Xtream cifradas (AES-256-CBC)
+  epg_url       TEXT,
+  criado_em     TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, fonte_url)         -- chave do upsert
+);
+-- RLS: só o dono lê/escreve
+ALTER TABLE listas ENABLE ROW LEVEL SECURITY;
+```
+
+## Site (landing page + painel)
+
+[`website/`](../website/) — páginas estáticas, deploy no Vercel. O
+[`vercel.json`](../vercel.json) da raiz aponta `outputDirectory: website`.
+
+| Arquivo | Papel |
+|---|---|
+| `index.html` | Landing page pública |
+| `login.html` | Login / cadastro + MFA (autenticação Supabase client-side) |
+| `painel.html` | Painel do usuário: gerenciar listas, configurações de conta, MFA |
+| `supabase-config.js` | URL + anon key do Supabase (pública por design — protegida por RLS) |
+| `assets/auth.css` | Estilos compartilhados de `login.html` e `painel.html` |
+
+Os links de download na seção "Download" apontam para os assets do release no
+GitHub — **precisam ser atualizados a cada nova versão**.
 
 ## Configuração local (.env)
 
 ```env
 TMDB_PROXY_URL=https://sua-api.vercel.app
+SUPABASE_URL=https://<ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-key-publica>
 ```
 Carregado em runtime por `flutter_dotenv`; declarado como asset no `pubspec.yaml`.
+Sem `SUPABASE_URL`/`SUPABASE_ANON_KEY`, o app roda em modo local-only.
 
 ## Resumo dos "gotchas"
 
@@ -114,3 +189,5 @@ Carregado em runtime por `flutter_dotenv`; declarado como asset no `pubspec.yaml
 | `cpp_client_wrapper` | Recopiar `.cc` após `flutter clean` no Windows |
 | Links do site | Atualizar a cada release com nome de arquivo novo |
 | Remote git | É `gabriel448/Hero-play` (não `IPTV`) |
+| `supabase/.env` | Guardar `ENCRYPTION_KEY` junto com o keystore — sem ela não dá para descriptografar listas Xtream |
+| Edge Function | Fazer `supabase functions deploy iptv` após mudanças em `supabase/functions/iptv/` |

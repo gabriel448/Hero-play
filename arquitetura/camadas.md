@@ -21,6 +21,11 @@ Estruturas de dados puras. **Sem** dependência de Flutter, Hive ou rede. Cada
 modelo sabe se (de)serializar via `toMap()` / `fromMap()` (usado pelo Hive) e
 pode ter lógica de domínio leve (ex.: `Serie.agrupar`, `Programa.ehAtual`).
 
+Modelos principais: `Canal`, `ListaM3U`, `Serie`, `Programa`, `Favorito`,
+`ProgressoAssistido`, `CategoriaPersonalizada` — todos com `toMap/fromMap`
+para o Hive. `ListaRemota` é um modelo mais simples (somente nuvem — sem
+`toMap/fromMap`, pois nunca vai para o Hive).
+
 Regra: um model nunca importa de `services`, `state` ou `screens`.
 
 Detalhe em [modelos.md](modelos.md).
@@ -48,9 +53,10 @@ services e chamam `notifyListeners()` quando algo muda.
 
 | Provider | Responsabilidade |
 |---|---|
-| `IptvProvider` | Listas, favoritos, histórico, progresso, "minha lista", busca, lista ativa |
+| `IptvProvider` | Listas, favoritos, histórico, progresso, "minha lista", busca, lista ativa, sync Supabase |
+| `ContaProvider` | Estado de autenticação (logado/deslogado); delega ao `ServicoConta` |
 | `MiniPlayerProvider` | Estado do mini player flutuante (canal, player, posição, tamanho) |
-| `PreferenciasProvider` | Idioma, ordenações, auto-qualidade |
+| `PreferenciasProvider` | Idioma, ordenações, auto-qualidade, flag `pulouLogin` |
 | `ServicoEpg` | É service **e** `ChangeNotifier` — a UI escuta o estado de carregamento do EPG |
 
 A UI lê com `context.watch<T>()` (reativo) ou `context.read<T>()` (one-shot, em

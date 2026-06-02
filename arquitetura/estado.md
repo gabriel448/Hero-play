@@ -13,10 +13,14 @@ MultiProvider(
     ChangeNotifierProvider<ServicoEpg>.value(value: servicoEpg),
     Provider<TmdbService>.value(value: tmdb),          // sem notify — stateless
     ChangeNotifierProvider<MiniPlayerProvider>(create: (_) => MiniPlayerProvider()),
+    ChangeNotifierProvider<ContaProvider>(create: (_) => ContaProvider(servicoConta)),
   ],
   child: const IptvApp(),
 )
 ```
+
+`servicoConta` é `null` se as credenciais Supabase não estiverem no `.env`; nesse
+caso `ContaProvider.disponivel == false` e a tela de login nunca aparece.
 
 ## Como a UI consome
 
@@ -39,7 +43,12 @@ services (`Armazenamento`, `CarregadorLista`, `ParserM3U`, `ServicoEpg`).
 **Grupos de ações:**
 - **Importação:** `importarPorUrl`, `importarPorArquivo`, `atualizarLista`,
   `atualizarUrlLista`, `renomearLista`, `removerLista`. Todas passam por
-  `_executarComLoading` (seta `carregando`/`erro` e notifica).
+  `_executarComLoading` (seta `carregando`/`erro` e notifica). Quando logado,
+  cada ação de lista também chama o `ServicoConta` equivalente (best-effort).
+- **Sincronização:** `sincronizarDoSupabase()` — busca definições na nuvem e
+  importa as que não existem localmente. `primeiraSync` fica `true` durante
+  esse processo para o `app.dart` exibir `TelaImportandoListas`. `limparListasLocais()`
+  apaga o cache Hive no logout (evita mistura de contas).
 - **Lista ativa:** `selecionarLista`, `ativarLista` (persiste qual abre no
   startup), `_restaurarListaAtiva` (no boot).
 - **EPG:** `atualizarEpgUrl` + `_baixarEpgEmBackground` (dispara download que
@@ -87,17 +96,29 @@ Geometria do mini player desktop é derivada de uma largura única
 (`larguraDesktop`, clampada 220–800px): altura do vídeo é 16:9, barra de botões
 é proporcional.
 
+## `ContaProvider` — [conta_provider.dart](../lib/state/conta_provider.dart)
+
+Expõe o estado de autenticação para a UI e delega ações ao `ServicoConta`.
+
+- `disponivel` — `true` quando as credenciais Supabase estão no `.env`.
+- `estaLogado`, `email` — derivados da sessão atual.
+- `entrar`, `criarConta`, `sair` — delegam ao `ServicoConta`.
+- Escuta `ServicoConta.mudancasAuth` (stream) e chama `notifyListeners()` a cada
+  mudança de sessão — assim o `app.dart` reage ao login/logout sem polling.
+
+O `app.dart` usa `ContaProvider` + `PreferenciasProvider` para decidir qual tela
+raiz mostrar: `precisaLogin = disponivel && !logado && !pulouLogin`.
+
 ## `PreferenciasProvider` — [preferencias_provider.dart](../lib/state/preferencias_provider.dart)
 
 Preferências do usuário, persistidas via `Armazenamento`:
 - `idioma` (`IdiomaApp?`) — `null` dispara o onboarding. `idiomaDefinido` e
   `idiomaEfetivo` (cai em português).
 - `autoQualidade` (bool).
+- `pulouLogin` (bool) — o usuário tocou em "Continuar sem conta"; não mostrar
+  a tela de login novamente até o app ser reiniciado.
 - `ordemCategorias` (`OrdemCategorias`: popularidade | A-Z) e `ordemCanais`
   (`OrdemCanais`: padrão | A-Z) — ordenação das listas ao vivo.
-
-`IptvApp` escuta `idiomaDefinido` para decidir entre `TelaOnboarding` e
-`TelaInicial`.
 
 ## `ServicoEpg` como provider
 
