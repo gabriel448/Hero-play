@@ -203,10 +203,14 @@
         } else {
           const { data, error } = await sb.auth.signUp({ email:emailVal, password:senhaVal });
           if (error) throw error;
-          if (data.session) await sb.auth.signOut();
-          mostrarOk('Conta criada! Confirme seu email e depois entre.');
-          $('senha').value=''; $('confirmar').value='';
-          setTimeout(()=>setModo('entrar',{manterMsg:true}), 1400);
+          if (data.session) {
+            mostrarOk('Conta criada! Redirecionando…');
+            setTimeout(() => navegar('painel.html'), 900);
+          } else {
+            mostrarOk('Conta criada! Entre com seus dados.');
+            $('senha').value=''; $('confirmar').value='';
+            setTimeout(()=>setModo('entrar',{manterMsg:true}), 1400);
+          }
         }
       } catch (err) {
         mostrarErro(traduzErro(err.message||'Erro inesperado.'));
