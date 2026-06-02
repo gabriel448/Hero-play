@@ -1,6 +1,14 @@
 # ─── Secrets ─────────────────────────────────────────────────────────────────
 .env
 
+# ─── Supabase ─────────────────────────────────────────────────────────────────
+
+# Segredos locais para dev (ENCRYPTION_KEY, etc.) — NUNCA versionar
+supabase/.env
+
+# Arquivos temporarios gerados pelo Supabase CLI (local dev / docker)
+supabase/.temp/
+
 # ─── Flutter / Dart ──────────────────────────────────────────────────────────
 
 # Build output
@@ -82,6 +90,9 @@ skills-lock.json
 
 # Settings locais do Claude Code (por maquina — nunca versionar)
 .claude/settings.local.json
+
+# Configuracao de servidores MCP (especifica da maquina/ferramenta)
+.mcp.json
 
 # ─── Sistema Operacional ─────────────────────────────────────────────────────
 

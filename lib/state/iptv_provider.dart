@@ -3,11 +3,13 @@ import '../models/canal.dart';
 import '../models/canal_assistido.dart';
 import '../models/categoria_personalizada.dart';
 import '../models/lista_m3u.dart';
+import '../models/lista_remota.dart';
 import '../models/progresso_canal.dart';
 import '../models/serie.dart';
 import '../services/armazenamento.dart';
 import '../services/carregador_lista.dart';
 import '../services/parser_m3u.dart';
+import '../services/servico_conta.dart';
 import '../services/servico_epg.dart';
 
 /// Provider central do app: mantem o estado e expoe acoes para a UI.
@@ -19,18 +21,25 @@ class IptvProvider extends ChangeNotifier {
   final CarregadorLista _carregador;
   final ParserM3U _parser;
   final ServicoEpg? _epg;
+  // Conta na nuvem (Supabase). Quando presente e logado, as acoes de lista
+  // tambem sao refletidas no Supabase. Opcional: sem ele o app roda local-only.
+  final ServicoConta? _conta;
 
   IptvProvider({
     required Armazenamento armazenamento,
     CarregadorLista? carregador,
     ParserM3U? parser,
     ServicoEpg? epg,
+    ServicoConta? conta,
   })  :
         // ignore: prefer_initializing_formals
         _armazenamento = armazenamento,
         _carregador = carregador ?? CarregadorLista(),
         _parser = parser ?? ParserM3U(),
-        _epg = epg;
+        // ignore: prefer_initializing_formals
+        _epg = epg,
+        // ignore: prefer_initializing_formals
+        _conta = conta;
 
   // ===== ESTADO =====
 
@@ -43,6 +52,15 @@ class IptvProvider extends ChangeNotifier {
   ListaM3U? _listaAtiva;
   String _busca = '';
   bool _carregando = false;
+  // Sincronizacao com a nuvem em andamento (puxando/empurrando definicoes).
+  bool _sincronizando = false;
+  int _progressoSync = 0; // quantas listas ja foram baixadas nesta sincronizacao
+  int _totalSync = 0;     // total de listas a baixar nesta sincronizacao
+  // True durante a primeira sincronizacao apos login (quando nao havia listas
+  // locais). Permanece true ate o sync terminar, mesmo que listas ja estejam
+  // disponiveis — usado pelo app.dart para manter a tela de importacao visivel
+  // ate o progresso completo.
+  bool _primeiraSync = false;
   String? _erro;
   // Tipo do formato não suportado detectado pelo parser ('hls', 'epg', ou null).
   String? _formatoNaoSuportado;
@@ -60,7 +78,11 @@ class IptvProvider extends ChangeNotifier {
   ListaM3U? get listaAtiva => _listaAtiva;
   String get busca => _busca;
   bool get carregando => _carregando;
+  bool get sincronizando => _sincronizando;
   String? get erro => _erro;
+  int get progressoSync => _progressoSync;
+  int get totalSync => _totalSync;
+  bool get primeiraSync => _primeiraSync;
   /// Tipo do formato não suportado ('hls', 'epg') ou null se não houve esse erro.
   String? get formatoNaoSuportado => _formatoNaoSuportado;
 
@@ -145,6 +167,7 @@ class IptvProvider extends ChangeNotifier {
         await _ativarLista(lista);
       }
       _baixarEpgEmBackground(lista);
+      _espelharSalvar(nome: nome, fonteUrl: url, epgUrl: epgNormalizado);
     });
   }
 
@@ -215,12 +238,16 @@ class IptvProvider extends ChangeNotifier {
     } else {
       _baixarEpgEmBackground(atualizada);
     }
+    if (lista.origem == OrigemLista.url) {
+      _espelharSalvar(nome: lista.nome, fonteUrl: lista.fonte, epgUrl: limpo);
+    }
     notifyListeners();
   }
 
   Future<void> removerLista(ListaM3U lista) async {
     await _armazenamento.removerLista(lista.id);
     await _epg?.remover(lista.id);
+    if (lista.origem == OrigemLista.url) _espelharRemover(lista.fonte);
     final eraAtiva = _listaAtiva?.id == lista.id;
     _listas = _armazenamento.carregarListas();
     if (eraAtiva) {
@@ -274,6 +301,13 @@ class IptvProvider extends ChangeNotifier {
     await _armazenamento.salvarLista(atualizada);
     _listas = _armazenamento.carregarListas();
     if (_listaAtiva?.id == lista.id) _listaAtiva = atualizada;
+    if (lista.origem == OrigemLista.url) {
+      _espelharSalvar(
+        nome: nome,
+        fonteUrl: lista.fonte,
+        epgUrl: lista.epgUrl,
+      );
+    }
     notifyListeners();
   }
 
@@ -303,7 +337,186 @@ class IptvProvider extends ChangeNotifier {
       if (_listaAtiva?.id == lista.id) {
         await _ativarLista(atualizada);
       }
+      _espelharTrocaFonte(
+        fonteAntiga: lista.fonte,
+        fonteNova: url,
+        nome: lista.nome,
+        epgUrl: lista.epgUrl,
+      );
     });
+  }
+
+  // ===== SINCRONIZACAO COM A NUVEM (SUPABASE) =====
+
+  /// Traz para o aparelho exatamente as listas da conta logada — a conta e a
+  /// fonte da verdade. Independente do que houver no cache local:
+  ///  - PODA do cache as listas por URL que nao pertencem a esta conta
+  ///    (ex.: listas adicionadas antes de logar / de outra sessao);
+  ///  - baixa/parseia e salva as listas da conta que faltam no aparelho;
+  ///  - alinha nome/EPG das que existem dos dois lados (a nuvem manda).
+  ///
+  /// Listas por arquivo local sao preservadas (nao podem existir na nuvem).
+  /// Silenciosa: falhas de rede nao quebram o app nem apagam o cache (a poda
+  /// so ocorre apos um fetch bem-sucedido). Chamar apos o login e no startup
+  /// quando ja houver sessao salva.
+  Future<void> sincronizarDoSupabase() async {
+    final conta = _conta;
+    if (conta == null || !conta.estaLogado) return;
+    _sincronizando = true;
+    if (_listas.isEmpty) _primeiraSync = true;
+    notifyListeners();
+    try {
+      final remotas = await conta.listarListas();
+      final urlsRemotas = {for (final r in remotas) r.fonteUrl};
+
+      // 1) Poda: remove do cache as listas por URL que nao sao desta conta.
+      var podou = false;
+      for (final l
+          in _listas.where((l) => l.origem == OrigemLista.url).toList()) {
+        if (!urlsRemotas.contains(l.fonte)) {
+          await _armazenamento.removerLista(l.id);
+          await _epg?.remover(l.id);
+          podou = true;
+        }
+      }
+      if (podou) _listas = _armazenamento.carregarListas();
+
+      // 2) Alinha metadados das que ja existem (barato) e baixa em PARALELO
+      //    (em lotes) as que faltam — varias listas ao mesmo tempo em vez de
+      //    uma de cada vez. Cada lista e isolada: uma falha (URL morta/formato
+      //    invalido) nao impede as demais.
+      final fontesLocais = {for (final l in _listas) l.fonte};
+      for (final r in remotas.where((r) => fontesLocais.contains(r.fonteUrl))) {
+        try {
+          await _alinharMetadados(r);
+        } catch (_) {/* ignora */}
+      }
+
+      final aBaixar =
+          remotas.where((r) => !fontesLocais.contains(r.fonteUrl)).toList();
+      _progressoSync = 0;
+      _totalSync = aBaixar.length;
+      if (_totalSync > 0) notifyListeners();
+
+      const maxParalelo = 4;
+      for (var i = 0; i < aBaixar.length; i += maxParalelo) {
+        final lote = aBaixar.skip(i).take(maxParalelo);
+        await Future.wait(lote.map((r) async {
+          try {
+            await _baixarParsearSalvar(
+              nome: r.nome,
+              url: r.fonteUrl,
+              epgUrl: r.epgUrl,
+            );
+            _progressoSync++;
+            // Atualiza e notifica apos cada lista: o app sai da tela de
+            // importacao assim que a primeira lista fica pronta, sem
+            // precisar esperar todas as demais terminarem.
+            _listas = _armazenamento.carregarListas();
+            notifyListeners();
+          } catch (_) {/* pula esta lista */}
+        }));
+      }
+
+      _listas = _armazenamento.carregarListas();
+      // Se a lista ativa foi podada (era sem-conta), elege outra.
+      final ativaExiste = _listaAtiva != null &&
+          _listas.any((l) => l.id == _listaAtiva!.id);
+      if (!ativaExiste) {
+        _listaAtiva = null;
+        _restaurarListaAtiva();
+      }
+    } catch (_) {
+      // Sincronizacao e best-effort; mantem o que ja existe localmente.
+    } finally {
+      _sincronizando = false;
+      _primeiraSync = false;
+      notifyListeners();
+    }
+  }
+
+  /// Baixa uma lista por URL, parseia + serializa DENTRO de um isolate e grava
+  /// o mapa pronto no Hive. Tudo o que e pesado (parse e toMap dos milhares de
+  /// canais) sai da thread da UI. Nao dispara EPG aqui (feito so para a lista
+  /// ativa apos a sincronizacao) e nao reespelha na nuvem (evita laco).
+  Future<void> _baixarParsearSalvar({
+    required String nome,
+    required String url,
+    String? epgUrl,
+  }) async {
+    final conteudo = await _carregador.baixarDeUrl(url);
+    final mapa = await compute(
+      _parseListaMapIsolate,
+      <String?>[nome, url, epgUrl, conteudo],
+    );
+    await _armazenamento.salvarListaBruta(url, mapa);
+  }
+
+  /// Alinha nome/EPG de uma lista local com a versao da nuvem, se diferirem.
+  /// Nao reparseia os canais (so metadados).
+  Future<void> _alinharMetadados(ListaRemota r) async {
+    final local = _listas.firstWhere(
+      (l) => l.fonte == r.fonteUrl,
+      orElse: () => _listas.first,
+    );
+    if (local.fonte != r.fonteUrl) return;
+    if (local.nome == r.nome && local.epgUrl == r.epgUrl) return;
+    final atualizada = ListaM3U(
+      nome: r.nome,
+      fonte: local.fonte,
+      origem: local.origem,
+      canais: local.canais,
+      atualizadaEm: local.atualizadaEm,
+      epgUrl: r.epgUrl,
+    );
+    await _armazenamento.salvarLista(atualizada);
+    if (_listaAtiva?.id == local.id) _listaAtiva = atualizada;
+  }
+
+  /// Apaga as listas locais (cache). Usado no logout para nao misturar contas.
+  Future<void> limparListasLocais() async {
+    await _armazenamento.limparListas();
+    _listas = [];
+    _listaAtiva = null;
+    notifyListeners();
+  }
+
+  // ── Espelhamento na nuvem (best-effort, nao bloqueia a UI) ───────────────
+
+  void _espelharSalvar({
+    required String nome,
+    required String fonteUrl,
+    String? epgUrl,
+  }) {
+    final conta = _conta;
+    if (conta == null || !conta.estaLogado) return;
+    conta
+        .salvarLista(nome: nome, fonteUrl: fonteUrl, epgUrl: epgUrl)
+        .catchError((_) {/* silencioso */});
+  }
+
+  void _espelharRemover(String fonteUrl) {
+    final conta = _conta;
+    if (conta == null || !conta.estaLogado) return;
+    conta.removerLista(fonteUrl).catchError((_) {/* silencioso */});
+  }
+
+  void _espelharTrocaFonte({
+    required String fonteAntiga,
+    required String fonteNova,
+    required String nome,
+    String? epgUrl,
+  }) {
+    final conta = _conta;
+    if (conta == null || !conta.estaLogado) return;
+    conta
+        .trocarFonteLista(
+          fonteAntiga: fonteAntiga,
+          fonteNova: fonteNova,
+          nome: nome,
+          epgUrl: epgUrl,
+        )
+        .catchError((_) {/* silencioso */});
   }
 
   /// Dispara um download/refresh do EPG sem bloquear a UI. Erros sao
@@ -500,4 +713,25 @@ class IptvProvider extends ChangeNotifier {
     _minhaListaChaves = _armazenamento.carregarMinhaLista();
     notifyListeners();
   }
+}
+
+/// Funcao top-level para `compute()`: dentro de um isolate, parseia a M3U e ja
+/// devolve o mapa pronto para o Hive (no formato de [ListaM3U.toMap]). Assim
+/// tanto o parse quanto a serializacao dos milhares de canais ficam fora da
+/// thread da UI. `args` = [nome, url, epgUrl, conteudo].
+Map<String, dynamic> _parseListaMapIsolate(List<String?> args) {
+  final nome = args[0]!;
+  final url = args[1]!;
+  final epg = args[2];
+  final conteudo = args[3]!;
+  final canais = ParserM3U().parse(conteudo);
+  final epgN = (epg == null || epg.trim().isEmpty) ? null : epg.trim();
+  return {
+    'nome': nome,
+    'fonte': url,
+    'origem': OrigemLista.url.name,
+    'canais': [for (final c in canais) c.toMap()],
+    'atualizadaEm': DateTime.now().toIso8601String(),
+    'epgUrl': ?epgN,
+  };
 }

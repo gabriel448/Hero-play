@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/lista_m3u.dart';
+import '../state/conta_provider.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
@@ -16,16 +17,25 @@ class TelaGerenciarListas extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
+    final conta = context.watch<ContaProvider>();
     final listas = provider.listas;
+    final podeSincronizar = conta.disponivel && conta.estaLogado;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Gerenciar listas')),
+      appBar: AppBar(
+        title: const Text('Gerenciar listas'),
+        actions: [
+          if (podeSincronizar) const _BotaoAtualizar(),
+        ],
+      ),
       body: SafeArea(
         child: tabletBody(
           context,
-          listas.isEmpty
-              ? const _SemListas()
-              : ListView.separated(
+          listas.isEmpty && provider.sincronizando
+              ? _SkeletonListas(count: provider.totalSync)
+              : listas.isEmpty
+                  ? const _SemListas()
+                  : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
                     AppSpacing.base,
@@ -45,6 +55,182 @@ class TelaGerenciarListas extends StatelessWidget {
         ),
         icon: const Icon(Icons.add_rounded),
         label: const Text('Importar lista'),
+      ),
+    );
+  }
+}
+
+// ─── Botao de atualizar (sincronizar com a nuvem) ─────────────────────────────
+
+/// Puxa de novo as listas da conta no Supabase — util quando o usuario
+/// adicionou/removeu uma lista pelo site. Enquanto sincroniza, vira spinner.
+class _BotaoAtualizar extends StatelessWidget {
+  const _BotaoAtualizar();
+
+  @override
+  Widget build(BuildContext context) {
+    final sincronizando = context.watch<IptvProvider>().sincronizando;
+
+    if (sincronizando) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: AppSpacing.base),
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return IconButton(
+      tooltip: 'Atualizar listas',
+      icon: const Icon(Icons.cloud_sync_rounded),
+      onPressed: () async {
+        final provider = context.read<IptvProvider>();
+        final messenger = ScaffoldMessenger.of(context);
+        await provider.sincronizarDoSupabase();
+        if (!context.mounted) return;
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Listas atualizadas')),
+        );
+      },
+    );
+  }
+}
+
+// ─── Skeleton Loading ─────────────────────────────────────────────────────────
+
+/// Substituto animado para a lista enquanto as listas da conta carregam.
+/// Exibe [count] blocos (ou 2 por padrao) que imitam o layout de [_ItemLista]
+/// com efeito shimmer — o brilho varre da esquerda para a direita em loop.
+class _SkeletonListas extends StatefulWidget {
+  final int count;
+  const _SkeletonListas({required this.count});
+
+  @override
+  State<_SkeletonListas> createState() => _SkeletonListasState();
+}
+
+class _SkeletonListasState extends State<_SkeletonListas>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final n = widget.count > 0 ? widget.count : 2;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) => ListView.separated(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.base,
+          AppSpacing.lg,
+          96,
+        ),
+        itemCount: n,
+        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
+        itemBuilder: (context, i) => _SkeletonItem(t: _ctrl.value),
+      ),
+    );
+  }
+}
+
+/// Um bloco de placeholder que replica as dimensoes de [_ItemLista].
+class _SkeletonItem extends StatelessWidget {
+  final double t; // 0.0–1.0: posicao do shimmer
+  const _SkeletonItem({required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.base),
+      decoration: BoxDecoration(
+        color: AppColors.surface1,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Caixa do contador de canais (48x48)
+              _barra(width: 48, height: 48, radius: AppRadius.base),
+              const SizedBox(width: AppSpacing.base),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 3),
+                    // Linha do nome
+                    _barra(height: 13, radius: AppRadius.sm),
+                    const SizedBox(height: 7),
+                    // Linha do subtitulo (mais curta)
+                    _barra(height: 11, radius: AppRadius.sm, widthFactor: 0.55),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.base),
+          // Botoes Ativar / Editar
+          Row(
+            children: [
+              Expanded(child: _barra(height: 36, radius: AppRadius.base)),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(child: _barra(height: 36, radius: AppRadius.base)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _barra({
+    double? width,
+    required double height,
+    required double radius,
+    double widthFactor = 1.0,
+  }) {
+    // Shimmer: gradiente que varre da esquerda para a direita.
+    // Intervalo [-2, 2] no espaco de alinhamento (fora → dentro → fora).
+    final sweep = -2.0 + t * 4.0;
+    return FractionallySizedBox(
+      widthFactor: width == null ? widthFactor : null,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(radius),
+            gradient: LinearGradient(
+              begin: Alignment(sweep - 1, 0),
+              end: Alignment(sweep + 1, 0),
+              colors: const [
+                AppColors.surface2,
+                AppColors.surface3,
+                AppColors.surface2,
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

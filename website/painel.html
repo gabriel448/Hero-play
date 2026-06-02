@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel — Hero Play</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/auth.css">
+  <script>document.documentElement.classList.add('js-anim');</script>
+  <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+</head>
+<body>
+
+  <!-- ── Topbar ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-esq">
+      <button class="hamburger btn btn-ghost" id="btn-menu" aria-label="Abrir menu" aria-expanded="false">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <line x1="3" y1="5"  x2="17" y2="5"/>
+          <line x1="3" y1="10" x2="17" y2="10"/>
+          <line x1="3" y1="15" x2="17" y2="15"/>
+        </svg>
+      </button>
+      <a class="brand" href="index.html">
+        <img src="assets/heroplay-icon-192.png" alt="Hero Play">
+        <span>Hero Play</span>
+      </a>
+    </div>
+    <button class="btn btn-ghost" id="btn-sair" type="button">Sair</button>
+  </header>
+
+  <!-- ── Overlay do drawer (mobile) ─────────────────────────────────────── -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+
+  <!-- ── Layout ─────────────────────────────────────────────────────────── -->
+  <div class="layout">
+
+    <!-- Sidebar / Drawer -->
+    <nav class="sidebar" id="sidebar" aria-label="Navegação">
+      <div class="sidebar-topo">
+        <span class="sidebar-email" id="email-usuario"></span>
+        <button class="sidebar-fechar btn btn-ghost" id="btn-fechar-sidebar" aria-label="Fechar menu">✕</button>
+      </div>
+
+      <button class="nav-item active" data-secao="listas" type="button">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="6" height="6" rx="1.5"/>
+          <rect x="3" y="11" width="6" height="6" rx="1.5"/>
+          <line x1="12" y1="5.5" x2="17" y2="5.5"/>
+          <line x1="12" y1="9"   x2="17" y2="9"/>
+          <line x1="12" y1="13.5" x2="17" y2="13.5"/>
+          <line x1="12" y1="17"  x2="17" y2="17"/>
+        </svg>
+        Minhas listas
+      </button>
+
+      <button class="nav-item" data-secao="config" type="button">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9.1 5.9 L8.3 2.7 L11.7 2.7 L11.0 5.9 L12.5 6.6 L13.6 7.8 L16.4 6.1 L17.5 9.3 L14.2 9.6 L14.0 11.3 L13.2 12.8 L15.7 14.9 L12.9 16.9 L11.6 13.9 L10.0 14.2 L8.4 13.9 L7.1 16.9 L4.3 14.9 L6.8 12.8 L6.0 11.3 L5.8 9.6 L2.5 9.3 L3.6 6.1 L6.4 7.8 L7.5 6.6 Z"/>
+          <circle cx="10" cy="10" r="2.5"/>
+        </svg>
+        Configurações
+      </button>
+    </nav>
+
+    <!-- Conteúdo principal -->
+    <main class="conteudo">
+
+      <!-- Mensagens globais -->
+      <div class="msg error" id="msg-erro"></div>
+      <div class="msg ok"    id="msg-ok"></div>
+
+      <!-- ══ Secao: Minhas listas ══════════════════════════════════════════ -->
+      <section id="secao-listas" class="secao ativa">
+
+        <div class="painel-head">
+          <h1>Minhas listas</h1>
+        </div>
+        <p class="muted" style="margin-bottom:4px">Cadastre suas listas aqui. Elas aparecem automaticamente no app ao fazer login.</p>
+
+        <div class="secao-cab">
+          <div class="section-title">Suas listas</div>
+          <button class="btn btn-primary" id="btn-nova-lista" type="button">+ Nova lista</button>
+        </div>
+
+        <div id="listas-container">
+          <div class="spinner" id="carregando">Carregando…</div>
+        </div>
+
+      </section>
+
+      <!-- ══ Secao: Configuracoes ══════════════════════════════════════════ -->
+      <section id="secao-config" class="secao">
+
+        <div class="painel-head">
+          <h1>Configurações</h1>
+        </div>
+
+        <div class="config-cards">
+
+          <!-- Trocar senha -->
+          <div class="config-card">
+            <div class="config-card-head">
+              <h3>Trocar senha</h3>
+              <p>Defina uma nova senha para sua conta.</p>
+            </div>
+            <div class="msg error" id="erro-senha"></div>
+            <div class="msg ok"    id="ok-senha"></div>
+            <form id="form-senha" autocomplete="off">
+              <div class="field">
+                <label for="senha-atual">Senha atual</label>
+                <input type="password" id="senha-atual" placeholder="sua senha atual" autocomplete="current-password" required>
+              </div>
+              <div class="field">
+                <label for="nova-senha">Nova senha</label>
+                <input type="password" id="nova-senha" placeholder="mínimo 6 caracteres" minlength="6" autocomplete="new-password" required>
+              </div>
+              <div class="field">
+                <label for="confirmar-senha">Confirmar nova senha</label>
+                <input type="password" id="confirmar-senha" placeholder="repita a nova senha" autocomplete="new-password" required>
+              </div>
+              <button class="btn btn-primary" type="submit" id="btn-salvar-senha">Atualizar senha</button>
+            </form>
+          </div>
+
+          <!-- Trocar email -->
+          <div class="config-card">
+            <div class="config-card-head">
+              <h3>Trocar email</h3>
+              <p>Um link de confirmação será enviado para o novo endereço.</p>
+            </div>
+            <div class="msg error" id="erro-email"></div>
+            <div class="msg ok"    id="ok-email"></div>
+            <form id="form-email" autocomplete="off">
+              <div class="field">
+                <label for="novo-email">Novo email</label>
+                <input type="email" id="novo-email" placeholder="novo@email.com" autocomplete="email" required>
+              </div>
+              <div class="field">
+                <label for="senha-email">Confirmar com senha atual</label>
+                <input type="password" id="senha-email" placeholder="sua senha atual" autocomplete="current-password" required>
+              </div>
+              <button class="btn btn-primary" type="submit" id="btn-salvar-email">Solicitar troca</button>
+            </form>
+          </div>
+
+          <!-- MFA -->
+          <div class="config-card">
+            <div class="config-card-head">
+              <h3>Autenticação em dois fatores</h3>
+              <p>Proteja sua conta com um código TOTP gerado pelo Google Authenticator, Authy ou similar.</p>
+            </div>
+
+            <div class="badge-status inativo" id="badge-mfa">
+              <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="currentColor" opacity=".5"/></svg>
+              <span id="badge-mfa-texto">Inativo</span>
+            </div>
+            <div class="msg error" id="erro-mfa"></div>
+            <div class="msg ok"    id="ok-mfa"></div>
+
+            <!-- Estado: não ativo -->
+            <div id="mfa-nao-ativo">
+              <button class="btn btn-outline" id="btn-ativar-mfa" type="button">Ativar MFA</button>
+            </div>
+
+            <!-- Estado: ativo -->
+            <div id="mfa-ativo" style="display:none">
+              <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+                Sua conta exige o código TOTP ao entrar.
+              </p>
+              <button class="btn btn-danger" id="btn-desativar-mfa" type="button">Desativar MFA</button>
+            </div>
+          </div>
+
+          <!-- Zona de perigo -->
+          <div class="config-card perigo">
+            <div class="config-card-head">
+              <h3>Zona de perigo</h3>
+              <p>Esta ação é <strong>irreversível</strong>. Sua conta e todas as listas cadastradas serão removidas permanentemente.</p>
+            </div>
+            <div class="msg error" id="erro-remover"></div>
+            <button class="btn btn-danger" id="btn-remover-conta" type="button">Remover minha conta</button>
+          </div>
+
+        </div><!-- /config-cards -->
+      </section>
+
+    </main>
+  </div><!-- /layout -->
+
+  <!-- ── Modal: Adicionar / Editar lista ──────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-overlay" aria-hidden="true">
+    <div class="modal-card" id="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+      <div class="modal-cab">
+        <h2 id="modal-titulo">Adicionar lista</h2>
+        <button class="btn btn-ghost modal-fechar" id="btn-fechar-modal" type="button" aria-label="Fechar">✕</button>
+      </div>
+      <div class="msg error" id="modal-erro"></div>
+      <form id="form-lista" autocomplete="off">
+        <input type="hidden" id="editando-id">
+        <div class="field">
+          <label for="nome">Nome da lista</label>
+          <input type="text" id="nome" required placeholder="Ex.: Minha Lista">
+        </div>
+        <div class="field">
+          <label for="fonte_url">URL da lista (M3U)</label>
+          <input type="url" id="fonte_url" required placeholder="http://servidor/get.php?...">
+        </div>
+        <div class="field">
+          <label for="epg_url">URL do EPG / XMLTV (opcional)</label>
+          <input type="url" id="epg_url" placeholder="http://servidor/epg.xml">
+        </div>
+        <div class="modal-rodape">
+          <button class="btn btn-outline" id="btn-cancelar" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="btn-salvar" type="submit">Adicionar lista</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Modal: Desativar MFA ─────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-desativar-mfa-overlay" aria-hidden="true">
+    <div class="modal-card" id="modal-desativar-mfa-card" role="dialog" aria-modal="true">
+      <div class="modal-cab">
+        <h2>Desativar autenticação em dois fatores</h2>
+        <button class="btn btn-ghost modal-fechar" id="btn-fechar-desativar-mfa" type="button" aria-label="Fechar">✕</button>
+      </div>
+      <div class="msg error" id="erro-desativar-mfa"></div>
+
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px;line-height:1.55;">
+        Digite o código do seu app autenticador para confirmar a desativação.
+      </p>
+      <div class="otp-wrap" id="otp-desativar-wrap" data-submit="btn-confirmar-desativar">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+      </div>
+      <div class="mfa-acoes" style="margin-top:16px;">
+        <button class="btn btn-danger"  id="btn-confirmar-desativar" type="button" style="flex:1;">Desativar</button>
+        <button class="btn btn-outline" id="btn-cancelar-desativar"  type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Modal: Configurar MFA ─────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-mfa-overlay" aria-hidden="true">
+    <div class="modal-card modal-mfa" id="modal-mfa-card" role="dialog" aria-modal="true" aria-labelledby="modal-mfa-titulo">
+
+      <div class="modal-cab">
+        <h2 id="modal-mfa-titulo">Autenticação em dois fatores</h2>
+        <button class="btn btn-ghost modal-fechar" id="btn-fechar-modal-mfa" type="button" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="msg error" id="erro-mfa-modal"></div>
+
+      <div class="mfa-modal-corpo">
+
+        <!-- Coluna esquerda: QR + inputs -->
+        <div class="mfa-col-esq">
+          <div class="mfa-qr-wrap" id="mfa-qr-wrap">
+            <div id="mfa-qr-skeleton" class="mfa-qr-skeleton"></div>
+            <img id="mfa-qr" alt="QR Code MFA" width="200" height="200">
+          </div>
+          <p class="mfa-otp-label">Código de verificação</p>
+          <div class="otp-wrap" id="otp-wrap" data-submit="btn-verificar-mfa">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+          </div>
+          <div class="mfa-acoes mfa-acoes-modal">
+            <button class="btn btn-primary" id="btn-verificar-mfa" type="button">Verificar e ativar</button>
+            <button class="btn btn-ghost"   id="btn-cancelar-mfa"  type="button">Cancelar</button>
+          </div>
+        </div>
+
+        <!-- Divisor vertical -->
+        <div class="mfa-divisor"></div>
+
+        <!-- Coluna direita: passo a passo -->
+        <div class="mfa-col-dir">
+          <p class="mfa-dir-titulo">Como configurar</p>
+          <div class="mfa-passo">
+            <div class="mfa-passo-num">1</div>
+            <div class="mfa-passo-texto">
+              <strong>Instale um app autenticador</strong>
+              <p>Google Authenticator, Authy ou Microsoft Authenticator no seu celular.</p>
+            </div>
+          </div>
+          <div class="mfa-passo">
+            <div class="mfa-passo-num">2</div>
+            <div class="mfa-passo-texto">
+              <strong>Escaneie o QR code</strong>
+              <p>Abra o app, toque em "+" e aponte a câmera para o código ao lado.</p>
+            </div>
+          </div>
+          <div class="mfa-passo">
+            <div class="mfa-passo-num">3</div>
+            <div class="mfa-passo-texto">
+              <strong>Digite o código</strong>
+              <p>Insira os 6 dígitos exibidos no app para confirmar a ativação.</p>
+            </div>
+          </div>
+          <div class="mfa-secret-wrap" style="margin-top:auto;">
+            <button class="mfa-secret-summary" id="btn-secret-toggle" type="button">
+              <span>Não consigo escanear — código manual</span>
+              <svg class="mfa-secret-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="mfa-secret-reveal" id="mfa-secret-reveal">
+              <div class="mfa-secret-inner">
+                <p style="font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">Digite este código no seu app:</p>
+                <code class="mfa-secret-code" id="mfa-secret"></code>
+                <button class="btn btn-ghost" id="btn-copiar-segredo" type="button" style="padding:4px 10px;font-size:12px;">Copiar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script>
+    const sb  = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    const $   = (id) => document.getElementById(id);
+    const erroG = $('msg-erro'), okG = $('msg-ok');
+
+    /* ── Motion ──────────────────────────────────────────────────────────── */
+    const motion = (typeof anime !== 'undefined') &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!motion) document.documentElement.classList.remove('js-anim');
+
+    function animarMsg(el) {
+      if (!motion) return;
+      anime.remove(el);
+      anime({ targets: el, opacity:[0,1], translateY:[-6,0], duration:300, easing:'easeOutQuad' });
+    }
+    function mostrarErroG(t) { erroG.textContent=t; erroG.classList.add('show'); okG.classList.remove('show'); animarMsg(erroG); }
+    function mostrarOkG(t)   { okG.textContent=t; okG.classList.add('show'); erroG.classList.remove('show'); animarMsg(okG); setTimeout(()=>okG.classList.remove('show'),3500); }
+    function mostrarErro(el,t){ el.textContent=t; el.classList.add('show'); animarMsg(el); }
+    function mostrarOk(el,t)  { el.textContent=t; el.classList.add('show'); animarMsg(el); setTimeout(()=>el.classList.remove('show'),3500); }
+    function escapar(s)       { const d=document.createElement('div'); d.textContent=s??''; return d.innerHTML; }
+
+    /* ── Navegacao lateral ───────────────────────────────────────────────── */
+    function trocarSecao(nome) {
+      const atual = document.querySelector('.secao.ativa');
+      const prox  = $('secao-' + nome);
+      if (atual === prox) { fecharDrawer(); return; }
+
+      document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.secao === nome));
+
+      if (motion && atual) {
+        anime({ targets: atual, opacity:[1,0], translateY:[0,-8], duration:180, easing:'easeInQuad',
+          complete: () => {
+            atual.classList.remove('ativa');
+            prox.classList.add('ativa');
+            anime({ targets: prox, opacity:[0,1], translateY:[12,0], duration:320, easing:'easeOutQuad' });
+            anime({ targets: '#secao-' + nome + ' .config-card',
+                    opacity:[0,1], translateY:[20,0], delay:anime.stagger(60,{start:60}),
+                    duration:380, easing:'easeOutQuad' });
+          }
+        });
+      } else {
+        atual?.classList.remove('ativa');
+        prox.classList.add('ativa');
+      }
+
+      fecharDrawer();
+    }
+
+    document.querySelectorAll('.nav-item[data-secao]').forEach(b =>
+      b.addEventListener('click', () => trocarSecao(b.dataset.secao)));
+
+    /* ── Drawer (mobile) ─────────────────────────────────────────────────── */
+    function abrirDrawer() {
+      const sidebar  = $('sidebar');
+      const overlay  = $('drawer-overlay');
+      overlay.classList.add('vis');
+      sidebar.classList.add('aberta');
+      $('btn-menu').setAttribute('aria-expanded', 'true');
+      if (!motion) return;
+      anime({ targets: overlay,  opacity:[0,1], duration:300, easing:'linear' });
+      anime({ targets: sidebar,  translateX:['-100%','0%'], duration:320, easing:'easeOutExpo' });
+    }
+
+    function fecharDrawer() {
+      const sidebar  = $('sidebar');
+      const overlay  = $('drawer-overlay');
+      if (!sidebar.classList.contains('aberta')) return;
+      $('btn-menu').setAttribute('aria-expanded', 'false');
+      if (!motion) {
+        sidebar.classList.remove('aberta');
+        overlay.classList.remove('vis');
+        return;
+      }
+      anime({ targets: sidebar,  translateX:['0%','-100%'], duration:250, easing:'easeInQuad',
+              complete: () => sidebar.classList.remove('aberta') });
+      anime({ targets: overlay,  opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete: () => overlay.classList.remove('vis') });
+    }
+
+    $('btn-menu').onclick           = abrirDrawer;
+    $('btn-fechar-sidebar').onclick = fecharDrawer;
+    $('drawer-overlay').onclick     = fecharDrawer;
+    document.addEventListener('keydown', e => { if (e.key==='Escape') fecharDrawer(); });
+
+    /* ── Auth ────────────────────────────────────────────────────────────── */
+    let usuario = null;
+
+    (async () => {
+      const { data } = await sb.auth.getSession();
+      if (!data.session) { location.replace('login.html'); return; }
+      usuario = data.session.user;
+      $('email-usuario').textContent = usuario.email;
+      carregarListas();
+      carregarMFA();
+    })();
+
+    $('btn-sair').onclick = async () => {
+      await sb.auth.signOut();
+      if (!motion) { location.replace('login.html'); return; }
+      anime({ targets: '.topbar, .layout', opacity:[1,0], translateY:[0,-10],
+              duration:300, easing:'easeInQuad', complete: () => location.replace('login.html') });
+    };
+
+    document.querySelectorAll('a[href="index.html"]').forEach(a =>
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        if (!motion) { location.replace('index.html'); return; }
+        anime({ targets: '.topbar, .layout', opacity:[1,0], translateY:[0,-10],
+                duration:300, easing:'easeInQuad', complete: () => location.replace('index.html') });
+      }));
+
+    /* ── Modal ───────────────────────────────────────────────────────────── */
+    function abrirModal(modo, dados) {
+      const overlay  = $('modal-overlay');
+      const card     = $('modal-card');
+      const editando = modo === 'editar';
+
+      $('form-lista').reset();
+      $('editando-id').value = '';
+      $('modal-erro').classList.remove('show');
+      $('btn-salvar').disabled = false;
+      $('modal-titulo').textContent = editando ? 'Editar lista' : 'Adicionar lista';
+      $('btn-salvar').textContent   = editando ? 'Salvar alterações' : 'Adicionar lista';
+
+      if (dados) {
+        $('editando-id').value = dados.id;
+        $('nome').value        = dados.nome;
+        $('fonte_url').value   = dados.fonte_url;
+        $('epg_url').value     = dados.epg_url || '';
+      }
+
+      overlay.classList.add('aberto');
+      overlay.setAttribute('aria-hidden', 'false');
+      if (!motion) { $('nome').focus(); return; }
+
+      anime({ targets: overlay, opacity:[0,1], duration:260, easing:'linear' });
+      anime({ targets: card, opacity:[0,1], translateY:[28,0], scale:[0.95,1],
+              duration:400, easing:'easeOutExpo', complete:() => $('nome').focus() });
+      anime({ targets: '#form-lista .field, #modal-erro, .modal-rodape',
+              opacity:[0,1], translateY:[10,0], delay:anime.stagger(50,{start:140}),
+              duration:300, easing:'easeOutQuad' });
+    }
+
+    function fecharModal(cb) {
+      const overlay = $('modal-overlay');
+      const card    = $('modal-card');
+      if (!motion) {
+        overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true');
+        if (cb) cb(); return;
+      }
+      anime({ targets:card,    opacity:[1,0], translateY:[0,12], scale:[1,0.96], duration:240, easing:'easeInQuad' });
+      anime({ targets:overlay, opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete:() => { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); } });
+    }
+
+    $('modal-overlay').addEventListener('click', e => { if(e.target===$('modal-overlay')) fecharModal(); });
+    document.addEventListener('keydown', e => {
+      if (e.key==='Escape' && $('modal-overlay').classList.contains('aberto')) fecharModal();
+    });
+    $('btn-fechar-modal').onclick = () => fecharModal();
+    $('btn-cancelar').onclick     = () => fecharModal();
+    $('btn-nova-lista').onclick   = () => abrirModal('novo');
+
+    /* ── Listas ──────────────────────────────────────────────────────────── */
+    async function carregarListas() {
+      const cont = $('listas-container');
+      const { data, error } = await sb.functions.invoke('iptv', { method:'GET' });
+      if (error) { cont.innerHTML=`<div class="empty">Erro ao carregar: ${escapar(error.message)}</div>`; return; }
+      if (!data?.length) { cont.innerHTML=`<div class="empty">Você ainda não cadastrou nenhuma lista.</div>`; return; }
+
+      cont.innerHTML = data.map(l => `
+        <div class="lista-card">
+          <div class="info">
+            <div class="nome">${escapar(l.nome)}</div>
+            <div class="url">${escapar(l.fonte_url)}</div>
+            ${l.epg_url?`<div class="epg">EPG: ${escapar(l.epg_url)}</div>`:''}
+          </div>
+          <div class="acoes">
+            <button class="btn btn-outline" style="width:auto;padding:8px 12px" data-edit="${l.id}" type="button">Editar</button>
+            <button class="btn btn-danger"  data-del="${l.id}" type="button">Excluir</button>
+          </div>
+        </div>`).join('');
+
+      cont.querySelectorAll('[data-edit]').forEach(b => b.onclick=()=>abrirModal('editar', data.find(x=>x.id===b.dataset.edit)));
+      cont.querySelectorAll('[data-del]').forEach(b  => b.onclick=()=>excluir(b.dataset.del));
+
+      if (motion) anime({ targets:'#listas-container .lista-card', opacity:[0,1], translateY:[14,0],
+                          delay:anime.stagger(70), duration:500, easing:'easeOutQuad' });
+    }
+
+    $('form-lista').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = $('btn-salvar'); btn.disabled=true;
+      const id      = $('editando-id').value;
+      const payload = { nome:$('nome').value.trim(), fonte_url:$('fonte_url').value.trim(), epg_url:$('epg_url').value.trim()||null };
+      let fnError;
+      if (id) ({ error:fnError } = await sb.functions.invoke('iptv',{ method:'PUT', body:{id,...payload} }));
+      else    ({ error:fnError } = await sb.functions.invoke('iptv',{ method:'POST', body:payload }));
+      btn.disabled=false;
+      if (fnError) {
+        const el=$('modal-erro'); el.textContent='Erro ao salvar: '+(fnError.message||fnError); el.classList.add('show'); animarMsg(el);
+        return;
+      }
+      fecharModal(() => { mostrarOkG(id?'Lista atualizada.':'Lista adicionada.'); carregarListas(); });
+    });
+
+    async function excluir(id) {
+      if (!confirm('Excluir esta lista?')) return;
+      const { error } = await sb.functions.invoke('iptv',{ method:'DELETE', body:{id} });
+      if (error) return mostrarErroG('Erro ao excluir: '+(error.message||error));
+      mostrarOkG('Lista excluída.');
+      const card=document.querySelector(`[data-del="${id}"]`)?.closest('.lista-card');
+      if (motion && card) {
+        card.style.overflow='hidden';
+        anime({ targets:card, opacity:[1,0], translateX:[0,-24], maxHeight:[card.offsetHeight,0],
+                marginBottom:[10,0], paddingTop:0, paddingBottom:0, duration:360, easing:'easeInQuad',
+                complete:()=>carregarListas() });
+      } else carregarListas();
+    }
+
+    /* ── Configuracoes ───────────────────────────────────────────────────── */
+
+    // Trocar senha — exige verificação da senha atual antes de alterar
+    $('form-senha').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn      = $('btn-salvar-senha');
+      const atual    = $('senha-atual').value;
+      const nova     = $('nova-senha').value;
+      const conf     = $('confirmar-senha').value;
+      const erroEl   = $('erro-senha');
+
+      erroEl.classList.remove('show');
+      if (nova !== conf)   { mostrarErro(erroEl,'As senhas não coincidem.'); return; }
+      if (nova === atual)  { mostrarErro(erroEl,'A nova senha deve ser diferente da atual.'); return; }
+
+      btn.disabled=true; btn.textContent='Verificando…';
+
+      // 1) Confirma identidade com a senha atual
+      const { error: authErr } = await sb.auth.signInWithPassword({
+        email: usuario.email, password: atual,
+      });
+      if (authErr) {
+        btn.disabled=false; btn.textContent='Atualizar senha';
+        mostrarErro(erroEl,'Senha atual incorreta.');
+        return;
+      }
+
+      // 2) Só então atualiza
+      btn.textContent='Atualizando…';
+      const { error } = await sb.auth.updateUser({ password: nova });
+      btn.disabled=false; btn.textContent='Atualizar senha';
+      if (error) mostrarErro(erroEl, traduzErro(error.message));
+      else       { $('form-senha').reset(); mostrarOk($('ok-senha'),'Senha atualizada com sucesso!'); }
+    });
+
+    // Trocar email — exige senha atual + confirmação nos dois endereços
+    $('form-email').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn    = $('btn-salvar-email');
+      const novoEm = $('novo-email').value.trim();
+      const senhaC = $('senha-email').value;
+      const erroEl = $('erro-email');
+
+      erroEl.classList.remove('show');
+      if (novoEm === usuario.email) { mostrarErro(erroEl,'O novo email é igual ao atual.'); return; }
+
+      btn.disabled=true; btn.textContent='Verificando…';
+
+      // 1) Confirma identidade com a senha atual
+      const { error: authErr } = await sb.auth.signInWithPassword({
+        email: usuario.email, password: senhaC,
+      });
+      if (authErr) {
+        btn.disabled=false; btn.textContent='Solicitar troca';
+        mostrarErro(erroEl,'Senha incorreta.');
+        return;
+      }
+
+      // 2) Solicita a troca (Supabase envia confirmação para ambos os emails)
+      btn.textContent='Solicitando…';
+      const { error } = await sb.auth.updateUser({ email: novoEm });
+      btn.disabled=false; btn.textContent='Solicitar troca';
+      if (error) mostrarErro(erroEl, traduzErro(error.message));
+      else {
+        $('form-email').reset();
+        mostrarOk($('ok-email'),
+          `Confirmação enviada para ${usuario.email} e para ${novoEm}. ` +
+          `Clique no link em ambos os emails para concluir a troca.`);
+      }
+    });
+
+    /* ── MFA ─────────────────────────────────────────────────────────────── */
+    let mfaFactorId = null;
+
+    async function carregarMFA() {
+      const { data, error } = await sb.auth.mfa.listFactors();
+      if (error) return;
+      const verificado = data.totp?.find(f => f.status === 'verified');
+      if (verificado) { mfaFactorId = verificado.id; setMFAEstado('ativo'); }
+      else             { mfaFactorId = null;          setMFAEstado('inativo'); }
+    }
+
+    function setMFAEstado(estado) {
+      const badge = $('badge-mfa');
+      if (estado === 'ativo') {
+        badge.className = 'badge-status ativo';
+        $('badge-mfa-texto').textContent = 'Ativo';
+      } else {
+        badge.className = 'badge-status inativo';
+        $('badge-mfa-texto').textContent = 'Inativo';
+      }
+      $('mfa-nao-ativo').style.display = estado === 'inativo' ? '' : 'none';
+      $('mfa-ativo').style.display     = estado === 'ativo'   ? '' : 'none';
+      if (motion && estado === 'ativo')
+        anime({ targets:'#mfa-ativo', opacity:[0,1], translateY:[8,0], duration:300, easing:'easeOutQuad' });
+    }
+
+    // Abre o modal imediatamente (sem QR ainda) — o QR chega via preencherQR().
+    function abrirModalMFA() {
+      const qrImg  = $('mfa-qr');
+      const qrSkel = $('mfa-qr-skeleton');
+      qrImg.onload = null;          // cancela onload de abertura anterior
+      qrImg.src = '';
+      qrImg.style.opacity = '0';
+      qrSkel.style.display  = '';   // garante skeleton visível
+      qrSkel.style.opacity  = '1';
+      $('mfa-secret').textContent = '';
+      clearOtp();
+      $('erro-mfa-modal').classList.remove('show');
+
+      // Reseta toggle "Não consigo escanear"
+      const secretReveal = $('mfa-secret-reveal');
+      document.querySelector('.mfa-secret-wrap')?.classList.remove('open');
+      secretReveal?.classList.remove('open');
+      const si = secretReveal?.querySelector('.mfa-secret-inner');
+      if (si) { si.style.opacity = ''; si.style.transform = ''; }
+
+      const overlay = $('modal-mfa-overlay');
+      const card    = $('modal-mfa-card');
+      overlay.classList.add('aberto');
+      overlay.setAttribute('aria-hidden', 'false');
+
+      if (!motion) { focusOtp(); return; }
+      // Só opacity/transform — tudo no compositor, sem reflow.
+      anime({ targets: overlay, opacity:[0,1], duration:200, easing:'linear' });
+      anime({ targets: card, opacity:[0,1], translateY:[20,0], scale:[0.96,1],
+              duration:320, easing:'easeOutExpo' });
+      anime({ targets: '.mfa-passo, .mfa-dir-titulo', opacity:[0,1], translateX:[10,0],
+              delay:anime.stagger(55,{start:160}), duration:260, easing:'easeOutQuad' });
+      anime({ targets: '.mfa-secret-wrap', opacity:[0,1], translateX:[10,0],
+              duration:240, delay:380, easing:'easeOutQuad' });
+      anime({ targets: '.otp-digit', opacity:[0,1], translateY:[6,0],
+              delay:anime.stagger(28,{start:260}), duration:200, easing:'easeOutQuad' });
+      setTimeout(focusOtp, 460);
+    }
+
+    // Chamado quando a API retorna — popula o QR e o anima.
+    function preencherQR(data) {
+      mfaFactorId = data.id;
+      $('mfa-secret').textContent = data.totp.secret;
+      const img  = $('mfa-qr');
+      const skel = $('mfa-qr-skeleton');
+      img.onload = () => {
+        if (!motion) {
+          skel.style.display = 'none';
+          img.style.opacity  = '1';
+          return;
+        }
+        // Skeleton sai, QR entra — ao mesmo tempo, sem layout shift.
+        anime({ targets: skel, opacity:[1,0], duration:260, easing:'easeOutQuad',
+                complete: () => { skel.style.display = 'none'; } });
+        anime({ targets: img, opacity:[0,1], scale:[0.92,1],
+                duration:360, easing:'easeOutBack' });
+      };
+      img.src = data.totp.qr_code;
+    }
+
+    function fecharModalMFA(cb) {
+      const overlay = $('modal-mfa-overlay');
+      const card    = $('modal-mfa-card');
+      if (!motion) {
+        overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true');
+        if (cb) cb(); return;
+      }
+      anime({ targets:card,    opacity:[1,0], translateY:[0,12], scale:[1,0.96], duration:240, easing:'easeInQuad' });
+      anime({ targets:overlay, opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete:() => { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); } });
+    }
+
+    function cancelarSetupMFA() {
+      if (mfaFactorId) sb.auth.mfa.unenroll({ factorId: mfaFactorId }).catch(()=>{});
+      mfaFactorId = null;
+      fecharModalMFA(() => setMFAEstado('inativo'));
+    }
+
+    $('modal-mfa-overlay').addEventListener('click', e => { if(e.target===$('modal-mfa-overlay')) cancelarSetupMFA(); });
+    $('btn-fechar-modal-mfa').onclick = cancelarSetupMFA;
+    document.addEventListener('keydown', e => {
+      if (e.key==='Escape' && $('modal-mfa-overlay').classList.contains('aberto')) cancelarSetupMFA();
+    });
+
+    $('btn-ativar-mfa').onclick = async () => {
+      const btn = $('btn-ativar-mfa');
+      btn.disabled = true;
+      $('erro-mfa').classList.remove('show');
+      abrirModalMFA(); // Modal abre imediatamente; QR chega depois.
+      try {
+        let { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', issuer: 'Hero Play' });
+
+        if (error) {
+          const msg = (error.message ?? '').toLowerCase();
+          if (msg.includes('already exists') || msg.includes('already enrolled')) {
+            const { data: fatores } = await sb.auth.mfa.listFactors();
+            const lista = fatores?.all ?? fatores?.totp ?? [];
+            for (const f of lista) {
+              if (f.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: f.id });
+            }
+            ({ data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', issuer: 'Hero Play' }));
+          }
+        }
+
+        if (error) { mostrarErro($('erro-mfa-modal'), traduzErroMFA(error.message)); return; }
+
+        preencherQR(data);
+      } catch (e) {
+        mostrarErro($('erro-mfa-modal'), 'Erro ao iniciar MFA: ' + (e?.message ?? e));
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    $('btn-copiar-segredo').onclick = () => {
+      navigator.clipboard.writeText($('mfa-secret').textContent)
+        .then(() => { $('btn-copiar-segredo').textContent = 'Copiado!'; setTimeout(() => $('btn-copiar-segredo').textContent = 'Copiar', 1800); });
+    };
+
+    // Toggle "Não consigo escanear" — grid-template-rows anima o card sem reflow.
+    $('btn-secret-toggle').addEventListener('click', () => {
+      const wrap   = document.querySelector('.mfa-secret-wrap');
+      const reveal = $('mfa-secret-reveal');
+      const inner  = reveal.querySelector('.mfa-secret-inner');
+      const abrindo = !wrap.classList.contains('open');
+
+      anime.remove(inner);
+      wrap.classList.toggle('open', abrindo);
+      reveal.classList.toggle('open', abrindo);   // dispara CSS transition no card
+
+      if (!motion) return;
+      if (abrindo) {
+        // Conteúdo aparece levemente depois do grid começar a expandir.
+        anime({ targets: inner, opacity:[0,1], translateY:[-6,0],
+                duration:240, delay:60, easing:'easeOutQuad' });
+      } else {
+        anime({ targets: inner, opacity:[1,0], translateY:[0,-4],
+                duration:180, easing:'easeInQuad',
+                complete: () => { inner.style.opacity=''; inner.style.transform=''; } });
+      }
+    });
+
+    $('btn-cancelar-mfa').onclick = cancelarSetupMFA;
+
+    $('btn-verificar-mfa').onclick = async () => {
+      const code = getOtpValue();
+      if (code.length !== 6) { mostrarErro($('erro-mfa-modal'), 'Digite os 6 dígitos do código.'); return; }
+      const btn = $('btn-verificar-mfa');
+      btn.disabled = true; btn.textContent = 'Verificando…';
+      const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: mfaFactorId, code });
+      btn.disabled = false; btn.textContent = 'Verificar e ativar';
+      if (error) { mostrarErro($('erro-mfa-modal'), traduzErroMFA(error.message)); return; }
+      fecharModalMFA(() => {
+        setMFAEstado('ativo');
+        mostrarOk($('ok-mfa'), 'MFA ativado! Sua conta agora exige o código ao entrar.');
+      });
+    };
+
+    // Helpers OTP (scopados ao wrap pai; sem arg = otp-wrap do modal de setup)
+    function getOtpDigits(w) { return [...(w || $('otp-wrap')).querySelectorAll('.otp-digit')]; }
+    function getOtpValue(w)   { return getOtpDigits(w).map(i => i.value).join(''); }
+    function clearOtp(w)      { getOtpDigits(w).forEach(i => { i.value = ''; i.classList.remove('filled'); }); }
+    function focusOtp(w)      { getOtpDigits(w)[0]?.focus(); }
+
+    // Navegação entre caixas — scopada ao wrap do dígito
+    document.addEventListener('input', e => {
+      if (!e.target.classList.contains('otp-digit')) return;
+      const wrap   = e.target.closest('.otp-wrap');
+      const digits = [...wrap.querySelectorAll('.otp-digit')];
+      const idx    = digits.indexOf(e.target);
+      e.target.value = e.target.value.replace(/\D/g, '').slice(-1);
+      e.target.classList.toggle('filled', e.target.value !== '');
+      if (e.target.value && idx < digits.length - 1) digits[idx + 1].focus();
+      if (digits.map(i => i.value).join('').length === digits.length) {
+        const sub = wrap.dataset.submit; if (sub) $(sub)?.click();
+      }
+    }, true);
+
+    document.addEventListener('keydown', e => {
+      if (!e.target.classList.contains('otp-digit')) return;
+      const wrap   = e.target.closest('.otp-wrap');
+      const digits = [...wrap.querySelectorAll('.otp-digit')];
+      const idx    = digits.indexOf(e.target);
+      if (e.key === 'Backspace') {
+        if (e.target.value) { e.target.value = ''; e.target.classList.remove('filled'); }
+        else if (idx > 0)   { digits[idx - 1].focus(); digits[idx - 1].value = ''; digits[idx - 1].classList.remove('filled'); }
+      }
+      if (e.key === 'ArrowLeft'  && idx > 0)              digits[idx - 1].focus();
+      if (e.key === 'ArrowRight' && idx < digits.length - 1) digits[idx + 1].focus();
+    }, true);
+
+    document.addEventListener('paste', e => {
+      if (!e.target.classList.contains('otp-digit')) return;
+      e.preventDefault();
+      const wrap   = e.target.closest('.otp-wrap');
+      const digits = [...wrap.querySelectorAll('.otp-digit')];
+      const text   = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, digits.length);
+      text.split('').forEach((ch, i) => { if (digits[i]) { digits[i].value = ch; digits[i].classList.add('filled'); } });
+      digits[Math.min(text.length, digits.length - 1)]?.focus();
+      if (digits.map(i => i.value).join('').length === digits.length) {
+        const sub = wrap.dataset.submit; if (sub) $(sub)?.click();
+      }
+    }, true);
+
+    $('btn-desativar-mfa').onclick = () => abrirModalDesativarMFA();
+
+    /* ── Modal: desativar MFA ──────────────────────────────────────────────── */
+    function abrirModalDesativarMFA() {
+      $('erro-desativar-mfa').classList.remove('show');
+      clearOtp($('otp-desativar-wrap'));
+
+      const overlay = $('modal-desativar-mfa-overlay');
+      const card    = $('modal-desativar-mfa-card');
+      overlay.classList.add('aberto');
+      overlay.setAttribute('aria-hidden', 'false');
+
+      if (!motion) { focusOtp($('otp-desativar-wrap')); return; }
+      anime({ targets: overlay, opacity:[0,1], duration:200, easing:'linear' });
+      anime({ targets: card, opacity:[0,1], translateY:[20,0], scale:[0.96,1],
+              duration:320, easing:'easeOutExpo' });
+      anime({ targets: '#otp-desativar-wrap .otp-digit', opacity:[0,1], translateY:[6,0],
+              delay:anime.stagger(28,{start:200}), duration:200, easing:'easeOutQuad',
+              complete: () => focusOtp($('otp-desativar-wrap')) });
+    }
+
+    function fecharModalDesativarMFA(cb) {
+      const overlay = $('modal-desativar-mfa-overlay');
+      const card    = $('modal-desativar-mfa-card');
+      if (!motion) {
+        overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true');
+        if (cb) cb(); return;
+      }
+      anime({ targets:card,    opacity:[1,0], translateY:[0,12], scale:[1,0.96], duration:240, easing:'easeInQuad' });
+      anime({ targets:overlay, opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete:() => { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); } });
+    }
+
+    $('modal-desativar-mfa-overlay').addEventListener('click', e => {
+      if (e.target === $('modal-desativar-mfa-overlay')) fecharModalDesativarMFA();
+    });
+    $('btn-fechar-desativar-mfa').onclick   = () => fecharModalDesativarMFA();
+    $('btn-cancelar-desativar').onclick     = () => fecharModalDesativarMFA();
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && $('modal-desativar-mfa-overlay').classList.contains('aberto'))
+        fecharModalDesativarMFA();
+    });
+
+    // Confirmar via TOTP
+    $('btn-confirmar-desativar').onclick = async () => {
+      const code = getOtpValue($('otp-desativar-wrap'));
+      if (code.length !== 6) { mostrarErro($('erro-desativar-mfa'), 'Digite os 6 dígitos.'); return; }
+      const btn = $('btn-confirmar-desativar');
+      btn.disabled = true; btn.textContent = 'Verificando…';
+      try {
+        const { data: ch, error: chErr } = await sb.auth.mfa.challenge({ factorId: mfaFactorId });
+        if (chErr) throw chErr;
+        const { error: verErr } = await sb.auth.mfa.verify({ factorId: mfaFactorId, challengeId: ch.id, code });
+        if (verErr) throw verErr;
+        const { error: unErr } = await sb.auth.mfa.unenroll({ factorId: mfaFactorId });
+        if (unErr) throw unErr;
+        fecharModalDesativarMFA(() => {
+          mfaFactorId = null; setMFAEstado('inativo');
+          mostrarOk($('ok-mfa'), 'MFA desativado com sucesso.');
+        });
+      } catch(e) {
+        mostrarErro($('erro-desativar-mfa'), traduzErroMFA(e.message ?? ''));
+        clearOtp($('otp-desativar-wrap')); focusOtp($('otp-desativar-wrap'));
+      } finally { btn.disabled = false; btn.textContent = 'Desativar'; }
+    };
+
+
+    function traduzErroMFA(m) {
+      const t = (m||'').toLowerCase();
+      if (t.includes('invalid') || t.includes('expired')) return 'Código inválido ou expirado. Tente um novo código.';
+      if (t.includes('already enrolled') || t.includes('already exists')) return 'MFA já está configurado nesta conta. Recarregue a página.';
+      return traduzErro(m);
+    }
+
+    // Remover conta — placeholder
+    $('btn-remover-conta').onclick = async () => {
+      const confirmado = confirm(
+        'Tem certeza? Esta ação é irreversível.\n\nSua conta e todas as listas serão removidas permanentemente.'
+      );
+      if (!confirmado) return;
+      mostrarErro($('erro-remover'), 'Remoção de conta via painel será ativada em breve. Por enquanto entre em contato com o suporte.');
+    };
+
+    function traduzErro(m) {
+      const t = (m||'').toLowerCase();
+      if (t.includes('same password'))      return 'A nova senha deve ser diferente da atual.';
+      if (t.includes('should be at least')) return 'A senha precisa ter pelo menos 6 caracteres.';
+      if (t.includes('already registered') || t.includes('already exists')) return 'Esse email já está em uso.';
+      if (t.includes('invalid email'))      return 'Email inválido.';
+      return m || 'Erro inesperado. Tente novamente.';
+    }
+  </script>
+</body>
+</html>

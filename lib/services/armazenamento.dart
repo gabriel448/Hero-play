@@ -140,6 +140,13 @@ class Armazenamento {
   Future<void> salvarAutoQualidade(bool valor) =>
       _boxPreferencias.put('auto_qualidade', valor);
 
+  /// Se o usuario escolheu usar o app sem conta (pulou a tela de login).
+  bool obterPulouLogin() =>
+      _boxPreferencias.get('pulou_login', defaultValue: false) as bool;
+
+  Future<void> salvarPulouLogin(bool valor) =>
+      _boxPreferencias.put('pulou_login', valor);
+
   /// Modo de ordenacao da lista de categorias ao vivo: 'popularidade' (padrao)
   /// ou 'az'. Persistido entre sessoes.
   String obterOrdemCategorias() =>
@@ -177,9 +184,23 @@ class Armazenamento {
     await _boxListas.put(lista.id, lista.toMap());
   }
 
+  /// Salva uma lista a partir de um mapa ja serializado (no formato de
+  /// [ListaM3U.toMap]). Usado pela sincronizacao, que monta o mapa dentro de
+  /// um isolate — assim a serializacao pesada nao roda na thread da UI.
+  Future<void> salvarListaBruta(String id, Map<String, dynamic> mapa) async {
+    await _boxListas.put(id, mapa);
+  }
+
   /// Apaga uma lista pelo identificador.
   Future<void> removerLista(String id) async {
     await _boxListas.delete(id);
+  }
+
+  /// Apaga TODAS as listas locais (usado ao trocar de conta no logout, para
+  /// nao misturar listas de usuarios diferentes no mesmo aparelho).
+  Future<void> limparListas() async {
+    await _boxListas.clear();
+    await _boxPreferencias.delete('lista_ativa_id');
   }
 
   /// Retorna todas as listas salvas, ordenadas pela data mais recente.

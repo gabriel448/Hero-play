@@ -39,6 +39,23 @@ class PreferenciasProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Login: o usuario pode optar por usar o app sem conta ────────────────
+
+  /// `true` se o usuario escolheu seguir sem conta na tela de login.
+  bool get pulouLogin => _armazenamento.obterPulouLogin();
+
+  /// Marca que o usuario quer usar o app sem entrar (modo local).
+  Future<void> pularLogin() async {
+    await _armazenamento.salvarPulouLogin(true);
+    notifyListeners();
+  }
+
+  /// Volta a exigir login (usado ao sair da conta).
+  Future<void> reativarLogin() async {
+    await _armazenamento.salvarPulouLogin(false);
+    notifyListeners();
+  }
+
   // ── Ordenacao da lista de categorias ao vivo ────────────────────────────
 
   OrdemCategorias get ordemCategorias =>

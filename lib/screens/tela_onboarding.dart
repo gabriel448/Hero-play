@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/idioma_app.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animado_entrada.dart';
 
 /// Tela de boas-vindas do primeiro uso: o usuario escolhe o idioma.
 ///
@@ -25,43 +26,56 @@ class TelaOnboarding extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 88,
-                      height: 88,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface1,
-                        borderRadius: BorderRadius.circular(AppRadius.lg),
-                      ),
-                      child: const Icon(
-                        Icons.live_tv_rounded,
-                        size: 44,
-                        color: AppColors.accent,
+                  AnimadoEntrada(
+                    child: Center(
+                      child: Container(
+                        width: 88,
+                        height: 88,
+                        decoration: BoxDecoration(
+                          color: AppColors.surface1,
+                          borderRadius: BorderRadius.circular(AppRadius.lg),
+                        ),
+                        child: const Icon(
+                          Icons.live_tv_rounded,
+                          size: 44,
+                          color: AppColors.accent,
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  Text(
-                    'IPTV Player',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    'Escolha o idioma  ·  Choose your language  ·  '
-                    'Elige tu idioma',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textSecondary,
+                  AnimadoEntrada(
+                    delay: const Duration(milliseconds: 80),
+                    child: Column(
+                      children: [
+                        Text(
+                          'IPTV Player',
+                          style: Theme.of(context).textTheme.headlineMedium,
+                          textAlign: TextAlign.center,
                         ),
-                    textAlign: TextAlign.center,
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Escolha o idioma  ·  Choose your language  ·  '
+                          'Elige tu idioma',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  for (final idioma in IdiomaApp.values) ...[
-                    _CardIdioma(
-                      idioma: idioma,
-                      onTap: () => context
-                          .read<PreferenciasProvider>()
-                          .definirIdioma(idioma),
+                  for (final (i, idioma) in IdiomaApp.values.indexed) ...[
+                    AnimadoEntrada(
+                      delay: Duration(milliseconds: 160 + i * 70),
+                      child: _CardIdioma(
+                        idioma: idioma,
+                        onTap: () => context
+                            .read<PreferenciasProvider>()
+                            .definirIdioma(idioma),
+                      ),
                     ),
                     if (idioma != IdiomaApp.values.last)
                       const SizedBox(height: AppSpacing.md),

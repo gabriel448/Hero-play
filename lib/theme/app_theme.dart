@@ -333,6 +333,38 @@ class AppTheme {
         color: AppColors.accent,
       ),
       splashFactory: InkRipple.splashFactory,
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: _FadeSlideTransitionBuilder(),
+          TargetPlatform.iOS: _FadeSlideTransitionBuilder(),
+          TargetPlatform.windows: _FadeSlideTransitionBuilder(),
+          TargetPlatform.linux: _FadeSlideTransitionBuilder(),
+          TargetPlatform.macOS: _FadeSlideTransitionBuilder(),
+        },
+      ),
+    );
+  }
+}
+
+class _FadeSlideTransitionBuilder extends PageTransitionsBuilder {
+  const _FadeSlideTransitionBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final fade = CurvedAnimation(parent: animation, curve: Curves.easeOut);
+    final slide = Tween<Offset>(
+      begin: const Offset(0, 0.03),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+    return FadeTransition(
+      opacity: fade,
+      child: SlideTransition(position: slide, child: child),
     );
   }
 }

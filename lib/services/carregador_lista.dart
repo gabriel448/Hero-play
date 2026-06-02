@@ -26,7 +26,9 @@ class CarregadorLista {
   Future<String> baixarDeUrl(String url) async {
     try {
       final uri = Uri.parse(url);
-      final resposta = await http.get(uri).timeout(timeout);
+      final resposta = await http
+          .get(uri, headers: const {'Accept-Encoding': 'gzip'})
+          .timeout(timeout);
 
       if (resposta.statusCode < 200 || resposta.statusCode >= 300) {
         throw CarregamentoListaException(

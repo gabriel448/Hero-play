@@ -1,0 +1,11 @@
+# Supabase
+.branches
+.temp
+
+# Segredos locais — NUNCA versionar
+.env
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entrar — Hero Play</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/auth.css">
+  <script>document.documentElement.classList.add('js-anim');</script>
+  <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <img src="assets/heroplay-icon-192.png" alt="Hero Play">
+      <span>Hero Play</span>
+    </a>
+    <a class="btn btn-ghost" href="index.html">← Voltar ao site</a>
+  </header>
+
+  <main class="center-wrap">
+    <div class="card anim-in">
+
+      <!-- ── Step 1: email + senha ────────────────────────────────────────── -->
+      <div id="step-auth">
+        <h1 id="titulo">Entrar</h1>
+        <p class="sub" id="subtitulo">Acesse sua conta para gerenciar suas listas.</p>
+
+        <div class="tabs">
+          <span class="tab-indicator" id="tab-indicator"></span>
+          <button class="tab active" id="tab-entrar" type="button">Entrar</button>
+          <button class="tab" id="tab-criar" type="button">Criar conta</button>
+        </div>
+
+        <div class="msg error" id="msg-erro"></div>
+        <div class="msg ok"    id="msg-ok"></div>
+
+        <form id="form-auth" autocomplete="on">
+          <div class="field">
+            <label for="email">Email</label>
+            <input type="email" id="email" required placeholder="voce@email.com" autocomplete="email">
+          </div>
+          <div class="field">
+            <label for="senha">Senha</label>
+            <input type="password" id="senha" required minlength="6" placeholder="mínimo 6 caracteres" autocomplete="current-password">
+          </div>
+          <div class="field" id="field-confirmar" style="display:none">
+            <label for="confirmar">Confirmar senha</label>
+            <input type="password" id="confirmar" minlength="6" placeholder="repita a senha" autocomplete="new-password">
+          </div>
+          <button class="btn btn-primary" id="btn-enviar" type="submit">Entrar</button>
+        </form>
+      </div>
+
+      <!-- ── Step 2: código MFA ───────────────────────────────────────────── -->
+      <div id="step-mfa" style="display:none">
+        <h1>Verificação em dois fatores</h1>
+        <p class="sub">Digite o código de 6 dígitos gerado pelo seu app autenticador.</p>
+        <div class="msg error" id="mfa-erro"></div>
+        <div class="field" style="margin-top:8px">
+          <label for="mfa-code">Código TOTP</label>
+          <input type="text" id="mfa-code" class="codigo-grande" maxlength="6"
+                 placeholder="000000" inputmode="numeric" autocomplete="one-time-code">
+        </div>
+        <button class="btn btn-primary" id="btn-mfa-verificar" type="button">Verificar</button>
+        <button class="btn btn-ghost" id="btn-mfa-voltar" type="button" style="margin-top:8px;width:100%">← Usar outra conta</button>
+      </div>
+
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const erro = $('msg-erro'), ok = $('msg-ok');
+    let modo = 'entrar';
+    let mfaChallengeId = null;
+    let mfaFactorId    = null;
+
+    if (location.protocol === 'file:') mostrarErroBoot('Abra via servidor HTTP (ex.: npx serve website).');
+    if (typeof supabase === 'undefined') mostrarErroBoot('Supabase não carregou. Verifique sua conexão.');
+    function mostrarErroBoot(t) { erro.textContent=t; erro.classList.add('show'); }
+
+    const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+
+    /* ── Motion ──────────────────────────────────────────────────────────── */
+    const motion = (typeof anime !== 'undefined') &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!motion) document.documentElement.classList.remove('js-anim');
+
+    function moverIndicador(instantaneo) {
+      const ind  = $('tab-indicator');
+      const alvo = modo === 'entrar' ? $('tab-entrar') : $('tab-criar');
+      if (!motion) { ind.style.left=alvo.offsetLeft+'px'; ind.style.width=alvo.offsetWidth+'px'; return; }
+      anime.remove(ind);
+      anime({ targets:ind, left:alvo.offsetLeft, width:alvo.offsetWidth,
+              duration:instantaneo?0:420, easing:'spring(1, 90, 12, 0)' });
+    }
+
+    function animarCampoConfirmar(mostrar) {
+      const f=$('field-confirmar');
+      if (!motion) { f.style.display=mostrar?'block':'none'; return; }
+      anime.remove(f);
+      const atual=f.getBoundingClientRect().height;
+      if (mostrar) {
+        f.style.display='block'; f.style.height='auto';
+        const alvo=f.getBoundingClientRect().height;
+        f.style.height=atual+'px';
+        if (atual===0){ f.style.opacity='0'; f.style.marginBottom='0px'; }
+        f.offsetHeight;
+        anime({ targets:f, height:alvo, opacity:1, marginBottom:14, duration:380, easing:'easeOutQuad',
+                complete:()=>{ f.style.height='auto'; } });
+      } else {
+        f.style.height=atual+'px'; f.offsetHeight;
+        anime({ targets:f, height:0, opacity:0, marginBottom:0, duration:300, easing:'easeInQuad',
+                complete:()=>{ f.style.display='none'; f.style.height=''; f.style.marginBottom=''; f.style.opacity=''; } });
+      }
+    }
+
+    function animarMsg(el) {
+      if (!motion) return;
+      anime.remove(el);
+      anime({ targets:el, opacity:[0,1], translateY:[-6,0], duration:320, easing:'easeOutQuad' });
+    }
+    function mostrarErro(t){ erro.textContent=t; erro.classList.add('show'); ok.classList.remove('show'); animarMsg(erro); }
+    function mostrarOk(t)  { ok.textContent=t;  ok.classList.add('show'); erro.classList.remove('show'); animarMsg(ok); }
+    function limparMsgs()  { erro.classList.remove('show'); ok.classList.remove('show'); }
+
+    function navegar(url) {
+      if (!motion) { location.replace(url); return; }
+      anime({ targets:'.card,.topbar', opacity:[1,0], translateY:[0,-10],
+              duration:300, easing:'easeInQuad', complete:()=>location.replace(url) });
+    }
+
+    function setModo(novo, opts={}) {
+      modo=novo;
+      const entrar=novo==='entrar';
+      $('tab-entrar').classList.toggle('active', entrar);
+      $('tab-criar').classList.toggle('active', !entrar);
+      $('titulo').textContent = entrar?'Entrar':'Criar conta';
+      $('subtitulo').textContent = entrar
+        ? 'Acesse sua conta para gerenciar suas listas.'
+        : 'Crie sua conta com email e senha.';
+      $('btn-enviar').textContent = entrar?'Entrar':'Criar conta';
+      $('senha').setAttribute('autocomplete', entrar?'current-password':'new-password');
+      animarCampoConfirmar(!entrar);
+      moverIndicador(false);
+      if (motion) {
+        anime.remove('#titulo,#subtitulo');
+        anime({ targets:'#titulo,#subtitulo', opacity:[0,1], translateY:[6,0], duration:320, easing:'easeOutQuad' });
+      }
+      if (!opts.manterMsg) limparMsgs();
+    }
+
+    $('tab-entrar').onclick = () => setModo('entrar');
+    $('tab-criar').onclick  = () => setModo('criar');
+
+    document.querySelectorAll('a[href="index.html"]').forEach(a =>
+      a.addEventListener('click', e => { e.preventDefault(); navegar('index.html'); }));
+
+    entrada();
+    function entrada() {
+      moverIndicador(true);
+      if (!motion) return;
+      anime.timeline({ easing:'easeOutExpo', duration:700 })
+        .add({ targets:'.card', opacity:[0,1], translateY:[26,0], scale:[0.98,1] })
+        .add({ targets:'.card > h1,.card > .sub,.tabs,#form-auth',
+               opacity:[0,1], translateY:[12,0], delay:anime.stagger(70) }, '-=440');
+    }
+
+    sb.auth.getSession().then(({ data }) => { if (data.session) location.replace('painel.html'); });
+
+    /* ── Step 1: Login ──────────────────────────────────────────────────── */
+    $('form-auth').addEventListener('submit', async e => {
+      e.preventDefault();
+      limparMsgs();
+      const emailVal = $('email').value.trim();
+      const senhaVal = $('senha').value;
+      const btn = $('btn-enviar');
+
+      if (modo==='criar' && senhaVal!==$('confirmar').value)
+        return mostrarErro('As senhas não coincidem.');
+
+      btn.disabled=true; btn.textContent='Aguarde…';
+
+      try {
+        if (modo==='entrar') {
+          const { data, error } = await sb.auth.signInWithPassword({ email:emailVal, password:senhaVal });
+          if (error) throw error;
+
+          // Verifica se MFA e necessario
+          const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+          if (aal?.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') {
+            await iniciarDesafioMFA();
+          } else {
+            navegar('painel.html');
+          }
+        } else {
+          const { data, error } = await sb.auth.signUp({ email:emailVal, password:senhaVal });
+          if (error) throw error;
+          if (data.session) await sb.auth.signOut();
+          mostrarOk('Conta criada! Confirme seu email e depois entre.');
+          $('senha').value=''; $('confirmar').value='';
+          setTimeout(()=>setModo('entrar',{manterMsg:true}), 1400);
+        }
+      } catch (err) {
+        mostrarErro(traduzErro(err.message||'Erro inesperado.'));
+      } finally {
+        btn.disabled=false; btn.textContent=modo==='entrar'?'Entrar':'Criar conta';
+      }
+    });
+
+    /* ── Step 2: Challenge MFA ──────────────────────────────────────────── */
+    async function iniciarDesafioMFA() {
+      const { data:factors } = await sb.auth.mfa.listFactors();
+      const totp = factors?.totp?.find(f => f.status==='verified');
+      if (!totp) { navegar('painel.html'); return; }
+
+      mfaFactorId = totp.id;
+      const { data:ch, error } = await sb.auth.mfa.challenge({ factorId: mfaFactorId });
+      if (error) { mostrarErro('Falha ao iniciar MFA. Tente novamente.'); return; }
+      mfaChallengeId = ch.id;
+
+      // Transição step1 → step2
+      if (motion) {
+        anime({ targets:'#step-auth', opacity:[1,0], translateX:[0,-24], duration:220, easing:'easeInQuad',
+          complete:() => {
+            $('step-auth').style.display='none';
+            $('step-mfa').style.display='';
+            anime({ targets:'#step-mfa', opacity:[0,1], translateX:[24,0], duration:320, easing:'easeOutExpo',
+                    complete:()=>$('mfa-code').focus() });
+          }
+        });
+      } else {
+        $('step-auth').style.display='none';
+        $('step-mfa').style.display='';
+        $('mfa-code').focus();
+      }
+    }
+
+    $('btn-mfa-verificar').onclick = async () => {
+      const code = $('mfa-code').value.replace(/\D/g,'');
+      if (code.length!==6) { $('mfa-erro').textContent='Digite os 6 dígitos.'; $('mfa-erro').classList.add('show'); return; }
+      const btn=$('btn-mfa-verificar');
+      btn.disabled=true; btn.textContent='Verificando…';
+      const { error } = await sb.auth.mfa.verify({ factorId:mfaFactorId, challengeId:mfaChallengeId, code });
+      btn.disabled=false; btn.textContent='Verificar';
+      if (error) {
+        $('mfa-erro').textContent='Código inválido ou expirado.';
+        $('mfa-erro').classList.add('show');
+        $('mfa-code').value=''; $('mfa-code').focus();
+        return;
+      }
+      navegar('painel.html');
+    };
+
+    // Auto-submit ao completar 6 dígitos
+    $('mfa-code').addEventListener('input', e => {
+      e.target.value=e.target.value.replace(/\D/g,'').slice(0,6);
+      if (e.target.value.length===6) $('btn-mfa-verificar').click();
+    });
+
+    $('btn-mfa-voltar').onclick = async () => {
+      await sb.auth.signOut();
+      $('step-mfa').style.display='none';
+      $('step-auth').style.display='';
+      $('mfa-code').value='';
+      $('mfa-erro').classList.remove('show');
+      if (motion) anime({ targets:'#step-auth', opacity:[0,1], translateY:[10,0], duration:300, easing:'easeOutQuad' });
+    };
+
+    function traduzErro(m) {
+      const t=(m||'').toLowerCase();
+      if (t.includes('invalid login'))     return 'Email ou senha incorretos.';
+      if (t.includes('already registered')||t.includes('already exists')) return 'Esse email já tem conta. Tente entrar.';
+      if (t.includes('password should be at least')) return 'A senha precisa ter pelo menos 6 caracteres.';
+      if (t.includes('unable to validate email')||t.includes('invalid email')) return 'Email inválido.';
+      if (t.includes('email not confirmed')) return 'Confirme seu email antes de entrar.';
+      return m||'Erro inesperado. Tente novamente.';
+    }
+  </script>
+</body>
+</html>

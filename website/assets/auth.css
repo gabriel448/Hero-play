@@ -1,0 +1,691 @@
+/* Estilo compartilhado das paginas de conta (login + painel).
+   Reaproveita os tokens da landing (index.html). */
+:root {
+  --bg:           #0F0E0D;
+  --surface1:     #1A1815;
+  --surface2:     #252220;
+  --surface3:     #332E2A;
+  --text-primary: #F5F1EC;
+  --text-secondary:#A8A09A;
+  --text-tertiary: #5C5650;
+  --accent:       #E53935;
+  --accent-bright:#EF5350;
+  --accent-dim:   #3D1212;
+  --divider:      #2A2622;
+  --outline:      #3A3530;
+  --ok:           #43A047;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Manrope', sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a { color: var(--accent-bright); }
+
+/* ── Topo ─────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(20px, 5vw, 60px);
+  height: 60px;
+  border-bottom: 1px solid var(--divider);
+  background: rgba(15, 14, 13, 0.9);
+}
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand span { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+
+/* ── Botoes / inputs ──────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 18px;
+  border-radius: 10px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform .15s, background .15s, border-color .15s, opacity .15s;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--accent); color: #fff; width: 100%; }
+.btn-primary:hover { background: var(--accent-bright); transform: translateY(-1px); }
+.btn-primary:disabled { opacity: .55; cursor: default; transform: none; }
+.btn-outline { background: transparent; color: var(--text-primary); border-color: var(--outline); }
+.btn-outline:hover { border-color: var(--text-secondary); }
+.btn-ghost { background: transparent; color: var(--text-secondary); padding: 8px 12px; }
+.btn-ghost:hover { color: var(--text-primary); }
+.btn-danger { background: transparent; color: var(--accent-bright); border-color: var(--accent-dim); padding: 8px 12px; }
+.btn-danger:hover { background: var(--accent-dim); }
+
+label { display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+
+input[type=email], input[type=password], input[type=text], input[type=url] {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: var(--surface2);
+  color: var(--text-primary);
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s;
+}
+input:focus { border-color: var(--accent); }
+
+/* Autofill: o navegador força fundo branco em :-webkit-autofill ignorando o
+   background. Não dá pra setar background-color direto — usa-se um box-shadow
+   inset gigante com a cor do tema, e text-fill-color pro texto.
+   A borda de 1px tem raio interno diferente do shadow, e o branco do autofill
+   "vaza" nos cantos arredondados (bug do Chrome). Por isso a borda real fica
+   opaca (= cor do preenchimento) e o contorno vira um 2º shadow inset, que
+   acompanha o border-radius sem deixar fresta. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--text-primary);
+  border-color: var(--surface2);
+  -webkit-box-shadow: 0 0 0 1000px var(--surface2) inset, 0 0 0 1px var(--outline) inset;
+          box-shadow: 0 0 0 1000px var(--surface2) inset, 0 0 0 1px var(--outline) inset;
+  caret-color: var(--text-primary);
+  /* atrasa a transição do fundo "indefinidamente" pra matar o flash branco */
+  transition: background-color 600000s 0s, color 600000s 0s;
+}
+input:-webkit-autofill:focus {
+  border-color: var(--surface2);
+  -webkit-box-shadow: 0 0 0 1000px var(--surface2) inset, 0 0 0 1px var(--accent) inset;
+          box-shadow: 0 0 0 1000px var(--surface2) inset, 0 0 0 1px var(--accent) inset;
+}
+
+.field { margin-bottom: 14px; }
+
+/* ── Mensagens ────────────────────────────────────────────────────────── */
+.msg { font-size: 13px; padding: 10px 12px; border-radius: 9px; margin-bottom: 14px; display: none; }
+.msg.show { display: block; }
+.msg.error { background: var(--accent-dim); color: #FFD7D5; }
+.msg.ok    { background: rgba(67,160,71,.16); color: #C8E6C9; }
+
+/* ── Card de login ────────────────────────────────────────────────────── */
+.center-wrap { display: flex; align-items: center; justify-content: center; padding: 48px 20px; min-height: calc(100vh - 60px); }
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface1);
+  border: 1px solid var(--divider);
+  border-radius: 18px;
+  padding: 32px;
+}
+.card h1 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.card .sub { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; }
+
+.tabs { display: flex; gap: 4px; background: var(--surface2); padding: 4px; border-radius: 12px; margin-bottom: 24px; }
+.tab { flex: 1; text-align: center; padding: 9px; border-radius: 9px; font-size: 14px; font-weight: 600; color: var(--text-secondary); cursor: pointer; border: none; background: transparent; font-family: inherit; }
+.tab.active { color: var(--text-primary); }
+
+/* ── Painel ───────────────────────────────────────────────────────────── */
+.painel { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
+.painel-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.painel-head h1 { font-size: 24px; font-weight: 800; }
+.email-pill { font-size: 13px; color: var(--text-secondary); }
+
+.section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-tertiary); margin: 28px 0 12px; }
+
+.lista-card {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface1);
+  border: 1px solid var(--divider);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.lista-card .info { flex: 1; min-width: 0; }
+.lista-card .nome { font-size: 15px; font-weight: 700; }
+.lista-card .url { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lista-card .epg { font-size: 12px; color: var(--text-secondary); }
+.lista-card .acoes { display: flex; gap: 6px; flex-shrink: 0; }
+
+.form-card { background: var(--surface1); border: 1px solid var(--divider); border-radius: 14px; padding: 20px; }
+.empty { color: var(--text-secondary); font-size: 14px; padding: 24px; text-align: center; border: 1px dashed var(--outline); border-radius: 14px; }
+
+.muted { color: var(--text-secondary); font-size: 13px; }
+.spinner { color: var(--text-secondary); font-size: 14px; padding: 24px; text-align: center; }
+
+/* ── Animações (anime.js) ─────────────────────────────────────────────────
+   Estado inicial escondido só quando JS+motion estão ativos: o atributo
+   .js-anim é posto no <html> por um script no <head>; se anime.js não
+   carregar ou o usuário pedir menos movimento, o JS remove .js-anim e tudo
+   aparece normalmente (sem flash, sem conteúdo preso invisível). */
+@media (prefers-reduced-motion: no-preference) {
+  .js-anim .anim-in { opacity: 0; }
+}
+
+/* Micro-interação de toque nos botões */
+.btn:active { transform: scale(.97); }
+
+/* Tabs com indicador deslizante (o fundo do tab ativo vem do indicador) */
+.tabs { position: relative; }
+.tab { position: relative; z-index: 1; transition: color .25s; }
+.tab-indicator {
+  position: absolute;
+  top: 4px; bottom: 4px; left: 4px;
+  width: 80px;                 /* posição/tamanho ajustados via JS */
+  background: var(--surface3);
+  border-radius: 9px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Campo "confirmar senha": altura animável ao alternar entrar/criar */
+#field-confirmar { overflow: hidden; }
+
+/* Destaque do formulário ao entrar em modo edição */
+.form-card { transition: border-color .45s, box-shadow .45s; }
+.form-card.destacar { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+
+/* ── Cabecalho de secao com botao de acao ──────────────────────────────── */
+.secao-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 28px 0 12px;
+}
+.secao-cab .section-title { margin: 0; }
+.secao-cab .btn { width: auto; padding: 8px 16px; font-size: 13px; }
+
+/* ── Layout sidebar + conteudo ─────────────────────────────────────────── */
+.topbar-esq { display: flex; align-items: center; gap: 2px; }
+.hamburger  { display: none; padding: 8px 10px; }
+
+.drawer-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(10,9,8,.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 90;
+  opacity: 0;
+}
+.drawer-overlay.vis { display: block; }
+
+.layout {
+  display: flex;
+  min-height: calc(100vh - 60px);
+}
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--divider);
+  padding: 20px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+.sidebar-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 16px;
+  border-bottom: 1px solid var(--divider);
+  margin-bottom: 8px;
+}
+.sidebar-email { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-fechar { display: none; padding: 4px 8px; font-size: 18px; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: 'Manrope', sans-serif;
+  transition: background .15s, color .15s;
+}
+.nav-item:hover  { background: var(--surface2); color: var(--text-primary); }
+.nav-item.active { background: var(--surface2); color: var(--text-primary); }
+.nav-item svg    { width: 17px; height: 17px; flex-shrink: 0; }
+
+.conteudo {
+  flex: 1;
+  padding: 32px clamp(16px, 4vw, 40px) 80px;
+  min-width: 0;
+}
+
+.secao         { display: none; max-width: 680px; margin: 0 auto; }
+.secao.ativa   { display: block; }
+
+/* ── Cards de configuracao ──────────────────────────────────────────────── */
+.config-cards  { display: flex; flex-direction: column; gap: 16px; margin-top: 20px; }
+.config-card   {
+  background: var(--surface1);
+  border: 1px solid var(--divider);
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+.config-card.perigo { border-color: var(--accent-dim); }
+.config-card-head   { margin-bottom: 16px; }
+.config-card-head h3 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.config-card-head p  { font-size: 13px; color: var(--text-secondary); }
+.config-card .msg    { margin-bottom: 12px; }
+.config-card .btn    { width: auto; }
+
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 99px;
+  margin-bottom: 12px;
+}
+.badge-status.inativo { background: var(--surface2); color: var(--text-secondary); }
+.badge-status.ativo   { background: rgba(67,160,71,.15); color: #a5d6a7; }
+
+/* ── Responsive: drawer no mobile ──────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hamburger { display: inline-flex; }
+  .sidebar-fechar { display: inline-flex; }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 60px;
+    bottom: 0;
+    z-index: 100;
+    background: var(--surface1);
+    border-right: 1px solid var(--outline);
+    width: 270px;
+    transform: translateX(-100%);
+    height: calc(100vh - 60px);
+    transition: none; /* anime.js cuida da animacao */
+  }
+  .sidebar.aberta { transform: translateX(0); }
+}
+
+/* ── Modal ─────────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 9, 8, .72);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+}
+.modal-overlay.aberto {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal-card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--surface1);
+  border: 1px solid var(--outline);
+  border-radius: 18px;
+  padding: 28px;
+}
+.modal-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.modal-cab h2 { font-size: 18px; font-weight: 800; }
+.modal-fechar {
+  width: 34px; height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-rodape {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.modal-rodape .btn-outline { flex: 0 0 auto; }
+.modal-rodape .btn-primary { flex: 1; }
+
+/* ── MFA ─────────────────────────────────────────────────────────────────── */
+.mfa-qr-wrap {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  display: inline-grid;  /* inline-grid empilha filhos no mesmo cell */
+  margin: 4px 0 16px;
+}
+/* skeleton e img ocupam a mesma célula — sem layout shift */
+.mfa-qr-wrap > * { grid-area: 1 / 1; }
+
+.mfa-qr-skeleton {
+  width: 200px;
+  height: 200px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #E8E8E8 25%, #F5F5F5 50%, #E8E8E8 75%);
+  background-size: 200% 100%;
+  animation: qr-shimmer 1.4s linear infinite;
+}
+
+@keyframes qr-shimmer {
+  0%   { background-position:  200% 0; }
+  100% { background-position: -200% 0; }
+}
+.mfa-secret-wrap { font-size: 13px; color: var(--text-secondary); }
+
+.mfa-secret-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  user-select: none;
+  text-align: left;
+}
+.mfa-secret-summary:hover { color: var(--text-primary); }
+
+.mfa-secret-arrow {
+  flex-shrink: 0;
+  transition: transform 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.mfa-secret-wrap.open .mfa-secret-arrow { transform: rotate(180deg); }
+
+/* grid-template-rows: 0fr→1fr — anima a altura sem reflow por frame */
+.mfa-secret-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.mfa-secret-reveal.open { grid-template-rows: 1fr; }
+
+.mfa-secret-inner {
+  overflow: hidden;
+  padding-top: 12px;
+}
+.mfa-secret-code {
+  display: block;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  letter-spacing: 2px;
+  background: var(--surface2);
+  color: var(--text-primary);
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin: 8px 0;
+  word-break: break-all;
+}
+.mfa-acoes { display: flex; gap: 10px; flex-wrap: wrap; }
+
+
+
+/* ── OTP: 6 caixas separadas ─────────────────────────────────────────────── */
+.otp-wrap {
+  display: flex;
+  gap: 16px;
+  justify-content: flex-start;
+  margin: 4px 0;
+}
+.otp-digit {
+  flex: 0 0 40px;   /* impede o flex de esticar, sobrepoe o width:100% global */
+  width: 40px;
+  height: 56px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: var(--surface2);
+  color: var(--text-primary);
+  font-family: 'Manrope', sans-serif;
+  outline: none;
+  caret-color: var(--accent);
+  transition: border-color .15s, background .15s;
+}
+.otp-digit:focus  { border-color: var(--accent); background: var(--surface3); }
+.otp-digit.filled { border-color: var(--text-tertiary); }
+
+/* ── Modal MFA: duas colunas ─────────────────────────────────────────────── */
+.modal-mfa { max-width: 680px; }
+
+/* Título centrado no modal MFA; X absoluto garante que nunca sobreponha */
+.modal-mfa .modal-cab {
+  position: relative;
+  justify-content: center;
+}
+.modal-mfa .modal-cab h2 {
+  width: 100%;
+  text-align: center;
+  padding: 0 42px;   /* reserva espaço igual ao X em ambos os lados */
+}
+.modal-mfa .modal-fechar {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.mfa-modal-corpo {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+.mfa-col-esq {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mfa-col-esq .mfa-qr-wrap { margin-bottom: 20px; }
+
+.mfa-otp-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin: 0 0 10px;
+  width: 100%;
+  text-align: center;
+}
+
+.mfa-col-esq .otp-wrap { justify-content: flex-start; }
+
+.mfa-acoes-modal { width: 100%; margin-top: 16px; }
+.mfa-acoes-modal .btn { width: auto; }
+.mfa-acoes-modal .btn-primary { flex: 1; }
+
+.mfa-divisor {
+  width: 1px;
+  background: var(--divider);
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+.mfa-col-dir {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mfa-dir-titulo {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin: 0 0 16px;
+}
+
+.mfa-passo {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.mfa-passo-num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--surface3);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.mfa-passo-texto strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.mfa-passo-texto p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* ── Mobile: painel geral ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .conteudo { padding-top: 24px; padding-bottom: 60px; }
+  .config-card { padding: 16px 18px; }
+  .config-card-head { margin-bottom: 12px; }
+  .painel-head h1 { font-size: 20px; }
+  .secao-cab { margin: 20px 0 10px; }
+}
+
+/* ── Mobile: MFA modal (coluna única) ───────────────────────────────────── */
+@media (max-width: 580px) {
+  .mfa-modal-corpo {
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* Coluna esquerda: centraliza QR e inputs */
+  .mfa-col-esq {
+    flex: none;
+    width: 100%;
+    align-items: center;
+  }
+  .mfa-otp-label { text-align: center; }
+  .mfa-acoes-modal { justify-content: stretch; }
+
+  /* Divisor vira horizontal */
+  .mfa-divisor { width: 100%; height: 1px; align-self: auto; }
+
+  /* Coluna direita: largura total, passos mais compactos */
+  .mfa-col-dir { width: 100%; }
+  .mfa-dir-titulo { margin-bottom: 12px; }
+  .mfa-passo { margin-bottom: 14px; gap: 10px; }
+  .mfa-passo-num { width: 22px; height: 22px; font-size: 11px; }
+}
+
+/* ── Mobile pequeno (<480px): OTP + modal ────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Overlay: menos padding lateral para o card respirar */
+  .modal-overlay { padding: 10px; }
+
+  /* Card: padding menor, altura limitada com scroll */
+  .modal-card {
+    padding: 18px;
+    border-radius: 14px;
+    max-height: 92dvh;
+    overflow-y: auto;
+  }
+  .modal-mfa { border-radius: 14px; }
+
+  /* OTP: reduz para caber em telas ≤375px
+     6 × 34px + 5 × 10px = 254px → cabe em ~279px de conteúdo */
+  .otp-wrap { gap: 10px; }
+  .otp-digit {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 48px;
+    font-size: 19px;
+    border-radius: 8px;
+  }
+
+  /* QR wrap: padding interno menor */
+  .mfa-qr-wrap { padding: 10px; }
+
+  /* Botões de ação: empilha verticalmente */
+  .mfa-acoes-modal { flex-direction: column; gap: 8px; }
+  .mfa-acoes-modal .btn-primary { flex: none; width: 100%; }
+  .mfa-acoes-modal .btn-ghost   { width: 100%; }
+
+  /* Passos: fonte menor, sem texto descritivo */
+  .mfa-passo-texto p { display: none; }
+  .mfa-passo-texto strong { font-size: 12px; }
+}
+
+/* ── Step MFA no login ───────────────────────────────────────────────────── */
+.mfa-step { display: none; }
+.mfa-step.vis { display: block; }
+.codigo-grande {
+  text-align: center;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 10px;
+  color: var(--text-primary);
+  background: var(--surface2);
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  padding: 16px;
+  outline: none;
+  width: 100%;
+  font-family: 'Courier New', monospace;
+  caret-color: var(--accent);
+}
+.codigo-grande:focus { border-color: var(--accent); }

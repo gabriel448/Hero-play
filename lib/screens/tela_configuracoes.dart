@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/idioma_app.dart';
+import '../state/conta_provider.dart';
+import '../state/iptv_provider.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import 'tela_historico.dart';
+import 'tela_login.dart';
 
 /// Tela de configuracoes. Hoje apenas o idioma — ponto de extensao natural
 /// para futuras opcoes.
@@ -23,6 +26,10 @@ class TelaConfiguracoes extends StatelessWidget {
         ListView(
           padding: const EdgeInsets.only(bottom: AppSpacing.xl),
           children: [
+            if (context.watch<ContaProvider>().disponivel) ...[
+              const _TituloSecao('Conta'),
+              const _SecaoConta(),
+            ],
             const _TituloSecao('Atividade'),
             _OpcaoNavegacao(
               icone: Icons.history_rounded,
@@ -64,6 +71,116 @@ class TelaConfiguracoes extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Mostra o estado da conta: se logado, email + sair; se nao, botao de entrar.
+class _SecaoConta extends StatelessWidget {
+  const _SecaoConta();
+
+  @override
+  Widget build(BuildContext context) {
+    final conta = context.watch<ContaProvider>();
+
+    if (!conta.estaLogado) {
+      return _OpcaoNavegacao(
+        icone: Icons.login_rounded,
+        titulo: 'Entrar na conta',
+        subtitulo: 'Carregue e sincronize suas listas na nuvem.',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const TelaLogin()),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.accentDim,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: const Icon(
+              Icons.person_rounded,
+              size: 20,
+              color: AppColors.accentBright,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.base),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Conectado',
+                    style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  conta.email ?? '',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          OutlinedButton.icon(
+            onPressed: () => _sair(context),
+            icon: const Icon(Icons.logout_rounded, size: 16),
+            label: const Text('Sair'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.error,
+              side: const BorderSide(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sair(BuildContext context) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Sair da conta?'),
+        content: const Text(
+          'As listas baixadas neste aparelho serão removidas. Você poderá '
+          'recarregá-las ao entrar novamente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Sair'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !context.mounted) return;
+
+    final conta = context.read<ContaProvider>();
+    final iptv = context.read<IptvProvider>();
+    final preferencias = context.read<PreferenciasProvider>();
+    final navigator = Navigator.of(context);
+
+    await conta.sair();
+    await iptv.limparListasLocais();
+    // Volta a exigir login na proxima abertura / imediatamente.
+    await preferencias.reativarLogin();
+
+    // Fecha as Configuracoes; o app.dart ja troca a home para a tela de login.
+    navigator.popUntil((r) => r.isFirst);
   }
 }
 
