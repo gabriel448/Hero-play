@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../state/conta_provider.dart';
 import '../state/iptv_provider.dart';
+import '../state/perfil_provider.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animado_entrada.dart';
@@ -59,6 +60,7 @@ class _TelaLoginState extends State<TelaLogin> {
 
     final conta = context.read<ContaProvider>();
     final iptv = context.read<IptvProvider>();
+    final perfis = context.read<PerfilProvider>();
     final email = _emailCtrl.text.trim();
     final senha = _senhaCtrl.text;
 
@@ -84,6 +86,8 @@ class _TelaLoginState extends State<TelaLogin> {
       // e o app.dart troca para a tela "Importando listas". Assim a navegacao
       // nao trava enquanto as listas baixam.
       unawaited(iptv.sincronizarDoSupabase());
+      // Tambem traz os perfis da conta (best-effort, em paralelo).
+      unawaited(perfis.sincronizarDoSupabase());
       if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     } on AuthException catch (e) {

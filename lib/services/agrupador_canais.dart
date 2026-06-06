@@ -170,10 +170,7 @@ Canal _montarFontes(List<Canal> fontes) {
   );
 }
 
-bool _ehFontePrincipal(String nome) {
-  final base = nomeBase(nome);
-  return !base.contains('*');
-}
+bool _ehFontePrincipal(String nome) => !temMarcadorBackup(nome);
 
 /// Monta o [Canal] final a partir das variantes de um mesmo canal.
 /// Uma variante -> canal comum (so com a categoria normalizada).

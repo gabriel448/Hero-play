@@ -211,6 +211,7 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
               ? _descricaoSerie(agrup.temporadas.length, serie!.totalEpisodios)
               : null,
         ),
+        _MetaDetalhe(infoFuture: _infoFuture),
         const SizedBox(height: AppSpacing.xl),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 440),
@@ -339,6 +340,7 @@ class _Cabecalho extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     _LinhaMeta(infoFuture: infoFuture, subtitulo: subtitulo),
+                    _MetaDetalhe(infoFuture: infoFuture),
                   ],
                 ),
               ),
@@ -379,6 +381,80 @@ class _LinhaMeta extends StatelessWidget {
         ];
         if (partes.isEmpty) return const SizedBox.shrink();
         return Text(partes.join('  ·  '), style: estilo);
+      },
+    );
+  }
+}
+
+/// Bloco de metadados abaixo do nome/ano: nota (TMDB ~IMDB) e generos.
+/// Preenche o espaco ao lado do poster. Chega de forma assincrona e some se
+/// nao houver dado. (Os generos serao usados para recomendar titulos relacionados.)
+class _MetaDetalhe extends StatelessWidget {
+  final Future<TmdbInfo> infoFuture;
+
+  const _MetaDetalhe({required this.infoFuture});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<TmdbInfo>(
+      future: infoFuture,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.only(top: AppSpacing.sm),
+            child: Shimmer(child: SkeletonBox(width: 120, height: 13)),
+          );
+        }
+        final info = snap.data;
+        final nota = info?.nota;
+        final generos = info?.generos ?? const <String>[];
+        if (nota == null && generos.isEmpty) return const SizedBox.shrink();
+        final valStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppColors.textSecondary,
+        );
+        return Padding(
+          padding: const EdgeInsets.only(top: AppSpacing.sm),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (nota != null)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.star_rounded,
+                      size: 15,
+                      color: AppColors.warn,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      nota.toStringAsFixed(1),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      ' /10',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              if (generos.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    generos.join(' · '),
+                    style: valStyle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+        );
       },
     );
   }

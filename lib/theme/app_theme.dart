@@ -6,9 +6,10 @@ import 'package:google_fonts/google_fonts.dart';
 /// Cena fisica que justifica o tema: usuario no sofa, sala parcialmente
 /// escura, fim de tarde / noite. Modo descontraido. Dark forcado.
 abstract class AppColors {
-  // Surfaces (off-black tintadas para morno).
-  static const surface0 = Color(0xFF0F0E0D);
-  static const surface1 = Color(0xFF1A1815);
+  // Surfaces. surface0 (fundo) e surface1 (cards/inputs) sao preto puro; os
+  // niveis acima continuam off-black tintados para morno (elevacao/realce).
+  static const surface0 = Color(0xFF000000);
+  static const surface1 = Color(0xFF000000);
   static const surface2 = Color(0xFF252220);
   static const surface3 = Color(0xFF332E2A);
 

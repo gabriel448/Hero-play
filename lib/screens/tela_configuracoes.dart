@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/idioma_app.dart';
 import '../state/conta_provider.dart';
-import '../state/iptv_provider.dart';
+import '../state/perfil_provider.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
+import '../widgets/avatar_perfil.dart';
 import 'tela_historico.dart';
 import 'tela_login.dart';
 
@@ -26,6 +27,8 @@ class TelaConfiguracoes extends StatelessWidget {
         ListView(
           padding: const EdgeInsets.only(bottom: AppSpacing.xl),
           children: [
+            const _TituloSecao('Perfil'),
+            const _SecaoPerfil(),
             if (context.watch<ContaProvider>().disponivel) ...[
               const _TituloSecao('Conta'),
               const _SecaoConta(),
@@ -48,7 +51,7 @@ class TelaConfiguracoes extends StatelessWidget {
               onChanged: preferencias.definirAutoQualidade,
               beta: true,
             ),
-            const _TituloSecao('Idioma'),
+            const _TituloSecao('Idioma do áudio'),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.lg,
@@ -57,7 +60,9 @@ class TelaConfiguracoes extends StatelessWidget {
                 AppSpacing.sm,
               ),
               child: Text(
-                'Usado nas buscas de sinopse e elenco dos filmes e séries.',
+                'Define o idioma padrão das faixas de áudio: ao reproduzir, a '
+                'faixa nesse idioma é selecionada automaticamente quando '
+                'disponível. Não traduz a interface do app.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -69,6 +74,54 @@ class TelaConfiguracoes extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Mostra o perfil ativo e permite voltar para a tela "Quem esta assistindo".
+class _SecaoPerfil extends StatelessWidget {
+  const _SecaoPerfil();
+
+  @override
+  Widget build(BuildContext context) {
+    final ativo = context.watch<PerfilProvider>().perfilAtivo;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      child: Row(
+        children: [
+          if (ativo != null)
+            AvatarPerfil(chave: ativo.icone, tamanho: 44, animar: false)
+          else
+            const SizedBox(width: 44, height: 44),
+          const SizedBox(width: AppSpacing.base),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(ativo?.nome ?? 'Sem perfil',
+                    style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  'Perfil ativo nesta sessão',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          OutlinedButton.icon(
+            onPressed: () {
+              context.read<PerfilProvider>().trocarPerfil();
+              Navigator.of(context).popUntil((r) => r.isFirst);
+            },
+            icon: const Icon(Icons.switch_account_rounded, size: 16),
+            label: const Text('Trocar'),
+          ),
+        ],
       ),
     );
   }
@@ -151,8 +204,8 @@ class _SecaoConta extends StatelessWidget {
       builder: (_) => AlertDialog(
         title: const Text('Sair da conta?'),
         content: const Text(
-          'As listas baixadas neste aparelho serão removidas. Você poderá '
-          'recarregá-las ao entrar novamente.',
+          'Você sairá da sua conta neste aparelho. Para voltar a sincronizar '
+          'listas e perfis, entre novamente.',
         ),
         actions: [
           TextButton(
@@ -170,12 +223,16 @@ class _SecaoConta extends StatelessWidget {
     if (confirmar != true || !context.mounted) return;
 
     final conta = context.read<ContaProvider>();
-    final iptv = context.read<IptvProvider>();
+    final perfis = context.read<PerfilProvider>();
     final preferencias = context.read<PreferenciasProvider>();
     final navigator = Navigator.of(context);
 
     await conta.sair();
-    await iptv.limparListasLocais();
+    // NAO apagamos as listas no logout: o cache fica e o re-login na MESMA
+    // conta volta instantaneo (sem re-baixar tudo). Se outra conta entrar, o
+    // `prune` do sincronizarDoSupabase remove o que nao for dela. Apagar tudo
+    // aqui causava ~40s de tela "Conectando" travada ao re-logar.
+    await perfis.limparLocais();
     // Volta a exigir login na proxima abertura / imediatamente.
     await preferencias.reativarLogin();
 

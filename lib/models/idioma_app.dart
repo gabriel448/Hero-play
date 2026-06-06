@@ -21,4 +21,39 @@ enum IdiomaApp {
     }
     return null;
   }
+
+  /// Tokens usados para casar a FAIXA DE AUDIO deste idioma. Os players IPTV
+  /// rotulam as faixas de varias formas no `language`/`title` do media_kit
+  /// (ex.: "por", "POR", "Portuguese", "POB", "Dual"...). Comparacao em minusculo:
+  /// codigo curto (2-3 letras) e comparado por igualdade ao `language`; tokens
+  /// maiores sao buscados por "contem" no `language`+`title`.
+  List<String> get tokensAudio {
+    switch (this) {
+      case IdiomaApp.portugues:
+        return [
+          'pt',
+          'por',
+          'pob',
+          'pt-br',
+          'ptb',
+          'portugues',
+          'portuguese',
+          'brasil',
+          'brazil',
+        ];
+      case IdiomaApp.ingles:
+        return ['en', 'eng', 'english', 'ingles'];
+      case IdiomaApp.espanhol:
+        return [
+          'es',
+          'spa',
+          'esp',
+          'spanish',
+          'espanol',
+          'castellano',
+          'latino',
+          'lat',
+        ];
+    }
+  }
 }

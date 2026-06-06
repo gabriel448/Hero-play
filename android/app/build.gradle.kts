@@ -60,3 +60,9 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // WindowInsetsControllerCompat — controle de tela cheia / barras do sistema
+    // que funciona em todas as versoes do Android (usado na MainActivity).
+    implementation("androidx.core:core-ktx:1.13.1")
+}

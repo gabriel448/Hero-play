@@ -116,6 +116,9 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   Tracks _tracks = Tracks(video: [], audio: [], subtitle: []);
   Track _track = const Track();
+  // Garante que a auto-selecao de audio (pelo idioma do perfil) rode uma vez
+  // por stream, sem sobrescrever uma troca manual posterior do usuario.
+  bool _audioAuto = false;
 
   // Quando true, o player foi transferido para o mini player e não deve
   // ser disposto neste widget.
@@ -131,6 +134,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
   // adicionais que o libmpv dispara enquanto a conexão anterior ainda morre,
   // evitando o flash da tela de erro antes do retry limpar o estado.
   bool _retryPendente = false;
+  // Fontes (chave nome|url) que ja falharam nesta sessao — usadas para o
+  // failover automatico nao repetir a mesma fonte. Limpo ao reproduzir com
+  // sucesso e em qualquer abertura iniciada pelo usuario.
+  final Set<String> _fontesFalhas = {};
   // Garante que o seek de retomada aconteça uma única vez.
   bool _streamAberto = false;
   bool _seekFeito = false;
@@ -170,12 +177,17 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   void _boostarVolume() {
+    // Volume inicial = o ultimo escolhido pelo usuario (padrao 100% = sem
+    // atenuacao, dependendo so do volume do aparelho). Boost ate 200 disponivel.
+    final salvo = context.read<PreferenciasProvider>().volume;
     final native = _player.platform;
     if (native is NativePlayer) {
       native.setProperty('volume-max', '200').then((_) {
         if (!mounted) return;
-        native.setProperty('volume', '50');
+        native.setProperty('volume', salvo.round().toString());
       });
+    } else {
+      _player.setVolume(salvo);
     }
   }
 
@@ -229,6 +241,87 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _timerResetContador?.cancel();
     _timerResetContador = null;
     _contadorBuffering = 0;
+  }
+
+  // ── Failover automatico de fonte ─────────────────────────────────────────
+  List<Canal> get _fontesDisponiveis =>
+      widget.canal.temFontes ? widget.canal.fontes : [widget.canal];
+
+  String _chaveFonte(Canal c) => '${c.nome}|${c.url}';
+
+  Canal? _proximaFonte() {
+    for (final f in _fontesDisponiveis) {
+      if (!_fontesFalhas.contains(_chaveFonte(f))) return f;
+    }
+    return null;
+  }
+
+  /// Tratamento UNIFICADO de falha do stream (erro do libmpv, excecao ao abrir
+  /// ou timeout). Recupera sem incomodar o usuario:
+  ///   1) retry silencioso da MESMA fonte (uma vez);
+  ///   2) failover automatico para a proxima fonte do canal;
+  ///   3) so quando TODAS as fontes falham, mostra o erro padrao.
+  /// Ao vivo: status amigavel ("Reconectando…"/"Alterando fonte…") durante a
+  /// recuperacao. VOD: recupera em silencio e so mostra o erro no fim.
+  /// [pularRetry] pula direto ao failover (usado no timeout, que ja esperou).
+  void _tratarFalha(String mensagem, {bool pularRetry = false}) {
+    _registrarLog('FALHA: $mensagem');
+    _timeoutTimer?.cancel();
+    _atualizadorStatus?.cancel();
+    if (!mounted) return;
+    // Eventos transitorios (entre stop()->open() ou com recuperacao ja
+    // agendada) nao contam — evita o flash de erro antes do retry.
+    if (!_streamAberto) {
+      _registrarLog('falha ignorada (anterior ao open)');
+      return;
+    }
+    if (_retryPendente) {
+      _registrarLog('falha suprimida (recuperacao pendente)');
+      return;
+    }
+    final aoVivo = widget.canal.tipo == TipoCanal.aoVivo;
+
+    // 1) Retry silencioso da MESMA fonte (uma unica vez). O primeiro erro
+    //    nunca chega ao usuario — fica so no log.
+    if (!pularRetry && !_tentouAutoRetry) {
+      _tentouAutoRetry = true;
+      _retryPendente = true;
+      _registrarLog('recuperacao: retry da mesma fonte em 800ms');
+      if (aoVivo) setState(() => _status = 'Reconectando…');
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) _abrirStream(deAutoRetry: true);
+      });
+      return;
+    }
+
+    // 2) Failover: a fonte atual falhou de vez — tenta a proxima fonte.
+    _fontesFalhas.add(_chaveFonte(_fonteAtual));
+    final prox = _proximaFonte();
+    if (prox != null) {
+      _retryPendente = true;
+      _registrarLog('recuperacao: failover -> ${prox.nome}');
+      if (aoVivo) {
+        _mostrarNotificacaoAutoQualidade('Alterando fonte…');
+        setState(() => _status = 'Alterando fonte…');
+      }
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (!mounted) return;
+        setState(() {
+          _fonteAtual = prox;
+          _varianteAtual = prox.agrupado ? prox.variantes.first : prox;
+          _tentouAutoRetry = false; // a nova fonte tem direito ao seu retry
+        });
+        _abrirStream(deAutoRetry: true); // deAutoRetry: preserva _fontesFalhas
+      });
+      return;
+    }
+
+    // 3) Acabaram as fontes -> erro padrao (vale para ao vivo e VOD).
+    _registrarLog('recuperacao: sem mais fontes — exibindo erro');
+    setState(() {
+      _erro = mensagem;
+      _status = 'Erro';
+    });
   }
 
   void _tentarReduzirQualidade(String motivo) {
@@ -317,6 +410,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
         _iniciado = true;
         _timeoutTimer?.cancel();
         _atualizadorStatus?.cancel();
+        // Reproduziu: zera o estado de recuperacao. Uma queda futura recomeca
+        // o failover do zero (todas as fontes disponiveis de novo).
+        _tentouAutoRetry = false;
+        _fontesFalhas.clear();
         _registrarLog('playing=true');
         setState(() => _status = 'Tocando');
         _tentarSeekInicial();
@@ -353,39 +450,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       }
     });
 
-    _subError = _player.stream.error.listen((mensagem) {
-      _registrarLog('ERROR: $mensagem');
-      _timeoutTimer?.cancel();
-      _atualizadorStatus?.cancel();
-      if (!mounted) return;
-      // Suprime erros adicionais enquanto o retry ainda não começou — o
-      // libmpv pode disparar vários eventos antes de a conexão anterior
-      // morrer, e exibi-los causaria um flash desnecessário.
-      if (!_streamAberto) {
-        _registrarLog('ERROR ignorado (anterior ao open)');
-        return;
-      }
-      if (_retryPendente) {
-        _registrarLog('ERROR suprimido (retry pendente)');
-        return;
-      }
-      // Retry silencioso na primeira falha.
-      // deAutoRetry: true impede que o retry reset _tentouAutoRetry, evitando
-      // loop infinito caso o stream falhe em todas as tentativas.
-      if (!_tentouAutoRetry) {
-        _tentouAutoRetry = true;
-        _retryPendente = true;
-        _registrarLog('Auto-retry em 800ms...');
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) _abrirStream(deAutoRetry: true);
-        });
-        return;
-      }
-      setState(() {
-        _erro = mensagem;
-        _status = 'Erro';
-      });
-    });
+    _subError = _player.stream.error.listen(_tratarFalha);
 
     _subLog = _player.stream.log.listen((log) {
       if (log.level != 'warn' && log.level != 'error' && log.level != 'fatal') return;
@@ -397,6 +462,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subTracks = _player.stream.tracks.listen((t) {
       if (!mounted) return;
       setState(() => _tracks = t);
+      _autoSelecionarAudio(t);
     });
 
     _subTrack = _player.stream.track.listen((t) {
@@ -411,6 +477,39 @@ class _TelaPlayerState extends State<TelaPlayer> {
       if (!mounted) return;
       _tentarSeekInicial();
     });
+  }
+
+  /// Seleciona automaticamente a faixa de audio no idioma do perfil (config de
+  /// Idioma). As faixas vem rotuladas como ENG/POR/etc. no `language`/`title`.
+  /// Roda UMA vez por stream e so quando ha mais de uma faixa — assim respeita
+  /// uma troca manual feita depois pelo usuario.
+  void _autoSelecionarAudio(Tracks t) {
+    if (_audioAuto) return;
+    final faixas =
+        t.audio.where((a) => a.id != 'auto' && a.id != 'no').toList();
+    if (faixas.isEmpty) return; // faixas ainda nao descobertas; espera proxima
+    _audioAuto = true; // tenta apenas uma vez por stream
+    if (faixas.length < 2) return; // so uma faixa: nada a escolher
+
+    final tokens =
+        context.read<PreferenciasProvider>().idiomaEfetivo.tokensAudio;
+    AudioTrack? alvo;
+    for (final a in faixas) {
+      final lang = (a.language ?? '').toLowerCase().trim();
+      final hay = '$lang ${(a.title ?? '').toLowerCase()}';
+      final combina = tokens.any(
+        (tk) =>
+            (tk.length <= 3 && lang == tk) ||
+            (tk.length >= 3 && hay.contains(tk)),
+      );
+      if (combina) {
+        alvo = a;
+        break;
+      }
+    }
+    if (alvo != null && alvo.id != _track.audio.id) {
+      _player.setAudioTrack(alvo);
+    }
   }
 
   /// Executa o seek de retomada uma única vez, quando a mídia já está
@@ -454,7 +553,13 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _seekFeito = false;
     _retryPendente = false;
     _streamAberto = false;
-    if (!deAutoRetry) _tentouAutoRetry = false;
+    _audioAuto = false; // novo stream: refaz a auto-selecao de audio
+    if (!deAutoRetry) {
+      // Abertura iniciada pelo usuario (ou inicial): zera o estado de
+      // recuperacao para o failover poder tentar todas as fontes de novo.
+      _tentouAutoRetry = false;
+      _fontesFalhas.clear();
+    }
     _inicioTentativa = DateTime.now();
 
     setState(() {
@@ -515,19 +620,14 @@ class _TelaPlayerState extends State<TelaPlayer> {
       // Timeout maior para libmpv porque ele aceita streams mais lentos.
       _timeoutTimer = Timer(const Duration(seconds: 20), () {
         if (!mounted || _iniciado || _erro != null) return;
-        _registrarLog('TIMEOUT (20s sem inicio de reproducao)');
-        _atualizadorStatus?.cancel();
-        setState(() {
-          _erro = 'Timeout: o player nao conseguiu iniciar em 20 segundos.';
-          _status = 'Timeout';
-        });
+        // Ja esperou 20s — vai direto ao failover (sem novo retry da mesma).
+        _tratarFalha(
+          'Timeout: o player nao conseguiu iniciar em 20 segundos.',
+          pularRetry: true,
+        );
       });
     } catch (e) {
-      _registrarLog('Excecao ao abrir: $e');
-      setState(() {
-        _erro = 'Falha ao abrir stream: $e';
-        _status = 'Erro';
-      });
+      _tratarFalha('Falha ao abrir stream: $e');
     }
   }
 
@@ -1016,6 +1116,9 @@ class _PainelVolumeState extends State<_PainelVolume> {
                     widget.player.setVolume(v);
                     setState(() => _volume = v);
                   },
+                  // Persiste o nivel escolhido para reabrir nele da proxima vez.
+                  onChangeEnd: (v) =>
+                      context.read<PreferenciasProvider>().definirVolume(v),
                 ),
               ),
               const Icon(Icons.volume_up_rounded),
@@ -1363,7 +1466,12 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
                             onChanged: (v) => widget.player.setVolume(v),
                             // Pausa o auto-hide enquanto arrasta o slider.
                             onChangeStart: (_) => _timer?.cancel(),
-                            onChangeEnd: (_) => _resetTimer(),
+                            onChangeEnd: (v) {
+                              _resetTimer();
+                              context
+                                  .read<PreferenciasProvider>()
+                                  .definirVolume(v);
+                            },
                           ),
                         ),
                       ),

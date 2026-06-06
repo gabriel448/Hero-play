@@ -146,7 +146,7 @@ Deno.serve(async (req: Request) => {
         .order('created_at', { ascending: true })
       if (dbErr) throw dbErr
 
-      const listas = await Promise.all(
+      const reconstruidas = await Promise.all(
         (data ?? []).map(async (row) => {
           let fonteReconstruida: string = row.fonte_url
           let epgReconstruida: string | null = row.epg_url
@@ -181,17 +181,55 @@ Deno.serve(async (req: Request) => {
           }
 
           return {
-            id: row.id,
-            nome: row.nome,
-            fonte_url: fonteReconstruida,
-            epg_url: epgReconstruida,
-            ordem: row.ordem,
-            created_at: row.created_at,
+            row,
+            saida: {
+              id: row.id,
+              nome: row.nome,
+              fonte_url: fonteReconstruida,
+              epg_url: epgReconstruida,
+              ordem: row.ordem,
+              created_at: row.created_at,
+            },
           }
         }),
       )
 
-      return respJson(listas)
+      // ── Dedup por URL reconstruida ──────────────────────────────────────────
+      // A conta nunca deve listar a mesma lista duas vezes. Duas linhas com
+      // chaves armazenadas diferentes (ex.: formato legado sem hash de usuario x
+      // formato novo com '#x...') podem reconstruir para a MESMA URL final — a
+      // constraint unique (user_id, fonte_url) nao pega isso. Aqui mantemos uma
+      // copia (preferindo a chave canonica com hash) e EXCLUIMOS as demais, de
+      // modo que a duplicata some assim que a lista e importada/sincronizada.
+      const porUrl = new Map<string, { row: any; saida: any }>()
+      const idsExcluir: string[] = []
+      for (const item of reconstruidas) {
+        const chave = item.saida.fonte_url
+        const existente = porUrl.get(chave)
+        if (!existente) {
+          porUrl.set(chave, item)
+          continue
+        }
+        const existeCanonica = String(existente.row.fonte_url).includes('#x')
+        const novaCanonica = String(item.row.fonte_url).includes('#x')
+        if (novaCanonica && !existeCanonica) {
+          // A nova linha tem a chave canonica: descarta a antiga.
+          idsExcluir.push(existente.row.id)
+          porUrl.set(chave, item)
+        } else {
+          // Mantem a ja vista; esta e a copia a excluir.
+          idsExcluir.push(item.row.id)
+        }
+      }
+      if (idsExcluir.length > 0) {
+        await sb
+          .from('listas')
+          .delete()
+          .in('id', idsExcluir)
+          .eq('user_id', user.id)
+      }
+
+      return respJson([...porUrl.values()].map((i) => i.saida))
     }
 
     // ── POST — criar / upsert lista ────────────────────────────────────────────
@@ -211,6 +249,7 @@ Deno.serve(async (req: Request) => {
         epg_url: epg_url?.trim() ? sanitizarUrl(epg_url.trim()) : null,
       }
 
+      let chaveLegada: string | null = null
       if (ehXtream(fonte_url)) {
         const { serverUrl, usuario, senha, urlSaneada } = extrairXtream(fonte_url)
         payload = {
@@ -220,6 +259,10 @@ Deno.serve(async (req: Request) => {
           xtream_user: await cifrar(usuario),
           xtream_pass: await cifrar(senha),
         }
+        // Formato antigo (antes do hash de unicidade) gravava a URL saneada
+        // pura como chave. Marcamos para excluir apos o upsert, evitando que a
+        // mesma lista apareca duas vezes.
+        chaveLegada = urlSaneada
       } else {
         payload.fonte_url = (fonte_url as string).trim()
         payload.server_url = null
@@ -231,6 +274,17 @@ Deno.serve(async (req: Request) => {
         .from('listas')
         .upsert(payload, { onConflict: 'user_id,fonte_url' })
       if (dbErr) throw dbErr
+
+      // Remove a copia legada (chave sem hash) da mesma lista, se existir. A
+      // chave canonica recem-gravada (urlSaneada + '#x...') e diferente desta,
+      // entao este delete nunca apaga a linha que acabamos de salvar.
+      if (chaveLegada && chaveLegada !== payload.fonte_url) {
+        await sb
+          .from('listas')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('fonte_url', chaveLegada)
+      }
 
       return respJson({ ok: true }, 201)
     }

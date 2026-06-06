@@ -29,11 +29,16 @@ de item e a presença de player embutido vs. mini player flutuante.
 um `StatelessWidget` que observa múltiplos providers com `context.select`:
 
 ```
-onboarding (sem idioma)
-  → login (conta disponível + não logado + não pulou)
-      → TelaImportandoListas (logado + primeiraSync == true)
+login (conta disponível + não logado + não pulou)
+  → TelaImportandoListas (logado + primeiraSync == true)
+      → TelaPerfis ("Quem está assistindo?", enquanto !perfilConfirmado)
           → TelaInicial
 ```
+
+A escolha de idioma deixou de ser uma tela de onboarding global — agora é uma
+preferência **por perfil** (definida em Configurações; novos perfis nascem em
+português). A `TelaPerfis` é sempre a primeira tela após o login: `perfilConfirmado`
+é uma flag de sessão que começa `false` a cada abertura (estilo Netflix/Prime).
 
 Transições são feitas com `AnimatedSwitcher` + `FadeTransition` (320 ms) para
 evitar substituição abrupta de tela.
@@ -53,9 +58,9 @@ há router declarativo.
 
 | Tela | Papel |
 |---|---|
-| `TelaOnboarding` | Escolha de idioma na primeira abertura |
 | `TelaLogin` | Login / cadastro + "continuar sem conta" (gate de conta) |
 | `TelaImportandoListas` | Progresso da 1ª sincronização pós-login |
+| `TelaPerfis` | "Quem está assistindo?" — escolher/criar/gerenciar perfis (gate de perfil) |
 | `TelaInicial` | Home: hub entre Canais / Filmes / Séries + gerenciar/config |
 | `TelaCanais` | Canais ao vivo (3 layouts: phone, tablet, desktop) |
 | `TelaFilmes` / `TelaSeries` | Carrosséis VOD por categoria (`TipoVod`) |

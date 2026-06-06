@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +12,7 @@ import 'services/tmdb_service.dart';
 import 'state/conta_provider.dart';
 import 'state/iptv_provider.dart';
 import 'state/mini_player_provider.dart';
+import 'state/perfil_provider.dart';
 import 'state/preferencias_provider.dart';
 
 /// Ponto de entrada da aplicacao.
@@ -22,6 +24,19 @@ import 'state/preferencias_provider.dart';
 ///  4. IptvProvider, que carrega listas/favoritos/historico salvos.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Tela cheia edge-to-edge: o conteudo ocupa a tela toda, por baixo das barras
+  // do sistema (transparentes). A barra de navegacao (rodape) e escondida de
+  // forma nativa na MainActivity (modo transitorio, sem layout shift) — aqui so
+  // dizemos ao Flutter para desenhar edge-to-edge e deixamos as barras claras.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarContrastEnforced: false,
+  ));
 
   await dotenv.load(fileName: '.env');
   MediaKit.ensureInitialized();
@@ -52,7 +67,13 @@ Future<void> main() async {
   // sessoes. O sync acontece no login e quando o usuario toca em
   // "Atualizar listas" no gerenciador.
 
-  final preferencias = PreferenciasProvider(armazenamento);
+  // Perfis: carregados do disco aqui; nenhum e ativado ainda — a tela
+  // "Quem esta assistindo" (TelaPerfis) decide qual perfil entra na sessao.
+  final perfis = PerfilProvider(armazenamento, servicoConta)..inicializar();
+
+  // As preferencias por perfil (idioma, auto-qualidade, ordenacoes) saem do
+  // perfil ativo — por isso o PreferenciasProvider recebe o PerfilProvider.
+  final preferencias = PreferenciasProvider(armazenamento, perfis);
 
   final tmdb = TmdbService(dotenv.get('TMDB_PROXY_URL', fallback: ''));
 
@@ -60,6 +81,7 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider<IptvProvider>.value(value: provider),
+        ChangeNotifierProvider<PerfilProvider>.value(value: perfis),
         ChangeNotifierProvider<PreferenciasProvider>.value(value: preferencias),
         ChangeNotifierProvider<ServicoEpg>.value(value: servicoEpg),
         Provider<TmdbService>.value(value: tmdb),

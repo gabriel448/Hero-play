@@ -99,3 +99,53 @@ drop trigger if exists listas_set_updated_at on public.listas;
 create trigger listas_set_updated_at
   before update on public.listas
   for each row execute function public.set_updated_at();
+
+-- ============================================================================
+-- Perfis de uso (estilo "quem esta assistindo").
+--
+-- Cada conta tem ate 3 perfis, cada um com a sua configuracao (idioma, ajuste
+-- automatico de qualidade, ordenacoes). A biblioteca pessoal de cada perfil
+-- (favoritos, historico, etc.) NAO sobe ao banco — fica so no aparelho (Hive).
+-- As listas sao compartilhadas entre perfis (tabela `listas` acima).
+--
+-- Diferente de `listas`, perfis NAO tem credenciais a cifrar, entao o app
+-- acessa esta tabela direto (protegida por RLS), sem passar pela Edge Function.
+-- O `id` (uuid) e gerado no cliente para casar a linha local com a da nuvem.
+-- ============================================================================
+create table if not exists public.perfis (
+  id               uuid primary key,
+  user_id          uuid not null references auth.users(id) on delete cascade,
+  nome             text not null,
+  icone            text not null default 'ember',
+  idioma           text,                    -- BCP-47 (ex.: 'pt-BR'); null = padrao
+  auto_qualidade   boolean not null default false,
+  ordem_categorias text not null default 'popularidade',
+  ordem_canais     text not null default 'padrao',
+  criado_em        timestamptz not null default now()
+);
+
+create index if not exists perfis_user_id_idx on public.perfis (user_id);
+
+alter table public.perfis enable row level security;
+
+drop policy if exists "perfis_select_proprios" on public.perfis;
+create policy "perfis_select_proprios" on public.perfis
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "perfis_insert_proprios" on public.perfis;
+create policy "perfis_insert_proprios" on public.perfis
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "perfis_update_proprios" on public.perfis;
+create policy "perfis_update_proprios" on public.perfis
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "perfis_delete_proprios" on public.perfis;
+create policy "perfis_delete_proprios" on public.perfis
+  for delete using (auth.uid() = user_id);
+
+-- O app acessa direto pelo papel `authenticated` (cliente Supabase com JWT).
+revoke select, insert, update, delete on public.perfis from anon;
+grant select, insert, update, delete on public.perfis to authenticated;
+
+notify pgrst, 'reload schema';

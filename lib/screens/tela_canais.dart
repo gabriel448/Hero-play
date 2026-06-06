@@ -9,6 +9,8 @@ import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../utils/popularidade_categorias.dart';
+import '../widgets/abertura_secao.dart';
+import '../widgets/animado_entrada.dart';
 import '../widgets/item_canal.dart';
 import '../widgets/player_embutido_desktop.dart';
 import '../widgets/seletor_categoria.dart';
@@ -176,6 +178,7 @@ class _TelaCanaisState extends State<TelaCanais> {
       },
       child: Scaffold(
       appBar: AppBar(
+        centerTitle: !_buscando,
         titleSpacing: 0,
         title: _buscando
             ? Padding(
@@ -195,7 +198,11 @@ class _TelaCanaisState extends State<TelaCanais> {
                   onChanged: (v) => setState(() => _busca = v),
                 ),
               )
-            : const Text('Canais ao vivo'),
+            : const TituloSecao(
+                icone: Icons.live_tv_rounded,
+                texto: 'Canais ao vivo',
+                corIcone: AppColors.accentBright,
+              ),
         actions: [
           IconButton(
             icon: Icon(
@@ -214,11 +221,19 @@ class _TelaCanaisState extends State<TelaCanais> {
           ),
         ],
       ),
-      body: _buildBody(context),
+      // So construimos o corpo quando a abertura comeca a revelar — assim as
+      // categorias entram com stagger em sincronia (igual aos botoes da home).
+      body: AberturaSecao.conteudoRevelado(context)
+          ? _buildBody(context)
+          : const SizedBox.shrink(),
       ),
     );
   }
 }
+
+/// Quantas categorias animam na entrada (as visiveis no topo); o resto, ao
+/// rolar, entra sem animacao.
+const int _kCategoriasAnimadas = 8;
 
 class _ListaCategorias extends StatelessWidget {
   final Map<String, List<Canal>> categorias;
@@ -240,48 +255,56 @@ class _ListaCategorias extends StatelessWidget {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: _SecaoMinhasCategoriasPhone(
-            personalizadas: personalizadas,
-            categoriasQualidade: categoriasQualidade,
+          child: AnimadoEntrada(
+            child: _SecaoMinhasCategoriasPhone(
+              personalizadas: personalizadas,
+              categoriasQualidade: categoriasQualidade,
+            ),
           ),
         ),
         if (nomes.isNotEmpty) ...[
           SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.md,
-                AppSpacing.sm,
-                AppSpacing.xs,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'CATEGORIAS',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: AppColors.textTertiary,
-                            letterSpacing: 0.6,
-                          ),
+            child: AnimadoEntrada(
+              delay: const Duration(milliseconds: 80),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.xs,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'CATEGORIAS',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: AppColors.textTertiary,
+                              letterSpacing: 0.6,
+                            ),
+                      ),
                     ),
-                  ),
-                  const _BotaoOrdenarCategorias(),
-                ],
+                    const _BotaoOrdenarCategorias(),
+                  ],
+                ),
               ),
             ),
           ),
           // "Todos" — sempre no topo da lista de categorias.
           SliverToBoxAdapter(
-            child: _ItemCategoria(
-              nome: 'Todos',
-              quantidade: todosOsCanais.length,
-              icone: Icons.grid_view_rounded,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => TelaCategoria(
-                    nomeCategoria: 'Todos',
-                    canais: todosOsCanais,
-                    tipo: TipoCanal.aoVivo,
+            child: AnimadoEntrada(
+              delay: const Duration(milliseconds: 140),
+              child: _ItemCategoria(
+                nome: 'Todos',
+                quantidade: todosOsCanais.length,
+                icone: Icons.grid_view_rounded,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TelaCategoria(
+                      nomeCategoria: 'Todos',
+                      canais: todosOsCanais,
+                      tipo: TipoCanal.aoVivo,
+                    ),
                   ),
                 ),
               ),
@@ -298,7 +321,7 @@ class _ListaCategorias extends StatelessWidget {
             itemBuilder: (_, i) {
               final nome = nomes[i];
               final canais = categorias[nome]!;
-              return _ItemCategoria(
+              final item = _ItemCategoria(
                 nome: nome,
                 quantidade: canais.length,
                 onTap: () => Navigator.of(context).push(
@@ -311,6 +334,15 @@ class _ListaCategorias extends StatelessWidget {
                   ),
                 ),
               );
+              // Stagger so nas primeiras (visiveis no topo); as demais, ao
+              // rolar, entram sem animacao.
+              if (i < _kCategoriasAnimadas) {
+                return AnimadoEntrada(
+                  delay: Duration(milliseconds: 200 + 55 * i),
+                  child: item,
+                );
+              }
+              return item;
             },
             separatorBuilder: (_, _) => const Padding(
               padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg),

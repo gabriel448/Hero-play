@@ -93,7 +93,8 @@ Métodos: `ehAtual([agora])`, `ehFuturo([agora])`, `duracao`.
 | `CanalAssistido` | [canal_assistido.dart](../lib/models/canal_assistido.dart) | Entrada de histórico: `Canal` + `ultimaVistaEm` |
 | `ProgressoCanal` | [progresso_canal.dart](../lib/models/progresso_canal.dart) | "Continuar assistindo": `url`, `posicaoSeg`, `duracaoSeg`, `fracao` |
 | `CategoriaPersonalizada` | [categoria_personalizada.dart](../lib/models/categoria_personalizada.dart) | Categoria criada pelo usuário: `id`, `nome`, `canais` |
-| `IdiomaApp` | [idioma_app.dart](../lib/models/idioma_app.dart) | Idioma do onboarding (código BCP-47 + rótulo) |
+| `IdiomaApp` | [idioma_app.dart](../lib/models/idioma_app.dart) | Idioma (código BCP-47 + rótulo) |
+| `Perfil` | [perfil.dart](../lib/models/perfil.dart) | Perfil de uso: `id` (uuid), `nome`, `icone`, e config própria (`idioma`, `autoQualidade`, ordenações). `toMap/fromMap` (Hive) + `toCloudMap/fromCloudMap` (Supabase). Ordenações guardadas como String crua para não depender de `state` |
 
 ## Convenção de serialização
 

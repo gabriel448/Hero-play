@@ -110,6 +110,21 @@ class IptvProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Recarrega para a memoria a biblioteca pessoal do perfil ativo (favoritos,
+  /// historico, progressos, "minha lista", categorias). Chamado pela tela de
+  /// perfis logo apos `PerfilProvider.selecionar`, que ja apontou as boxes do
+  /// Hive para o perfil escolhido. As listas M3U sao compartilhadas e nao
+  /// precisam recarregar aqui.
+  void recarregarDadosDoPerfil() {
+    _favoritos = _armazenamento.carregarFavoritos();
+    _historico = _armazenamento.carregarHistorico();
+    _progressos = _armazenamento.carregarProgressos();
+    _categoriasPersonalizadas =
+        _armazenamento.carregarCategoriasPersonalizadas();
+    _minhaListaChaves = _armazenamento.carregarMinhaLista();
+    notifyListeners();
+  }
+
   /// Restaura a lista marcada como ativa pelo usuario, ou fallback para a
   /// primeira lista importada se nao houver marcacao mas existirem listas.
   void _restaurarListaAtiva() {
@@ -361,12 +376,23 @@ class IptvProvider extends ChangeNotifier {
   /// quando ja houver sessao salva.
   Future<void> sincronizarDoSupabase() async {
     final conta = _conta;
+    debugPrint('[SYNC] inicio conta=${conta != null} logado=${conta?.estaLogado}');
     if (conta == null || !conta.estaLogado) return;
     _sincronizando = true;
+    // Na primeira sincronizacao (sem listas locais) seguramos a tela de
+    // importacao ate TODAS as listas terminarem de baixar — so liberamos no
+    // finally. Assim a barra de progresso vai de 0 ate o total de verdade, em
+    // vez de pular para a home no meio do caminho.
     if (_listas.isEmpty) _primeiraSync = true;
     notifyListeners();
     try {
-      final remotas = await conta.listarListas();
+      // Timeout defensivo: sem isto, se a Edge Function nao responder a tela
+      // "Conectando a sua conta" fica presa pra sempre (o finally nunca roda).
+      debugPrint('[SYNC] chamando listarListas...');
+      final remotas = await conta
+          .listarListas()
+          .timeout(const Duration(seconds: 20));
+      debugPrint('[SYNC] listarListas retornou ${remotas.length} listas');
       final urlsRemotas = {for (final r in remotas) r.fonteUrl};
 
       // 1) Poda: remove do cache as listas por URL que nao sao desta conta.
@@ -392,32 +418,46 @@ class IptvProvider extends ChangeNotifier {
         } catch (_) {/* ignora */}
       }
 
-      final aBaixar =
-          remotas.where((r) => !fontesLocais.contains(r.fonteUrl)).toList();
+      // Dedup por URL: a conta pode ter linhas repetidas apontando para a mesma
+      // fonte — sem isto, baixavamos a MESMA lista gigante 2x em paralelo.
+      final vistos = <String>{};
+      final aBaixar = remotas
+          .where((r) => !fontesLocais.contains(r.fonteUrl))
+          .where((r) => vistos.add(r.fonteUrl))
+          .toList();
       _progressoSync = 0;
       _totalSync = aBaixar.length;
-      if (_totalSync > 0) notifyListeners();
+      debugPrint('[SYNC] totalSync=$_totalSync (aBaixar=${aBaixar.length}) '
+          'listasLocais=${_listas.length}');
+      // Empurra o total para a tela de importacao (a barra usa progresso/total).
+      notifyListeners();
 
-      const maxParalelo = 4;
+      // Baixa de 2 em 2 (o mesmo servidor Xtream costuma estrangular varias
+      // conexoes simultaneas — 4 em paralelo deixava cada uma muito mais lenta).
+      const maxParalelo = 2;
       for (var i = 0; i < aBaixar.length; i += maxParalelo) {
         final lote = aBaixar.skip(i).take(maxParalelo);
         await Future.wait(lote.map((r) async {
           try {
+            debugPrint('[SYNC] baixando ${r.fonteUrl}');
+            // Timeout POR LISTA: um download/parse travado nao pode prender o
+            // sync (nem a tela de importacao) indefinidamente.
             await _baixarParsearSalvar(
               nome: r.nome,
               url: r.fonteUrl,
               epgUrl: r.epgUrl,
-            );
+            ).timeout(const Duration(seconds: 90));
+            debugPrint('[SYNC] baixou OK ${r.fonteUrl}');
+            // So atualiza o progresso (a barra anda). NAO recarregamos do disco
+            // aqui: desserializar centenas de milhares de canais na thread da UI
+            // a cada download travava tudo. Carregamos uma unica vez no fim.
             _progressoSync++;
-            // Atualiza e notifica apos cada lista: o app sai da tela de
-            // importacao assim que a primeira lista fica pronta, sem
-            // precisar esperar todas as demais terminarem.
-            _listas = _armazenamento.carregarListas();
             notifyListeners();
-          } catch (_) {/* pula esta lista */}
+          } catch (_) {/* pula esta lista (timeout/erro) */}
         }));
       }
 
+      // Recarrega tudo UMA vez no fim (em vez de a cada download).
       _listas = _armazenamento.carregarListas();
       // Se a lista ativa foi podada (era sem-conta), elege outra.
       final ativaExiste = _listaAtiva != null &&
@@ -426,9 +466,11 @@ class IptvProvider extends ChangeNotifier {
         _listaAtiva = null;
         _restaurarListaAtiva();
       }
-    } catch (_) {
+    } catch (e, st) {
       // Sincronizacao e best-effort; mantem o que ja existe localmente.
+      debugPrint('[SYNC] ERRO: $e\n$st');
     } finally {
+      debugPrint('[SYNC] finally -> primeiraSync=false, sincronizando=false');
       _sincronizando = false;
       _primeiraSync = false;
       notifyListeners();

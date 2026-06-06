@@ -81,15 +81,26 @@ String nomeBase(String nome) => _semTags(nome);
 /// Funde categorias que so diferem pela qualidade.
 String categoriaBase(String grupo) => _semTags(grupo);
 
-// Digitos sobrescritos Unicode usados como marcadores de backup em listas IPTV.
-final _regexSobrescritos = RegExp(r'[²³¹⁰-⁹]+$');
+// Marcadores de backup SOBRESCRITOS em listas IPTV, no fim do nome:
+//  - digitos sobrescritos: ² ³ ¹ ⁰⁴-⁹  (U+00B2/B3/B9, U+2070-2079)
+//  - letras modificadoras sobrescritas: ᴮᴿ etc. (Phonetic Extensions U+1D2C-1D6B)
+// Ex.: "Globo SP HD²", "SPORTV HDᴮᴿ", "SPORTV 2 HDᴮᴿ".
+final _regexSobrescritos = RegExp(
+  r'[²³¹⁰-⁹ᴬ-ᵫ]+$',
+);
+
+// " BR" (ASCII, com espaco) no fim — marcador de fonte alternativa/regional.
+final _regexSufixoBR = RegExp(r'\s+BR$', caseSensitive: false);
 
 /// Nome-chave para agrupar fontes alternativas do mesmo canal.
 /// Remove tags de qualidade e marcadores de backup comuns em listas IPTV
-/// brasileiras: asteriscos, sufixo " BR" e digitos sobrescritos (²³...).
+/// brasileiras: asteriscos, sufixo " BR" e marcadores sobrescritos — digitos
+/// (² ³ ...) e letras (ᴮᴿ ...).
 /// "Globo SP HD*" → "Globo SP", "Globo SP BR" → "Globo SP",
-/// "GB Brasilia HD²" → "GB Brasilia".
-/// Numeros normais sem asterisco (ex.: "ESPN 2") NAO sao afetados.
+/// "GB Brasilia HD²" → "GB Brasilia", "SPORTV HDᴮᴿ" → "SPORTV",
+/// "SPORTV 2 HDᴮᴿ" → "SPORTV 2".
+/// Numeros normais sem asterisco (ex.: "ESPN 2", "SPORTV 2") NAO sao afetados —
+/// sao canais distintos.
 String nomeFonte(String nome) {
   var s = nomeBase(nome);
   final temAsterisco = s.contains('*');
@@ -97,11 +108,20 @@ String nomeFonte(String nome) {
   if (temAsterisco) {
     s = s.replaceAll(RegExp(r'\s+\d+$'), '').trim();
   }
-  // Digitos sobrescritos no fim (ex.: "²" que sobra apos remover "HD").
+  // Marcadores sobrescritos no fim (ex.: "²"/"ᴮᴿ" que sobram apos remover "HD").
   s = s.replaceAll(_regexSobrescritos, '').trim();
-  // " BR" no fim e marcador de fonte alternativa/regional em listas IPTV BR.
-  s = s.replaceAll(RegExp(r'\s+BR$', caseSensitive: false), '').trim();
+  s = s.replaceAll(_regexSufixoBR, '').trim();
   return s.isEmpty ? nomeBase(nome) : s;
+}
+
+/// True se o nome carrega um marcador de fonte de BACKUP (asterisco, sobrescrito
+/// ²/ᴮᴿ, ou " BR" no fim). Usado para eleger a fonte principal (a que NAO tem
+/// marcador) ao fundir fontes.
+bool temMarcadorBackup(String nome) {
+  final base = nomeBase(nome).trim();
+  return base.contains('*') ||
+      _regexSobrescritos.hasMatch(base) ||
+      _regexSufixoBR.hasMatch(base);
 }
 
 String _semTags(String texto) {

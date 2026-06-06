@@ -35,16 +35,20 @@ lib/
 ├── main.dart          # Bootstrap: Hive → MediaKit → dotenv → Supabase? → providers → runApp
 ├── app.dart           # MaterialApp, gate: onboarding → login → sync → home
 ├── models/
-│   └── lista_remota.dart  # Definição de lista na nuvem (id, nome, fonte_url, epg_url)
+│   ├── lista_remota.dart  # Definição de lista na nuvem (id, nome, fonte_url, epg_url)
+│   └── perfil.dart        # Perfil de uso (id, nome, ícone, idioma, config) — local + nuvem
 ├── services/
-│   └── servico_conta.dart # Auth Supabase + CRUD de listas via Edge Function
+│   └── servico_conta.dart # Auth Supabase + CRUD de listas (Edge Function) e perfis (tabela)
 ├── state/
-│   └── conta_provider.dart # Estado de autenticação; IptvProvider usa ServicoConta opcional
+│   ├── conta_provider.dart  # Estado de autenticação; IptvProvider usa ServicoConta opcional
+│   └── perfil_provider.dart # Perfis (até 3), perfil ativo da sessão, CRUD, sync nuvem
 ├── screens/
 │   ├── tela_login.dart         # Login / cadastro + "continuar sem conta"
-│   └── tela_importando_listas.dart  # Tela de progresso na 1ª sync pós-login
+│   ├── tela_importando_listas.dart  # Tela de progresso na 1ª sync pós-login
+│   └── tela_perfis.dart        # "Quem está assistindo?" — gate de perfil (1ª tela)
 ├── widgets/
-│   └── animado_entrada.dart    # Widget de animação de entrada reutilizável
+│   ├── animado_entrada.dart    # Widget de animação de entrada reutilizável
+│   └── avatar_perfil.dart      # Avatar Lottie do perfil (assets/avatars/*.json)
 ├── services/      # I/O, parse, players, EPG, TMDB, Hive
 ├── state/         # ChangeNotifier providers (IptvProvider é o central)
 ├── screens/       # Demais telas (rotas)
@@ -78,6 +82,28 @@ website/           # Landing page + login.html + painel.html (Vercel)
   `compute()` (isolate).
 - **Players:** use os singletons `PlayerAoVivo`/`PlayerVod` — nunca crie
   `Player`/`VideoController` novos por vídeo (vaza superfície EGL no Windows).
+
+## Animação e ferramentas (MCP / skills) — SEMPRE
+
+Ao trabalhar com **animação** ou **qualquer feature de Flutter**, use sempre,
+sem precisar ser solicitado:
+
+- **Servidores MCP** quando ajudarem: `context7` para a doc oficial do Flutter
+  (`/websites/flutter_dev`) e de pacotes antes de implementar; `dart` para
+  análise/erros/inspeção de pacotes. Consulte a doc para validar a abordagem em
+  vez de confiar só na memória.
+- **Skills de animação** disponíveis como referência de princípios (timeline,
+  stagger, easing, física de mola). As skills do repositório são voltadas a
+  web/React — traduza os conceitos para o Flutter (`AnimationController`,
+  `AnimatedBuilder`, `Interval`, `Tween`, `repeat(reverse:)`, overlays em
+  coordenadas globais).
+- **Padrão de animação do app:** a entrada de perfil
+  ([tela_inicial.dart](lib/screens/tela_inicial.dart)) e a abertura de seção
+  ([widgets/abertura_secao.dart](lib/widgets/abertura_secao.dart)) são a base.
+  Transições entre telas usam 3 estágios assíncronos (origem → centro com pulso
+  enquanto carrega → posição final) com overlay em coordenadas globais e
+  `Listenable.merge` de múltiplos controllers. Reutilize `AberturaSecao` +
+  `TituloSecao` para novas seções com carregamento.
 
 ## Comandos
 
@@ -137,3 +163,27 @@ Sempre rodar `flutter analyze` após mudanças. Não há suíte de testes releva
 - Credenciais Xtream (username/password na querystring) são cifradas pela Edge
   Function `iptv` antes de gravar; o app recebe a URL reconstituída na leitura.
   Nunca escreva direto na tabela `listas` — sempre use `ServicoConta`.
+
+### Regras extras para o sistema de perfis
+
+- Máximo de **3 perfis** por conta/aparelho (`Perfil.maxPerfis`) — limite por
+  causa do bloqueio de acesso múltiplo simultâneo às listas, que são
+  **compartilhadas** entre todos os perfis.
+- A **biblioteca pessoal** (favoritos, histórico, progresso, "minha lista",
+  categorias, qualidades) é **por perfil**: o `Armazenamento` abre boxes com
+  sufixo `__<idPerfil>` em `ativarPerfil`. Antes de um perfil ser ativo essas
+  boxes ficam null e as leituras retornam vazio.
+- As **preferências por perfil** (idioma, auto-qualidade, ordenações) vivem no
+  `Perfil`; leia/grave sempre via `PreferenciasProvider` (que delega ao perfil
+  ativo) — não acesse a box `preferencias` para isso.
+- Trocar de perfil = `PerfilProvider.selecionar(p)` (aponta as boxes) **e**
+  `IptvProvider.recarregarDadosDoPerfil()` (recarrega a memória). A `TelaPerfis`
+  já orquestra os dois; não duplique.
+- Perfis sincronizam só a **definição** (nome/ícone/config) na tabela `perfis`
+  do Supabase — direto na tabela (sem segredos, protegido por RLS), diferente de
+  `listas`. A biblioteca pessoal **nunca** sobe ao banco.
+- Avatares são Lottie em `assets/avatars/*.json`, gerados por
+  `tool/gerar_avatares.py`. Para adicionar um, gere o JSON e inclua a chave em
+  `avataresDisponiveis` ([widgets/avatar_perfil.dart](lib/widgets/avatar_perfil.dart)).
+- Ao fazer schema novo no Supabase, rode `supabase db push` (ou cole `schema.sql`
+  no SQL Editor) — a tabela `perfis` precisa existir no projeto remoto.

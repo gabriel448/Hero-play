@@ -9,6 +9,7 @@ construtor/`inicializar`).
 MultiProvider(
   providers: [
     ChangeNotifierProvider<IptvProvider>.value(value: provider),
+    ChangeNotifierProvider<PerfilProvider>.value(value: perfis),
     ChangeNotifierProvider<PreferenciasProvider>.value(value: preferencias),
     ChangeNotifierProvider<ServicoEpg>.value(value: servicoEpg),
     Provider<TmdbService>.value(value: tmdb),          // sem notify — stateless
@@ -106,19 +107,39 @@ Expõe o estado de autenticação para a UI e delega ações ao `ServicoConta`.
 - Escuta `ServicoConta.mudancasAuth` (stream) e chama `notifyListeners()` a cada
   mudança de sessão — assim o `app.dart` reage ao login/logout sem polling.
 
-O `app.dart` usa `ContaProvider` + `PreferenciasProvider` para decidir qual tela
-raiz mostrar: `precisaLogin = disponivel && !logado && !pulouLogin`.
+O `app.dart` usa `ContaProvider` + `PreferenciasProvider` + `PerfilProvider`
+para decidir a tela raiz: `precisaLogin = disponivel && !logado && !pulouLogin`,
+depois `!perfilConfirmado` → `TelaPerfis`.
+
+## `PerfilProvider` — [perfil_provider.dart](../lib/state/perfil_provider.dart)
+
+Gerencia os perfis (estilo "quem está assistindo"). Cada conta/aparelho tem até
+`Perfil.maxPerfis` (3) perfis — limite por causa do bloqueio de acesso múltiplo
+simultâneo às listas, que são **compartilhadas** entre perfis.
+
+- `perfis`, `perfilAtivo`, `podeAdicionar`.
+- `perfilConfirmado` — flag de **sessão** (começa `false` a cada abertura); o
+  `app.dart` mostra `TelaPerfis` enquanto for `false`.
+- `selecionar(p)` — aponta as boxes do Hive para o perfil (`Armazenamento.ativarPerfil`)
+  e marca `perfilConfirmado`. A `TelaPerfis` então chama
+  `IptvProvider.recarregarDadosDoPerfil()` para trocar a biblioteca em memória.
+- `criar` (o 1º perfil herda preferências legadas e **migra** a biblioteca antiga),
+  `editar`, `remover` (apaga as boxes do perfil), `trocarPerfil` (volta ao seletor).
+- `atualizarConfigAtivo(...)` — usado pelo `PreferenciasProvider` para gravar a
+  config no perfil ativo.
+- `sincronizarDoSupabase` / `limparLocais` — espelham/limpam as **definições** de
+  perfil na nuvem (best-effort). A biblioteca pessoal nunca sobe ao banco.
 
 ## `PreferenciasProvider` — [preferencias_provider.dart](../lib/state/preferencias_provider.dart)
 
-Preferências do usuário, persistidas via `Armazenamento`:
-- `idioma` (`IdiomaApp?`) — `null` dispara o onboarding. `idiomaDefinido` e
-  `idiomaEfetivo` (cai em português).
-- `autoQualidade` (bool).
-- `pulouLogin` (bool) — o usuário tocou em "Continuar sem conta"; não mostrar
-  a tela de login novamente até o app ser reiniciado.
-- `ordemCategorias` (`OrdemCategorias`: popularidade | A-Z) e `ordemCanais`
-  (`OrdemCanais`: padrão | A-Z) — ordenação das listas ao vivo.
+Superfície única de leitura/escrita das preferências. As que são **por perfil**
+(idioma, ajuste automático de qualidade, ordenações) ficam no `Perfil` ativo e são
+lidas/gravadas via `PerfilProvider` — este provider escuta o `PerfilProvider` e
+re-emite `notifyListeners` quando o perfil (ou sua config) muda, mantendo as telas
+existentes funcionando sem saberem de perfis:
+- `idioma`/`idiomaEfetivo`, `autoQualidade`, `ordemCategorias`/`ordemCanais` →
+  delegam ao perfil ativo.
+- `pulouLogin` (bool) — global ao aparelho, persistido via `Armazenamento`.
 
 ## `ServicoEpg` como provider
 

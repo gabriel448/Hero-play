@@ -9,6 +9,8 @@ import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
+import '../widgets/abertura_secao.dart';
+import '../widgets/animado_entrada.dart';
 import 'tela_detalhes.dart';
 
 enum TipoVod { filmes, series }
@@ -54,7 +56,6 @@ const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
 const double _kPosterWidth = 100.0;
 const double _kPosterHeight = 150.0;
 const double _kPosterLabel = 28.0;
-const double _kItemExtent = _kPosterWidth + AppSpacing.sm;
 
 const int _kDesktopVisibleCount = 14;
 
@@ -92,11 +93,43 @@ int? _extrairAno(String nome) {
   return int.tryParse(matches.last.group(0)!);
 }
 
+/// Entrada do cache de sessao do conteudo agrupado de VOD (filmes ou series).
+/// Evita recomputar o agrupamento (e re-esperar o load) ao reentrar na secao.
+class _VodCacheEntry {
+  final Map<String, List<Object>> conteudo;
+  final List<String> nomes;
+  final List<Object> todosConteudos;
+  final Map<String, Canal> canaisPorUrl;
+  final Map<String, Serie> seriesPorUrlEpisodio;
+  final Map<String, Object> todosPorChave;
+  const _VodCacheEntry({
+    required this.conteudo,
+    required this.nomes,
+    required this.todosConteudos,
+    required this.canaisPorUrl,
+    required this.seriesPorUrlEpisodio,
+    required this.todosPorChave,
+  });
+}
+
+// Cache em memoria por tipo (max 2 entradas: filmes + series da lista atual).
+// Invalida sozinho quando muda a identidade do mapa `categorias` (lista/perfil).
+int? _vodCacheIdentidade;
+final Map<TipoVod, _VodCacheEntry> _vodCache = {};
+
 /// Tela estilo streaming: carrosseis por categoria — filmes ou séries.
 class TelaFilmes extends StatefulWidget {
   final Map<String, List<Canal>> categorias;
   final TipoVod tipo;
-  const TelaFilmes({super.key, required this.categorias, this.tipo = TipoVod.filmes});
+  /// Chamado quando o conteudo termina de carregar (parse/agrupamento). Usado
+  /// pela animacao de abertura ([AberturaSecao]) para sair do estagio de pulso.
+  final VoidCallback? aoCarregar;
+  const TelaFilmes({
+    super.key,
+    required this.categorias,
+    this.tipo = TipoVod.filmes,
+    this.aoCarregar,
+  });
 
   @override
   State<TelaFilmes> createState() => _TelaFilmesState();
@@ -121,6 +154,28 @@ class _TelaFilmesState extends State<TelaFilmes> {
   @override
   void initState() {
     super.initState();
+    // Cache de sessao: invalida se a fonte (mapa categorias) mudou de
+    // identidade — a home so o recria ao trocar de lista/perfil.
+    final identidade = identityHashCode(widget.categorias);
+    if (_vodCacheIdentidade != identidade) {
+      _vodCache.clear();
+      _vodCacheIdentidade = identidade;
+    }
+
+    final cache = _vodCache[widget.tipo];
+    if (cache != null) {
+      // Reentrada: conteudo ja agrupado antes — sem espera de carregamento.
+      _conteudo = cache.conteudo;
+      _nomes = cache.nomes;
+      _todosConteudos = cache.todosConteudos;
+      _canaisPorUrl = cache.canaisPorUrl;
+      _seriesPorUrlEpisodio = cache.seriesPorUrlEpisodio;
+      _todosPorChave = cache.todosPorChave;
+      _pronto = true;
+      _finalizarCarga();
+      return;
+    }
+
     compute(_computarConteudoVod, (widget.categorias, widget.tipo)).then((r) {
       if (!mounted) return;
       final lookup = <String, Canal>{};
@@ -145,6 +200,15 @@ class _TelaFilmesState extends State<TelaFilmes> {
           porChave['s:${s.nome}'] = s;
         }
       }
+      // Guarda no cache para acelerar as proximas visitas a esta secao.
+      _vodCache[widget.tipo] = _VodCacheEntry(
+        conteudo: r.conteudo,
+        nomes: r.nomes,
+        todosConteudos: r.todosConteudos,
+        canaisPorUrl: lookup,
+        seriesPorUrlEpisodio: seriesPorEp,
+        todosPorChave: porChave,
+      );
       setState(() {
         _conteudo = r.conteudo;
         _nomes = r.nomes;
@@ -154,7 +218,81 @@ class _TelaFilmesState extends State<TelaFilmes> {
         _todosPorChave = porChave;
         _pronto = true;
       });
+      _finalizarCarga();
     });
+  }
+
+  /// Sinaliza para a animacao de abertura que o conteudo esta pronto. Em SERIES,
+  /// antes disso pre-carrega as capas (TMDB) dos primeiros banners — assim a
+  /// tela so abre quando os posters visiveis ja estao prontos (sem pop-in). Na
+  /// reentrada (cache), tanto o agrupamento quanto as capas ja estao em cache,
+  /// entao isto resolve quase instantaneamente.
+  void _finalizarCarga() {
+    if (widget.aoCarregar == null) return;
+    if (widget.tipo == TipoVod.series) {
+      _precarregarCapasSeries().whenComplete(() => widget.aoCarregar?.call());
+    } else {
+      widget.aoCarregar!.call();
+    }
+  }
+
+  /// Pre-carrega (TMDB + cache de imagem) as capas das primeiras series na
+  /// ordem em que aparecem (Continuar -> Minha lista -> Todas A-Z), para a
+  /// tela de series abrir com os banners do topo ja prontos. Best-effort: cada
+  /// capa tem timeout proprio e falhas nao travam a abertura.
+  Future<void> _precarregarCapasSeries() async {
+    try {
+      if (!mounted) return;
+      final tmdb = context.read<TmdbService>();
+      final provider = context.read<IptvProvider>();
+
+      final ordem = <Serie>[];
+      final vistos = <String>{};
+      void add(Serie s) {
+        if (vistos.add(s.nome)) ordem.add(s);
+      }
+
+      // Continuar assistindo (series com progresso) — primeira fila do topo.
+      for (final p in provider.progressos) {
+        final s = _seriesPorUrlEpisodio[p.url];
+        if (s != null) add(s);
+      }
+      // Minha lista.
+      for (final k in provider.minhaListaChaves) {
+        final item = _todosPorChave[k];
+        if (item is Serie) add(item);
+      }
+      // Todas (A-Z) — o carrossel "Todas" do topo.
+      final todas = _todosConteudos.whereType<Serie>().toList()
+        ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
+      for (final s in todas) {
+        add(s);
+      }
+
+      const maxCapas = 12;
+      final alvo = ordem.take(maxCapas).toList();
+
+      await Future.wait(alvo.map((s) async {
+        try {
+          final url = await tmdb
+              .posterSerie(s.nome)
+              .timeout(const Duration(seconds: 4));
+          final fonte = (url != null && url.isNotEmpty)
+              ? url
+              : (s.logoUrl != null && s.logoUrl!.isNotEmpty
+                  ? s.logoUrl
+                  : null);
+          if (fonte != null && mounted) {
+            await precacheImage(NetworkImage(fonte), context)
+                .timeout(const Duration(seconds: 4));
+          }
+        } catch (_) {
+          /* uma capa que falhar nao deve travar a abertura */
+        }
+      }));
+    } catch (_) {
+      /* best-effort */
+    }
   }
 
   @override
@@ -189,10 +327,27 @@ class _TelaFilmesState extends State<TelaFilmes> {
 
   @override
   Widget build(BuildContext context) {
+    final icone = widget.tipo == TipoVod.filmes
+        ? Icons.movie_creation_outlined
+        : Icons.tv_rounded;
+    final nomeSecao = widget.tipo == TipoVod.filmes ? 'Filmes' : 'Séries';
+    // So construimos o conteudo quando a abertura comeca a revelar — assim os
+    // carrosseis entram com stagger em sincronia (igual aos botoes da home).
+    final revelar = AberturaSecao.conteudoRevelado(context);
+
     if (!_pronto) {
+      // Sem spinner: durante a animacao de abertura esta tela fica invisivel
+      // (a AberturaSecao mostra o pulso); o conteudo surge so quando pronto.
       return Scaffold(
-        appBar: AppBar(title: Text(widget.tipo == TipoVod.filmes ? 'Filmes' : 'Séries')),
-        body: const Center(child: CircularProgressIndicator()),
+        appBar: AppBar(
+          centerTitle: true,
+          title: TituloSecao(
+            icone: icone,
+            texto: nomeSecao,
+            corIcone: AppColors.textSecondary,
+          ),
+        ),
+        body: const SizedBox.shrink(),
       );
     }
 
@@ -209,6 +364,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
       },
       child: Scaffold(
       appBar: AppBar(
+        centerTitle: !_buscando,
         titleSpacing: 0,
         title: _buscando
             ? Padding(
@@ -230,7 +386,11 @@ class _TelaFilmesState extends State<TelaFilmes> {
                   onChanged: (v) => setState(() => _busca = v),
                 ),
               )
-            : Text(widget.tipo == TipoVod.filmes ? 'Filmes' : 'Séries'),
+            : TituloSecao(
+                icone: icone,
+                texto: nomeSecao,
+                corIcone: AppColors.textSecondary,
+              ),
         actions: [
           IconButton(
             icon: Icon(
@@ -249,7 +409,9 @@ class _TelaFilmesState extends State<TelaFilmes> {
           ),
         ],
       ),
-      body: _buscando && _busca.isNotEmpty
+      body: !revelar
+          ? const SizedBox.shrink()
+          : _buscando && _busca.isNotEmpty
           ? _GradeResultados(
               itens: _filtrar(_busca),
               onTap: (item) => _navegar(context, item),
@@ -391,35 +553,47 @@ class _BodyComCarrosseis extends StatelessWidget {
       ),
       itemCount: total,
       itemBuilder: (_, i) {
+        final Widget linha;
         if (temAndamento && i == 0) {
-          return _CarrosselContinuar(itens: continuar, onTap: onTap);
-        }
-        if (temMinhaLista && i == (temAndamento ? 1 : 0)) {
-          return _CarrosselCategoria(
+          linha = _CarrosselContinuar(itens: continuar, onTap: onTap);
+        } else if (temMinhaLista && i == (temAndamento ? 1 : 0)) {
+          linha = _CarrosselCategoria(
             nomeCategoria: 'Minha lista',
             itens: minhaListaItens,
             onTap: onTap,
           );
-        }
-        // Carrossel "Todos"/"Todas" — sempre no topo após os especiais acima.
-        if (i == especialCount - 1) {
-          return _CarrosselCategoria(
+        } else if (i == especialCount - 1) {
+          // Carrossel "Todos"/"Todas" — sempre no topo após os especiais acima.
+          linha = _CarrosselCategoria(
             nomeCategoria: nomeTodos,
             itens: todosOrdenados,
             onTap: onTap,
           );
+        } else {
+          final idx = i - especialCount;
+          final nome = ordemCategorias[idx];
+          linha = _CarrosselCategoria(
+            nomeCategoria: nome,
+            itens: conteudo[nome]!,
+            onTap: (item) => onTap(item),
+          );
         }
-        final idx = i - especialCount;
-        final nome = ordemCategorias[idx];
-        return _CarrosselCategoria(
-          nomeCategoria: nome,
-          itens: conteudo[nome]!,
-          onTap: (item) => onTap(item),
-        );
+        // Entrada animada (fade + slide) escalonada nas primeiras filas — as
+        // visiveis no topo. As demais (so vistas ao rolar) entram sem animacao.
+        if (i < _kFilasAnimadas) {
+          return AnimadoEntrada(
+            delay: Duration(milliseconds: 70 * i),
+            child: linha,
+          );
+        }
+        return linha;
       },
     );
   }
 }
+
+/// Quantas filas de carrossel animam na entrada (as visiveis no topo).
+const int _kFilasAnimadas = 5;
 
 /// Um item do carrossel "Continuar assistindo": ou um filme (com seu
 /// progresso, para retomar direto no player), ou uma série (abre a tela

@@ -124,6 +124,7 @@ key.properties
 *.log
 *.class
 *.pyc
+__pycache__/
 *.swp
 .history
 .svn/

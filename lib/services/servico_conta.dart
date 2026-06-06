@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/lista_remota.dart';
+import '../models/perfil.dart';
 
 /// Camada de I/O para contas e sincronizacao de listas via Supabase.
 ///
@@ -98,6 +99,39 @@ class ServicoConta {
       body: {'fonte_url': fonteUrl},
     );
     _checarResposta(resp);
+  }
+
+  // ===== PERFIS =====
+  //
+  // Perfis nao tem credenciais a cifrar (diferente de `listas`), entao usamos
+  // a tabela direto, protegida por RLS (cada usuario so ve os seus). A coluna
+  // `user_id` recebe o id da sessao automaticamente via default/policy.
+
+  static const _tabelaPerfis = 'perfis';
+
+  /// Todos os perfis da conta logada, do mais antigo ao mais recente.
+  Future<List<Perfil>> listarPerfis() async {
+    final dados = await _cliente
+        .from(_tabelaPerfis)
+        .select()
+        .order('criado_em', ascending: true);
+    return (dados as List)
+        .map((m) => Perfil.fromCloudMap(m as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Insere ou atualiza um perfil (upsert por id).
+  Future<void> salvarPerfil(Perfil p) async {
+    final uid = usuario?.id;
+    if (uid == null) return;
+    await _cliente.from(_tabelaPerfis).upsert({
+      ...p.toCloudMap(),
+      'user_id': uid,
+    });
+  }
+
+  Future<void> removerPerfil(String id) async {
+    await _cliente.from(_tabelaPerfis).delete().eq('id', id);
   }
 
   // ── helpers ───────────────────────────────────────────────────────────────

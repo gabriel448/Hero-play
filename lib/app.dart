@@ -3,9 +3,10 @@ import 'package:provider/provider.dart';
 import 'screens/tela_importando_listas.dart';
 import 'screens/tela_inicial.dart';
 import 'screens/tela_login.dart';
-import 'screens/tela_onboarding.dart';
+import 'screens/tela_perfis.dart';
 import 'state/conta_provider.dart';
 import 'state/iptv_provider.dart';
+import 'state/perfil_provider.dart';
 import 'state/preferencias_provider.dart';
 import 'theme/app_theme.dart';
 import 'utils/nav_keys.dart';
@@ -30,14 +31,12 @@ class IptvApp extends StatelessWidget {
 
 /// Gerencia qual tela raiz exibir com base no estado dos providers.
 /// Usa [AnimatedSwitcher] para crossfade suave entre as transicoes de estado
-/// (onboarding → login → app) em vez de substituicao abrupta.
+/// (login → importacao → perfis → app) em vez de substituicao abrupta.
 class _TelaRaiz extends StatelessWidget {
   const _TelaRaiz();
 
   @override
   Widget build(BuildContext context) {
-    final temIdioma =
-        context.select<PreferenciasProvider, bool>((p) => p.idiomaDefinido);
     final pulouLogin =
         context.select<PreferenciasProvider, bool>((p) => p.pulouLogin);
     final disponivel =
@@ -45,17 +44,20 @@ class _TelaRaiz extends StatelessWidget {
     final logado = context.select<ContaProvider, bool>((c) => c.estaLogado);
     final primeiraSync =
         context.select<IptvProvider, bool>((p) => p.primeiraSync);
+    final perfilConfirmado =
+        context.select<PerfilProvider, bool>((p) => p.perfilConfirmado);
 
     final precisaLogin = disponivel && !logado && !pulouLogin;
     final importandoPrimeiraVez = logado && primeiraSync;
 
     final Widget tela;
-    if (!temIdioma) {
-      tela = const TelaOnboarding();
-    } else if (precisaLogin) {
+    if (precisaLogin) {
       tela = const TelaLogin();
     } else if (importandoPrimeiraVez) {
       tela = const TelaImportandoListas();
+    } else if (!perfilConfirmado) {
+      // "Quem esta assistindo?" — sempre exibida ao abrir o app, antes da home.
+      tela = const TelaPerfis();
     } else {
       tela = const TelaInicial();
     }

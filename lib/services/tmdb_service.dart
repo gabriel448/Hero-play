@@ -10,7 +10,20 @@ class TmdbInfo {
   final int? ano;
   final List<String> elenco;
 
-  const TmdbInfo({this.sinopse, this.ano, this.elenco = const []});
+  /// Nota media (0..10) do TMDB — aproxima a nota do IMDB. Null se indisponivel.
+  final double? nota;
+
+  /// Generos (ex.: "Ação", "Comédia"). Vazio se indisponivel. Sera usado para
+  /// recomendar titulos relacionados na tela do filme/serie.
+  final List<String> generos;
+
+  const TmdbInfo({
+    this.sinopse,
+    this.ano,
+    this.elenco = const [],
+    this.nota,
+    this.generos = const [],
+  });
 
   /// Resultado vazio — sem chave de API, sem match, ou erro de rede.
   static const vazio = TmdbInfo();
@@ -113,13 +126,60 @@ class TmdbService {
     final elenco =
         id != null ? await _elenco(id, ehTv, idioma) : const <String>[];
 
+    final notaRaw = (item['vote_average'] as num?)?.toDouble();
+    final nota = (notaRaw != null && notaRaw > 0) ? notaRaw : null;
+
+    final genreIds = (item['genre_ids'] as List?)
+            ?.map((g) => g is int ? g : int.tryParse('$g'))
+            .whereType<int>()
+            .toList() ??
+        const <int>[];
+    final mapaG = genreIds.isEmpty ? const <int, String>{} : await _mapaGeneros(ehTv, idioma);
+    final generos =
+        genreIds.map((g) => mapaG[g]).whereType<String>().take(3).toList();
+
     final info = TmdbInfo(
       sinopse: (sinopse != null && sinopse.isNotEmpty) ? sinopse : null,
       ano: ano,
       elenco: elenco,
+      nota: nota,
+      generos: generos,
     );
     _cacheInfo[chave] = info;
     return info;
+  }
+
+  // ─── Mapa id->nome dos generos (cacheado por tipo+idioma) ────────────────
+  final _cacheGeneros = <String, Map<int, String>>{};
+
+  Future<Map<int, String>> _mapaGeneros(bool ehTv, String idioma) async {
+    if (!configurado) return const {};
+    final chave = '${ehTv ? 'tv' : 'movie'}|$idioma';
+    final cache = _cacheGeneros[chave];
+    if (cache != null) return cache;
+    try {
+      final uri = Uri.parse('${proxyBaseUrl.trim()}/api/tmdb').replace(
+        queryParameters: {
+          'p': ehTv ? '/3/genre/tv/list' : '/3/genre/movie/list',
+          'language': idioma,
+        },
+      );
+      final resp = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (resp.statusCode != 200) return const {};
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      final list = (body['genres'] as List?) ?? const [];
+      final mapa = <int, String>{};
+      for (final g in list) {
+        final m = g as Map<String, dynamic>;
+        final id = m['id'] as int?;
+        final nome = (m['name'] as String?)?.trim();
+        if (id != null && nome != null && nome.isNotEmpty) mapa[id] = nome;
+      }
+      _cacheGeneros[chave] = mapa;
+      return mapa;
+    } catch (_) {
+      return const {};
+    }
   }
 
   /// Top 5 atores do elenco. Lista vazia em caso de erro.

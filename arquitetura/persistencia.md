@@ -18,17 +18,33 @@ _boxFavoritos   = await Hive.openBox('favoritos');
 
 ## Boxes
 
-| Box | Constante | Conteúdo | Chave do registro |
+Há **dois grupos** de boxes: **globais** (compartilhadas entre perfis) e **por
+perfil** (a biblioteca pessoal — abertas com sufixo `__<idPerfil>` e re-apontadas
+em `Armazenamento.ativarPerfil`, ver [perfis](#perfis-quem-está-assistindo)).
+
+| Box | Escopo | Conteúdo | Chave do registro |
 |---|---|---|---|
-| `listas` | `_nomeBoxListas` | `ListaM3U` (com canais parseados) | `lista.id` (= `fonte`) |
-| `favoritos` | `_nomeBoxFavoritos` | `Canal` favoritado | `canal.id` |
-| `historico` | `_nomeBoxHistorico` | `CanalAssistido` | `canal.id` (máx. 50, FIFO) |
-| `progressos` | `_nomeBoxProgressos` | `ProgressoCanal` ("continuar assistindo") | `canal.url` |
-| `preferencias` | `_nomeBoxPreferencias` | idioma, ordenações, auto-qualidade, lista ativa | chaves fixas |
-| `qualidades` | `_nomeBoxQualidades` | URL da variante preferida | `idGrupo` do canal |
-| `categorias_personalizadas` | `_nomeBoxCategorias` | `CategoriaPersonalizada` | `cat.id` |
-| `epg` | `_nomeBoxEpg` | grade XMLTV parseada + data | `idLista` |
-| `minha_lista` | `_nomeBoxMinhaLista` | lista de chaves de "minha lista" | chave fixa `'keys'` |
+| `listas` | global | `ListaM3U` (com canais parseados) | `lista.id` (= `fonte`) |
+| `epg` | global | grade XMLTV parseada + data | `idLista` |
+| `perfis` | global | `Perfil` (definição: nome, ícone, config) | `perfil.id` (uuid) |
+| `preferencias` | global | `pulou_login`, `lista_ativa_id`, `perfil_ativo_id` | chaves fixas |
+| `favoritos__<id>` | por perfil | `Canal` favoritado | `canal.id` |
+| `historico__<id>` | por perfil | `CanalAssistido` | `canal.id` (máx. 50, FIFO) |
+| `progressos__<id>` | por perfil | `ProgressoCanal` ("continuar assistindo") | `canal.url` |
+| `qualidades__<id>` | por perfil | URL da variante preferida | `idGrupo` do canal |
+| `categorias_personalizadas__<id>` | por perfil | `CategoriaPersonalizada` | `cat.id` |
+| `minha_lista__<id>` | por perfil | lista de chaves de "minha lista" | chave fixa `'keys'` |
+
+## Perfis ("quem está assistindo")
+
+As boxes da **biblioteca pessoal** ficam null até um perfil ser ativado — antes
+disso (na `TelaPerfis`) as leituras retornam vazio. `Armazenamento.ativarPerfil(id)`
+abre `favoritos__<id>`, `historico__<id>`, etc. e persiste `perfil_ativo_id`.
+`removerPerfil`/`limparPerfis` apagam as boxes do(s) perfil(is) do disco.
+
+**Migração:** ao criar o **primeiro** perfil, `migrarLegadoParaPerfil` copia a
+biblioteca antiga (boxes sem sufixo, de versões pré-perfis) para as boxes do novo
+perfil e apaga as antigas — nenhum dado é perdido na atualização.
 
 ## Detalhes por box
 

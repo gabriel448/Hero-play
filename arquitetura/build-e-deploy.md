@@ -96,7 +96,7 @@ Sem o proxy configurado, o `TmdbService` retorna vazio e o app funciona normal
 ```
 supabase/
 ├── config.toml            # Configuração do projeto Supabase CLI (local dev)
-├── schema.sql             # DDL da tabela `listas` + RLS + constraint unique(user_id, fonte_url)
+├── schema.sql             # DDL das tabelas `listas` e `perfis` + RLS + grants
 ├── .env                   # ENCRYPTION_KEY (AES-256-CBC) — NÃO versionado
 ├── functions/
 │   └── iptv/              # Edge Function Deno — CRUD de listas com cifragem Xtream
@@ -152,6 +152,27 @@ CREATE TABLE listas (
 -- RLS: só o dono lê/escreve
 ALTER TABLE listas ENABLE ROW LEVEL SECURITY;
 ```
+
+### Tabela `perfis` (perfis de uso)
+
+```sql
+CREATE TABLE perfis (
+  id               UUID PRIMARY KEY,        -- gerado no cliente (casa local↔nuvem)
+  user_id          UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  nome             TEXT NOT NULL,
+  icone            TEXT NOT NULL DEFAULT 'ember',
+  idioma           TEXT,                    -- BCP-47; null = padrão
+  auto_qualidade   BOOLEAN NOT NULL DEFAULT false,
+  ordem_categorias TEXT NOT NULL DEFAULT 'popularidade',
+  ordem_canais     TEXT NOT NULL DEFAULT 'padrao',
+  criado_em        TIMESTAMPTZ DEFAULT now()
+);
+-- RLS owner-only. Acessada DIRETO pelo app (sem Edge Function): perfis não têm
+-- segredos a cifrar. Só a definição sobe — a biblioteca pessoal fica no Hive.
+```
+
+Rodar `supabase db push` (ou colar `schema.sql` no SQL Editor) para criar a
+tabela no projeto remoto.
 
 ## Site (landing page + painel)
 

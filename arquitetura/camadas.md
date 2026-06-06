@@ -54,6 +54,7 @@ services e chamam `notifyListeners()` quando algo muda.
 | Provider | Responsabilidade |
 |---|---|
 | `IptvProvider` | Listas, favoritos, histórico, progresso, "minha lista", busca, lista ativa, sync Supabase |
+| `PerfilProvider` | Perfis (até 3), perfil ativo da sessão, CRUD, sync Supabase best-effort |
 | `ContaProvider` | Estado de autenticação (logado/deslogado); delega ao `ServicoConta` |
 | `MiniPlayerProvider` | Estado do mini player flutuante (canal, player, posição, tamanho) |
 | `PreferenciasProvider` | Idioma, ordenações, auto-qualidade, flag `pulouLogin` |
