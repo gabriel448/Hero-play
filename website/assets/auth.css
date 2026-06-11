@@ -112,6 +112,32 @@ input:-webkit-autofill:focus {
 
 .field { margin-bottom: 14px; }
 
+/* ── Checkbox "Lembrar deste dispositivo" ─────────────────────────────────── */
+.lembrar {
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer; user-select: none; margin: 2px 0 18px;
+}
+.lembrar input { position: absolute; opacity: 0; width: 0; height: 0; }
+.lembrar-box {
+  width: 20px; height: 20px; flex: none; border-radius: 6px;
+  border: 1.5px solid var(--outline); background: var(--surface2);
+  display: flex; align-items: center; justify-content: center;
+  transition: background .2s ease, border-color .2s ease;
+}
+.lembrar:hover .lembrar-box { border-color: var(--text-secondary); }
+.lembrar input:focus-visible + .lembrar-box { box-shadow: 0 0 0 3px rgba(229,57,53,.35); }
+.lembrar input:checked + .lembrar-box { background: var(--accent); border-color: var(--accent); }
+.lembrar-check { width: 13px; height: 13px; display: block; }
+.lembrar-check path {
+  fill: none; stroke: #fff; stroke-width: 3;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.lembrar-text {
+  font-size: 13px; font-weight: 500; color: var(--text-secondary);
+  transition: color .2s ease;
+}
+.lembrar:hover .lembrar-text { color: var(--text-primary); }
+
 /* ── Mensagens ────────────────────────────────────────────────────────── */
 .msg { font-size: 13px; padding: 10px 12px; border-radius: 9px; margin-bottom: 14px; display: none; }
 .msg.show { display: block; }
@@ -127,6 +153,9 @@ input:-webkit-autofill:focus {
   border: 1px solid var(--divider);
   border-radius: 18px;
   padding: 32px;
+  /* 60fps: transicoes de step animam transform+opacity (compositor). */
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 .card h1 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
 .card .sub { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; }
@@ -343,6 +372,8 @@ input:-webkit-autofill:focus {
   z-index: 200;
   opacity: 0;
   pointer-events: none;
+  /* 60fps: anima so opacity, numa camada propria de compositor (GPU). */
+  will-change: opacity;
 }
 .modal-overlay.aberto {
   opacity: 1;
@@ -355,6 +386,9 @@ input:-webkit-autofill:focus {
   border: 1px solid var(--outline);
   border-radius: 18px;
   padding: 28px;
+  /* 60fps: open/close anima transform+opacity (compositor, sem reflow). */
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 .modal-cab {
   display: flex;

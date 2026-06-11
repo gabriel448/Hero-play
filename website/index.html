@@ -775,6 +775,10 @@
       </svg>
     </a>
     <a href="#download" class="btn btn-primary nav-cta">Baixar</a>
+    <!-- Botao de TESTE: envia um codigo OTP por email da conta logada e abre o
+         modal de verificacao. So para validar o fluxo de codigo por email. -->
+    <button class="btn btn-outline nav-cta" id="navTestarCodigo" type="button"
+            title="Testar verificação por código de email">Testar código</button>
   </div>
   <button class="nav-menu-btn" id="navMenuBtn" aria-label="Abrir menu">
     <span></span><span></span><span></span>
@@ -1116,25 +1120,180 @@
   });
 </script>
 
-<!-- Estado de login: troca "Entrar" pelo icone de perfil quando logado -->
+<!-- ═══ Modal de TESTE: verificacao por codigo de email (OTP) ═══════════ -->
+<style>
+  .cod-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.72); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .cod-modal {
+    width: 100%; max-width: 380px;
+    background: #15161c; border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px; padding: 26px 24px; position: relative;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+    font-family: 'Manrope', system-ui, sans-serif; color: #fff;
+  }
+  .cod-modal h2 { margin: 0 0 6px; font-size: 21px; font-weight: 800; }
+  .cod-modal p  { margin: 0 0 16px; font-size: 14px; color: #a8acb8; line-height: 1.5; }
+  .cod-modal p b { color: #fff; }
+  .cod-x {
+    position: absolute; top: 14px; right: 14px; width: 30px; height: 30px;
+    border: none; background: rgba(255,255,255,0.06); color: #cfd2da;
+    border-radius: 9px; font-size: 18px; cursor: pointer; line-height: 1;
+  }
+  .cod-x:hover { background: rgba(255,255,255,0.12); }
+  .cod-input {
+    width: 100%; box-sizing: border-box; text-align: center;
+    font-size: 30px; font-weight: 700; letter-spacing: 10px;
+    padding: 14px 10px; border-radius: 12px;
+    background: #0e0f14; border: 1px solid rgba(255,255,255,0.14); color: #fff;
+    outline: none;
+  }
+  .cod-input:focus { border-color: #6c5ce7; }
+  .cod-msg { display: none; font-size: 13px; padding: 9px 12px; border-radius: 9px; margin-bottom: 12px; }
+  .cod-msg.show { display: block; }
+  .cod-msg.err { background: rgba(255,71,87,0.12); color: #ff8b95; border: 1px solid rgba(255,71,87,0.30); }
+  .cod-msg.ok  { background: rgba(46,213,115,0.12); color: #7bffb0; border: 1px solid rgba(46,213,115,0.30); }
+</style>
+<div class="cod-overlay" id="codModal" style="display:none">
+  <div class="cod-modal">
+    <button class="cod-x" id="codFechar" aria-label="Fechar">×</button>
+    <h2>Verificar código</h2>
+    <p>Enviamos um código de 6 dígitos para <b id="codEmail">seu email</b>. Digite-o abaixo.</p>
+    <div class="cod-msg err" id="codErro"></div>
+    <div class="cod-msg ok"  id="codOk"></div>
+    <input type="text" id="codInput" class="cod-input" maxlength="6"
+           placeholder="000000" inputmode="numeric" autocomplete="one-time-code">
+    <button class="btn btn-primary" id="codVerificar" type="button" style="width:100%;margin-top:14px">Verificar</button>
+    <button class="btn btn-outline" id="codReenviar"  type="button" style="width:100%;margin-top:8px">Reenviar código</button>
+  </div>
+</div>
+
+<!-- Estado de login + fluxo de teste de codigo por email -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase-config.js"></script>
 <script>
-  (async () => {
-    try {
-      if (typeof supabase === 'undefined' || !window.SUPABASE_URL ||
-          window.SUPABASE_URL.includes('SEU-PROJETO')) return;
-      const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-      const { data } = await sb.auth.getSession();
-      if (!data.session) return;
-      // Logado: esconde "Entrar", mostra o perfil.
-      const entrar = document.getElementById('navEntrar');
-      const perfil = document.getElementById('navPerfil');
-      const mob = document.getElementById('mobEntrar');
-      if (entrar) entrar.style.display = 'none';
-      if (perfil) perfil.style.display = 'inline-flex';
-      if (mob) { mob.textContent = 'Minha conta'; mob.href = 'painel.html'; }
-    } catch (_) { /* sem config/offline: mantem o botao Entrar */ }
+  (() => {
+    const configOk = typeof supabase !== 'undefined' && window.SUPABASE_URL &&
+        !window.SUPABASE_URL.includes('SEU-PROJETO');
+    const sb = configOk
+        ? window.criarClienteSupabase()
+        : null;
+
+    // ── Estado de login: troca "Entrar" pelo icone de perfil quando logado ──
+    (async () => {
+      if (!sb) return;
+      try {
+        const { data } = await sb.auth.getSession();
+        if (!data.session) return;
+        const entrar = document.getElementById('navEntrar');
+        const perfil = document.getElementById('navPerfil');
+        const mob = document.getElementById('mobEntrar');
+        if (entrar) entrar.style.display = 'none';
+        if (perfil) perfil.style.display = 'inline-flex';
+        if (mob) { mob.textContent = 'Minha conta'; mob.href = 'painel.html'; }
+      } catch (_) { /* offline: mantem o botao Entrar */ }
+    })();
+
+    // ── TESTE: envia OTP por email da conta logada e valida o codigo ────────
+    const $ = (id) => document.getElementById(id);
+    const modal = $('codModal');
+    let emailAlvo = null;
+
+    function abrirModal(email) {
+      emailAlvo = email;
+      verificando = false; verificado = false;
+      $('codEmail').textContent = email;
+      $('codInput').value = '';
+      $('codErro').classList.remove('show');
+      $('codOk').classList.remove('show');
+      modal.style.display = 'flex';
+      setTimeout(() => $('codInput').focus(), 50);
+    }
+    function fecharModal() { modal.style.display = 'none'; }
+    function msgErro(t) { $('codErro').textContent = t; $('codErro').classList.add('show'); $('codOk').classList.remove('show'); }
+    function msgOk(t)   { $('codOk').textContent = t; $('codOk').classList.add('show'); $('codErro').classList.remove('show'); }
+
+    // Envia o codigo OTP para [email]. signInWithOtp dispara o template de
+    // "Magic Link" do Supabase — que PRECISA conter {{ .Token }} para mostrar
+    // o codigo de 6 digitos (senao o email so traz o link e nao ha codigo).
+    async function enviarCodigo(email) {
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: { shouldCreateUser: false },
+      });
+      if (error) throw error;
+    }
+
+    async function aoClicarTestar() {
+      if (!sb) { alert('Supabase não configurado (supabase-config.js).'); return; }
+      const btn = $('navTestarCodigo');
+      btn.disabled = true;
+      const textoOriginal = btn.textContent;
+      btn.textContent = 'Enviando…';
+      try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user || !user.email) {
+          alert('Entre na sua conta primeiro (botão Entrar) para testar o código.');
+          return;
+        }
+        await enviarCodigo(user.email);
+        abrirModal(user.email);
+      } catch (err) {
+        alert('Não foi possível enviar o código: ' + (err.message || err));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    }
+
+    let verificando = false, verificado = false;
+    async function aoVerificar() {
+      // Evita verificar 2x (auto-submit ao completar 6 digitos + clique no
+      // botao): a 2a chamada usaria um token ja consumido e daria "invalido".
+      if (verificando || verificado) return;
+      const token = $('codInput').value.replace(/\D/g, '');
+      if (token.length !== 6) { msgErro('Digite os 6 dígitos.'); return; }
+      verificando = true;
+      const btn = $('codVerificar');
+      btn.disabled = true; btn.textContent = 'Verificando…';
+      // type:'email' é o tipo correto para o codigo enviado por signInWithOtp.
+      const { error } = await sb.auth.verifyOtp({
+        email: emailAlvo, token, type: 'email',
+      });
+      verificando = false;
+      btn.disabled = false; btn.textContent = 'Verificar';
+      if (error) {
+        // Mostra a mensagem REAL do Supabase para diagnostico.
+        msgErro('Falhou: ' + (error.message || 'código inválido ou expirado'));
+        $('codInput').value = ''; $('codInput').focus();
+        return;
+      }
+      verificado = true;
+      msgOk('Código válido! ✓ A verificação por email está funcionando.');
+    }
+
+    if ($('navTestarCodigo')) $('navTestarCodigo').addEventListener('click', aoClicarTestar);
+    if ($('codFechar'))    $('codFechar').addEventListener('click', fecharModal);
+    if ($('codVerificar')) $('codVerificar').addEventListener('click', aoVerificar);
+    if ($('codReenviar'))  $('codReenviar').addEventListener('click', async () => {
+      const btn = $('codReenviar'); btn.disabled = true; btn.textContent = 'Reenviando…';
+      try {
+        await enviarCodigo(emailAlvo);
+        verificando = false; verificado = false; // novo codigo: permite verificar de novo
+        $('codInput').value = '';
+        msgOk('Novo código enviado.');
+      }
+      catch (err) { msgErro('Falha ao reenviar: ' + (err.message || err)); }
+      finally { btn.disabled = false; btn.textContent = 'Reenviar código'; }
+    });
+    if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) fecharModal(); });
+    const inp = $('codInput');
+    if (inp) inp.addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+      if (e.target.value.length === 6) aoVerificar();
+    });
   })();
 </script>
 

@@ -6,6 +6,7 @@ import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/chave_conteudo.dart';
 import '../utils/layout.dart';
 import '../widgets/skeleton.dart';
 import 'tela_player.dart';
@@ -159,7 +160,10 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
         ),
         SliverList.builder(
           itemCount: episodios.length,
-          itemBuilder: (_, i) => _ItemEpisodio(episodio: episodios[i]),
+          itemBuilder: (_, i) => _ItemEpisodio(
+            episodio: episodios[i],
+            episodiosSerie: serie.episodios,
+          ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
       ],
@@ -281,8 +285,12 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
               sliver: SliverList.builder(
                 itemCount: episodios.length,
-                itemBuilder: (_, i) =>
-                    _ItemEpisodio(episodio: episodios[i], padH: 0, desktop: true),
+                itemBuilder: (_, i) => _ItemEpisodio(
+                  episodio: episodios[i],
+                  episodiosSerie: serie!.episodios,
+                  padH: 0,
+                  desktop: true,
+                ),
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
@@ -519,6 +527,7 @@ class _AcaoSerie extends StatelessWidget {
           MaterialPageRoute(
             builder: (_) => TelaPlayer(
               canal: retomada.episodio,
+              episodiosSerie: serie.episodios,
               posicaoInicial: retomada.posicao > Duration.zero
                   ? retomada.posicao
                   : null,
@@ -620,10 +629,11 @@ _Retomada _calcularRetomada(Serie serie, IptvProvider provider) {
 
   // 2. Episodio mais avancado ja aberto (historico). episodios ja vem
   //    ordenados por (temporada, episodio), entao o ultimo match e o maior.
-  final urlsHistorico = provider.historico.map((h) => h.canal.url).toSet();
+  final urlsHistorico =
+      provider.historico.map((h) => chaveConteudo(h.canal.url)).toSet();
   Canal? maisAvancado;
   for (final ep in serie.episodios) {
-    if (urlsHistorico.contains(ep.url)) maisAvancado = ep;
+    if (urlsHistorico.contains(chaveConteudo(ep.url))) maisAvancado = ep;
   }
   if (maisAvancado != null) {
     final idx = serie.episodios.indexOf(maisAvancado);
@@ -1002,11 +1012,13 @@ class _SeletorTemporada extends StatelessWidget {
 
 class _ItemEpisodio extends StatelessWidget {
   final Canal episodio;
+  final List<Canal> episodiosSerie;
   final double padH;
   final bool desktop;
 
   const _ItemEpisodio({
     required this.episodio,
+    required this.episodiosSerie,
     this.padH = AppSpacing.lg,
     this.desktop = false,
   });
@@ -1022,6 +1034,7 @@ class _ItemEpisodio extends StatelessWidget {
           MaterialPageRoute(
             builder: (_) => TelaPlayer(
               canal: episodio,
+              episodiosSerie: episodiosSerie,
               posicaoInicial: progresso != null
                   ? Duration(seconds: progresso.posicaoSeg)
                   : null,

@@ -52,6 +52,13 @@
             <label for="confirmar">Confirmar senha</label>
             <input type="password" id="confirmar" minlength="6" placeholder="repita a senha" autocomplete="new-password">
           </div>
+          <label class="lembrar" id="lembrar-wrap">
+            <input type="checkbox" id="lembrar" checked>
+            <span class="lembrar-box">
+              <svg class="lembrar-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>
+            </span>
+            <span class="lembrar-text">Lembrar deste dispositivo</span>
+          </label>
           <button class="btn btn-primary" id="btn-enviar" type="submit">Entrar</button>
         </form>
       </div>
@@ -67,7 +74,24 @@
                  placeholder="000000" inputmode="numeric" autocomplete="one-time-code">
         </div>
         <button class="btn btn-primary" id="btn-mfa-verificar" type="button">Verificar</button>
-        <button class="btn btn-ghost" id="btn-mfa-voltar" type="button" style="margin-top:8px;width:100%">← Usar outra conta</button>
+        <button class="btn btn-ghost" id="btn-mfa-email" type="button" style="margin-top:8px;width:100%">Perdi acesso ao MFA — entrar por email</button>
+        <button class="btn btn-ghost" id="btn-mfa-voltar" type="button" style="margin-top:4px;width:100%">← Usar outra conta</button>
+      </div>
+
+      <!-- ── Step 3: codigo por email (cadastro OU login sem MFA) ─────────── -->
+      <div id="step-codigo" style="display:none">
+        <h1 id="codigo-titulo">Confirme seu email</h1>
+        <p class="sub" id="codigo-sub">Enviamos um código de 6 dígitos para <b id="codigo-email">seu email</b>. Digite-o para ativar sua conta.</p>
+        <div class="msg error" id="codigo-erro"></div>
+        <div class="msg ok"    id="codigo-ok"></div>
+        <div class="field" style="margin-top:8px">
+          <label for="codigo-code">Código</label>
+          <input type="text" id="codigo-code" class="codigo-grande" maxlength="6"
+                 placeholder="000000" inputmode="numeric" autocomplete="one-time-code">
+        </div>
+        <button class="btn btn-primary" id="btn-codigo-verificar" type="button">Confirmar e entrar</button>
+        <button class="btn btn-ghost" id="btn-codigo-reenviar" type="button" style="margin-top:8px;width:100%">Reenviar código</button>
+        <button class="btn btn-ghost" id="btn-codigo-voltar" type="button" style="margin-top:4px;width:100%">← Voltar</button>
       </div>
 
     </div>
@@ -81,17 +105,44 @@
     let modo = 'entrar';
     let mfaChallengeId = null;
     let mfaFactorId    = null;
+    let emailCadastro  = null;
+    let emailLogin     = null;       // email usado no login (p/ fallback por email)
+    let codigoModo     = 'signup';   // 'signup' (confirmar conta) | 'login-email' (entrar sem MFA)
 
     if (location.protocol === 'file:') mostrarErroBoot('Abra via servidor HTTP (ex.: npx serve website).');
     if (typeof supabase === 'undefined') mostrarErroBoot('Supabase não carregou. Verifique sua conexão.');
     function mostrarErroBoot(t) { erro.textContent=t; erro.classList.add('show'); }
 
-    const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    const sb = window.criarClienteSupabase();
 
     /* ── Motion ──────────────────────────────────────────────────────────── */
     const motion = (typeof anime !== 'undefined') &&
       !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!motion) document.documentElement.classList.remove('js-anim');
+
+    /* ── "Lembrar deste dispositivo" ─────────────────────────────────────────
+       Grava a preferencia em hp_lembrar ANTES de autenticar (o adapter em
+       supabase-config.js decide localStorage x sessionStorage). A caixa anima
+       um "pop" e o checkmark e desenhado (stroke-dashoffset) ao alternar. */
+    (function initLembrar() {
+      const cb = $('lembrar');
+      if (!cb) return;
+      const box = document.querySelector('.lembrar-box');
+      const check = document.querySelector('.lembrar-check path');
+      const comprimento = check && check.getTotalLength ? check.getTotalLength() : 24;
+      if (check) { check.style.strokeDasharray = comprimento; check.style.strokeDashoffset = cb.checked ? 0 : comprimento; }
+      const aplicar = (animar) => {
+        localStorage.setItem('hp_lembrar', cb.checked ? '1' : '0');
+        if (!check) return;
+        if (!motion || !animar) { check.style.strokeDashoffset = cb.checked ? 0 : comprimento; return; }
+        anime.remove(box); anime.remove(check);
+        anime({ targets: box, scale: [1, 1.18, 1], duration: 340, easing: 'easeOutBack' });
+        anime({ targets: check, strokeDashoffset: cb.checked ? [comprimento, 0] : [0, comprimento],
+                duration: cb.checked ? 320 : 200, easing: 'easeOutQuad' });
+      };
+      aplicar(false);
+      cb.addEventListener('change', () => aplicar(true));
+    })();
 
     function moverIndicador(instantaneo) {
       const ind  = $('tab-indicator');
@@ -192,6 +243,7 @@
         if (modo==='entrar') {
           const { data, error } = await sb.auth.signInWithPassword({ email:emailVal, password:senhaVal });
           if (error) throw error;
+          emailLogin = emailVal; // guarda p/ o fallback "entrar por email" no MFA
 
           // Verifica se MFA e necessario
           const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
@@ -204,12 +256,14 @@
           const { data, error } = await sb.auth.signUp({ email:emailVal, password:senhaVal });
           if (error) throw error;
           if (data.session) {
+            // "Confirm email" desligado no projeto: ja logou direto.
             mostrarOk('Conta criada! Redirecionando…');
             setTimeout(() => navegar('painel.html'), 900);
           } else {
-            mostrarOk('Conta criada! Entre com seus dados.');
-            $('senha').value=''; $('confirmar').value='';
-            setTimeout(()=>setModo('entrar',{manterMsg:true}), 1400);
+            // Confirmacao por email exigida: pede o codigo enviado (type:'signup')
+            // antes de ativar a conta de fato.
+            emailCadastro = emailVal;
+            irParaStepCodigo({ email:emailVal, modo:'signup', de:'#step-auth' });
           }
         }
       } catch (err) {
@@ -275,8 +329,101 @@
       $('step-auth').style.display='';
       $('mfa-code').value='';
       $('mfa-erro').classList.remove('show');
-      if (motion) anime({ targets:'#step-auth', opacity:[0,1], translateY:[10,0], duration:300, easing:'easeOutQuad' });
+      // translateX:[-24,0] zera o offset residual deixado pela saida (senao o
+      // step-auth volta deslocado pra esquerda).
+      if (motion) anime({ targets:'#step-auth', opacity:[0,1], translateX:[-24,0], duration:320, easing:'easeOutExpo' });
+      else $('step-auth').style.transform='';
     };
+
+    /* ── Step 3: codigo por email ──────────────────────────────────────────
+       Dois modos:
+       - 'signup'      : confirma o email do cadastro (verifyOtp type:'signup').
+       - 'login-email' : entra sem o MFA (recuperacao) — signInWithOtp + verifyOtp
+                          type:'email'. Vai direto ao painel (AAL1), onde da pra
+                          remover/reconfigurar o MFA. */
+    function irParaStepCodigo({ email, modo, de }) {
+      codigoModo = modo;
+      const loginEmail = modo === 'login-email';
+      $('codigo-titulo').textContent = loginEmail ? 'Entrar por email' : 'Confirme seu email';
+      $('codigo-sub').innerHTML = loginEmail
+        ? 'Enviamos um código de 6 dígitos para <b id="codigo-email"></b>. Digite-o para entrar sem o MFA.'
+        : 'Enviamos um código de 6 dígitos para <b id="codigo-email"></b>. Digite-o para ativar sua conta.';
+      $('codigo-email').textContent = email;
+      $('btn-codigo-verificar').textContent = loginEmail ? 'Entrar' : 'Confirmar e entrar';
+      $('codigo-code').value = '';
+      $('codigo-erro').classList.remove('show');
+      $('codigo-ok').classList.remove('show');
+      codigoVerificando = false;
+      const origem = de || '#step-auth';
+      const trocar = () => {
+        document.querySelector(origem).style.display='none';
+        $('step-codigo').style.display='';
+        if (motion) anime({ targets:'#step-codigo', opacity:[0,1], translateX:[24,0], duration:320, easing:'easeOutExpo', complete:()=>$('codigo-code').focus() });
+        else $('codigo-code').focus();
+      };
+      if (motion) anime({ targets:origem, opacity:[1,0], translateX:[0,-24], duration:220, easing:'easeInQuad', complete:trocar });
+      else trocar();
+    }
+
+    let codigoVerificando = false;
+    $('btn-codigo-verificar').onclick = async () => {
+      if (codigoVerificando) return; // evita verificar 2x e consumir o token
+      const code = $('codigo-code').value.replace(/\D/g,'');
+      if (code.length!==6) { $('codigo-erro').textContent='Digite os 6 dígitos.'; $('codigo-erro').classList.add('show'); return; }
+      codigoVerificando = true;
+      const btn=$('btn-codigo-verificar'); const txt=btn.textContent;
+      btn.disabled=true; btn.textContent='Verificando…';
+      const { error } = codigoModo === 'login-email'
+        ? await sb.auth.verifyOtp({ email:emailLogin,    token:code, type:'email'  })
+        : await sb.auth.verifyOtp({ email:emailCadastro, token:code, type:'signup' });
+      codigoVerificando = false;
+      btn.disabled=false; btn.textContent=txt;
+      if (error) {
+        $('codigo-erro').textContent = traduzErro(error.message) || 'Código inválido ou expirado.';
+        $('codigo-erro').classList.add('show'); $('codigo-ok').classList.remove('show');
+        $('codigo-code').value=''; $('codigo-code').focus();
+        return;
+      }
+      $('codigo-ok').textContent = codigoModo === 'login-email' ? 'Verificado! Entrando…' : 'Conta confirmada! Entrando…';
+      $('codigo-ok').classList.add('show');
+      setTimeout(()=>navegar('painel.html'), 800); // login-email entra em AAL1 (sem re-checar MFA)
+    };
+
+    $('btn-codigo-reenviar').onclick = async () => {
+      const btn=$('btn-codigo-reenviar'); btn.disabled=true; btn.textContent='Reenviando…';
+      const { error } = codigoModo === 'login-email'
+        ? await sb.auth.signInWithOtp({ email:emailLogin, options:{ shouldCreateUser:false } })
+        : await sb.auth.resend({ type:'signup', email:emailCadastro });
+      btn.disabled=false; btn.textContent='Reenviar código';
+      if (error) { $('codigo-erro').textContent='Falha ao reenviar: '+error.message; $('codigo-erro').classList.add('show'); }
+      else { $('codigo-code').value=''; codigoVerificando=false; $('codigo-ok').textContent='Novo código enviado.'; $('codigo-ok').classList.add('show'); $('codigo-erro').classList.remove('show'); }
+    };
+
+    $('btn-codigo-voltar').onclick = async () => {
+      $('step-codigo').style.display='none';
+      if (codigoModo === 'login-email') await sb.auth.signOut().catch(()=>{});
+      $('step-auth').style.display='';
+      setModo(codigoModo === 'login-email' ? 'entrar' : 'criar');
+      if (motion) anime({ targets:'#step-auth', opacity:[0,1], translateX:[-24,0], duration:320, easing:'easeOutExpo' });
+      else $('step-auth').style.transform='';
+    };
+
+    /* ── Fallback: perdi o MFA, entrar por email ───────────────────────────── */
+    $('btn-mfa-email').onclick = async () => {
+      const btn=$('btn-mfa-email'); const txt=btn.textContent;
+      btn.disabled=true; btn.textContent='Enviando código…';
+      $('mfa-erro').classList.remove('show');
+      const { error } = await sb.auth.signInWithOtp({ email:emailLogin, options:{ shouldCreateUser:false } });
+      btn.disabled=false; btn.textContent=txt;
+      if (error) { $('mfa-erro').textContent='Não foi possível enviar o código: '+error.message; $('mfa-erro').classList.add('show'); return; }
+      irParaStepCodigo({ email:emailLogin, modo:'login-email', de:'#step-mfa' });
+    };
+
+    // Auto-submit ao completar 6 dígitos
+    $('codigo-code').addEventListener('input', e => {
+      e.target.value=e.target.value.replace(/\D/g,'').slice(0,6);
+      if (e.target.value.length===6) $('btn-codigo-verificar').click();
+    });
 
     function traduzErro(m) {
       const t=(m||'').toLowerCase();

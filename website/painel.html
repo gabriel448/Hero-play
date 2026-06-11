@@ -110,21 +110,7 @@
             </div>
             <div class="msg error" id="erro-senha"></div>
             <div class="msg ok"    id="ok-senha"></div>
-            <form id="form-senha" autocomplete="off">
-              <div class="field">
-                <label for="senha-atual">Senha atual</label>
-                <input type="password" id="senha-atual" placeholder="sua senha atual" autocomplete="current-password" required>
-              </div>
-              <div class="field">
-                <label for="nova-senha">Nova senha</label>
-                <input type="password" id="nova-senha" placeholder="mínimo 6 caracteres" minlength="6" autocomplete="new-password" required>
-              </div>
-              <div class="field">
-                <label for="confirmar-senha">Confirmar nova senha</label>
-                <input type="password" id="confirmar-senha" placeholder="repita a nova senha" autocomplete="new-password" required>
-              </div>
-              <button class="btn btn-primary" type="submit" id="btn-salvar-senha">Atualizar senha</button>
-            </form>
+            <button class="btn btn-primary" id="btn-abrir-trocar-senha" type="button" style="width:100%;">Trocar senha</button>
           </div>
 
           <!-- Trocar email -->
@@ -249,6 +235,73 @@
     </div>
   </div>
 
+  <!-- ── Modal: verificar identidade (AAL2) p/ trocar email ────────────────── -->
+  <div class="modal-overlay" id="modal-verificar-overlay" aria-hidden="true">
+    <div class="modal-card" id="modal-verificar-card" role="dialog" aria-modal="true" style="text-align:center;position:relative;">
+      <button class="btn btn-ghost modal-fechar" id="btn-fechar-verificar" type="button" aria-label="Fechar" style="position:absolute;top:12px;right:12px;">✕</button>
+      <h2 style="font-size:20px;font-weight:800;margin:4px 0 6px;">Confirme com o MFA</h2>
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 auto 18px;max-width:320px;line-height:1.55;">
+        Sua conta tem MFA ativo. Digite o código do app autenticador para autorizar esta alteração.
+      </p>
+      <div class="msg error" id="erro-verificar" style="text-align:left;"></div>
+      <div class="otp-wrap" id="otp-verificar-wrap" data-submit="btn-confirmar-verificar" style="justify-content:center;">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+      </div>
+      <div class="mfa-acoes" style="margin-top:18px;justify-content:center;">
+        <button class="btn btn-outline" id="btn-cancelar-verificar"  type="button">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirmar-verificar" type="button" style="flex:1;">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Modal: trocar senha (2 passos: MFA → nova senha) ──────────────────── -->
+  <div class="modal-overlay" id="modal-senha-overlay" aria-hidden="true">
+    <div class="modal-card" id="modal-senha-card" role="dialog" aria-modal="true" style="text-align:center;position:relative;overflow:hidden;">
+      <button class="btn btn-ghost modal-fechar" id="btn-fechar-senha" type="button" aria-label="Fechar" style="position:absolute;top:12px;right:12px;z-index:2;">✕</button>
+      <div id="senha-conteudo" style="position:relative;">
+
+        <!-- Passo 1: código do MFA -->
+        <div id="senha-step-mfa">
+          <h2 style="font-size:20px;font-weight:800;margin:4px 0 6px;">Confirme com o MFA</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 auto 18px;max-width:320px;line-height:1.55;">
+            Digite o código do seu app autenticador para autorizar a troca de senha.
+          </p>
+          <div class="msg error" id="erro-senha-mfa" style="text-align:left;"></div>
+          <div class="otp-wrap" id="otp-senha-wrap" data-submit="btn-senha-verificar" style="justify-content:center;">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+          </div>
+          <button class="btn btn-primary" id="btn-senha-verificar" type="button" style="width:100%;margin-top:18px;">Confirmar</button>
+        </div>
+
+        <!-- Passo 2: nova senha -->
+        <div id="senha-step-nova" style="display:none">
+          <div id="senha-check" style="width:46px;height:46px;margin:2px auto 12px;border-radius:50%;background:rgba(67,160,71,.16);display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path id="senha-check-path" d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="#43A047" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <h2 style="font-size:20px;font-weight:800;margin:0 0 6px;">Nova senha</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 auto 18px;max-width:320px;line-height:1.55;">
+            Defina e confirme sua nova senha.
+          </p>
+          <div class="msg error" id="erro-senha-nova" style="text-align:left;"></div>
+          <input type="password" id="nova-senha" placeholder="nova senha (mín. 6)" minlength="6" autocomplete="new-password" style="text-align:center;">
+          <input type="password" id="confirmar-senha" placeholder="confirmar nova senha" autocomplete="new-password" style="text-align:center;margin-top:10px;">
+          <button class="btn btn-primary" id="btn-senha-salvar" type="button" style="width:100%;margin-top:18px;">Salvar nova senha</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- ── Modal: Configurar MFA ─────────────────────────────────────────────── -->
   <div class="modal-overlay" id="modal-mfa-overlay" aria-hidden="true">
     <div class="modal-card modal-mfa" id="modal-mfa-card" role="dialog" aria-modal="true" aria-labelledby="modal-mfa-titulo">
@@ -334,7 +387,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script>
-    const sb  = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    const sb  = window.criarClienteSupabase();
     const $   = (id) => document.getElementById(id);
     const erroG = $('msg-erro'), okG = $('msg-ok');
 
@@ -555,37 +608,112 @@
 
     /* ── Configuracoes ───────────────────────────────────────────────────── */
 
-    // Trocar senha — exige verificação da senha atual antes de alterar
-    $('form-senha').addEventListener('submit', async e => {
-      e.preventDefault();
-      const btn      = $('btn-salvar-senha');
-      const atual    = $('senha-atual').value;
-      const nova     = $('nova-senha').value;
-      const conf     = $('confirmar-senha').value;
-      const erroEl   = $('erro-senha');
+    /* ── Trocar senha (modal 2 passos: MFA → nova senha) ─────────────────────
+       Com MFA ativo: passo 1 = codigo TOTP (eleva pra AAL2); ao verificar, o
+       modal SE TRANSFORMA (slide + altura + check) no passo 2 = nova senha.
+       Sem MFA: abre direto no passo 2 (updateUser funciona em AAL1). */
+    $('btn-abrir-trocar-senha').onclick = abrirModalSenha;
 
-      erroEl.classList.remove('show');
-      if (nova !== conf)   { mostrarErro(erroEl,'As senhas não coincidem.'); return; }
-      if (nova === atual)  { mostrarErro(erroEl,'A nova senha deve ser diferente da atual.'); return; }
+    async function abrirModalSenha() {
+      $('erro-senha').classList.remove('show'); $('ok-senha').classList.remove('show');
+      $('erro-senha-mfa').classList.remove('show'); $('erro-senha-nova').classList.remove('show');
+      clearOtp($('otp-senha-wrap'));
+      $('nova-senha').value=''; $('confirmar-senha').value='';
+      $('senha-conteudo').style.height='';
 
-      btn.disabled=true; btn.textContent='Verificando…';
-
-      // 1) Confirma identidade com a senha atual
-      const { error: authErr } = await sb.auth.signInWithPassword({
-        email: usuario.email, password: atual,
-      });
-      if (authErr) {
-        btn.disabled=false; btn.textContent='Atualizar senha';
-        mostrarErro(erroEl,'Senha atual incorreta.');
-        return;
+      const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+      const precisaMfa = aal && aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2';
+      if (precisaMfa && !mfaFactorId) {
+        const { data } = await sb.auth.mfa.listFactors();
+        mfaFactorId = data?.totp?.find(f => f.status === 'verified')?.id || null;
       }
+      const comMfa = precisaMfa && !!mfaFactorId;
+      $('senha-step-mfa').style.display  = comMfa ? '' : 'none';
+      $('senha-step-nova').style.display = comMfa ? 'none' : '';
+      $('senha-check').style.display     = comMfa ? 'flex' : 'none';
 
-      // 2) Só então atualiza
-      btn.textContent='Atualizando…';
+      const overlay = $('modal-senha-overlay'), card = $('modal-senha-card');
+      overlay.classList.add('aberto'); overlay.setAttribute('aria-hidden','false');
+      const focar = () => comMfa ? focusOtp($('otp-senha-wrap')) : $('nova-senha').focus();
+      if (!motion) { focar(); return; }
+      anime({ targets: overlay, opacity:[0,1], duration:200, easing:'linear' });
+      anime({ targets: card, opacity:[0,1], translateY:[20,0], scale:[0.96,1], duration:320, easing:'easeOutExpo', complete: focar });
+      if (comMfa) anime({ targets:'#otp-senha-wrap .otp-digit', opacity:[0,1], translateY:[6,0],
+                          delay:anime.stagger(28,{start:160}), duration:200, easing:'easeOutQuad' });
+    }
+
+    function fecharModalSenha(cb) {
+      const overlay = $('modal-senha-overlay'), card = $('modal-senha-card');
+      if (!motion) { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); return; }
+      anime({ targets:card, opacity:[1,0], translateY:[0,12], scale:[1,0.96], duration:240, easing:'easeInQuad' });
+      anime({ targets:overlay, opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete:()=>{ overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); } });
+    }
+
+    function animarCheck() {
+      const p = $('senha-check-path');
+      if (!p) return;
+      const len = p.getTotalLength ? p.getTotalLength() : 24;
+      p.style.strokeDasharray = len;
+      if (!motion) { p.style.strokeDashoffset = 0; return; }
+      p.style.strokeDashoffset = len;
+      anime.remove(p); anime.remove('#senha-check');
+      anime({ targets:'#senha-check', scale:[0.6,1], opacity:[0,1], duration:340, easing:'easeOutBack' });
+      anime({ targets:p, strokeDashoffset:[len,0], duration:380, delay:80, easing:'easeOutQuad' });
+    }
+
+    // Transformacao animada: passo MFA → passo nova senha (slide + altura).
+    function irPassoNovaSenha() {
+      const cont = $('senha-conteudo'), de = $('senha-step-mfa'), pa = $('senha-step-nova');
+      if (!motion) { de.style.display='none'; pa.style.display=''; animarCheck(); $('nova-senha').focus(); return; }
+      const h0 = cont.offsetHeight;
+      anime({ targets: de, opacity:[1,0], translateX:[0,-26], duration:200, easing:'easeInQuad', complete:()=>{
+        de.style.display='none'; pa.style.display=''; pa.style.opacity='0';
+        const h1 = cont.offsetHeight;
+        cont.style.height = h0+'px';
+        cont.style.willChange = 'height'; // hint p/ o browser preparar a transicao
+        requestAnimationFrame(()=>{
+          anime({ targets: cont, height:[h0,h1], duration:320, easing:'easeOutExpo',
+                  complete:()=>{ cont.style.height=''; cont.style.willChange=''; } });
+          anime({ targets: pa, opacity:[0,1], translateX:[26,0], duration:340, easing:'easeOutExpo', complete:()=>$('nova-senha').focus() });
+          animarCheck();
+        });
+      }});
+    }
+
+    $('btn-senha-verificar').onclick = async () => {
+      const code = getOtpValue($('otp-senha-wrap'));
+      if (code.length !== 6) { mostrarErro($('erro-senha-mfa'), 'Digite os 6 dígitos.'); return; }
+      const btn = $('btn-senha-verificar'); btn.disabled=true; btn.textContent='Verificando…';
+      try {
+        const { data: ch, error: chErr } = await sb.auth.mfa.challenge({ factorId: mfaFactorId });
+        if (chErr) throw chErr;
+        const { error: verErr } = await sb.auth.mfa.verify({ factorId: mfaFactorId, challengeId: ch.id, code });
+        if (verErr) throw verErr;
+        irPassoNovaSenha();
+      } catch(e) {
+        mostrarErro($('erro-senha-mfa'), traduzErroMFA(e.message ?? ''));
+        clearOtp($('otp-senha-wrap')); focusOtp($('otp-senha-wrap'));
+      } finally { btn.disabled=false; btn.textContent='Confirmar'; }
+    };
+
+    $('btn-senha-salvar').onclick = async () => {
+      const nova = $('nova-senha').value, conf = $('confirmar-senha').value;
+      const erroEl = $('erro-senha-nova');
+      erroEl.classList.remove('show');
+      if (nova.length < 6) { mostrarErro(erroEl,'A senha precisa ter ao menos 6 caracteres.'); return; }
+      if (nova !== conf)   { mostrarErro(erroEl,'As senhas não coincidem.'); return; }
+      const btn = $('btn-senha-salvar'); btn.disabled=true; btn.textContent='Salvando…';
       const { error } = await sb.auth.updateUser({ password: nova });
-      btn.disabled=false; btn.textContent='Atualizar senha';
-      if (error) mostrarErro(erroEl, traduzErro(error.message));
-      else       { $('form-senha').reset(); mostrarOk($('ok-senha'),'Senha atualizada com sucesso!'); }
+      btn.disabled=false; btn.textContent='Salvar nova senha';
+      if (error) { mostrarErro(erroEl, traduzErro(error.message)); return; }
+      fecharModalSenha(() => mostrarOk($('ok-senha'), 'Senha atualizada com sucesso!'));
+    };
+
+    $('btn-fechar-senha').onclick = () => fecharModalSenha();
+    $('modal-senha-overlay').addEventListener('click', e => { if (e.target === $('modal-senha-overlay')) fecharModalSenha(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && $('modal-senha-overlay').classList.contains('aberto')) fecharModalSenha();
     });
 
     // Trocar email — exige senha atual + confirmação nos dois endereços
@@ -611,7 +739,12 @@
         return;
       }
 
-      // 2) Solicita a troca (Supabase envia confirmação para ambos os emails)
+      // 2) Com MFA ativo, o Supabase exige AAL2 — pede o codigo do MFA.
+      btn.textContent='Verificando…';
+      const elevado = await garantirAAL2();
+      if (!elevado) { btn.disabled=false; btn.textContent='Solicitar troca'; return; }
+
+      // 3) Solicita a troca (Supabase envia confirmação para ambos os emails)
       btn.textContent='Solicitando…';
       const { error } = await sb.auth.updateUser({ email: novoEm });
       btn.disabled=false; btn.textContent='Solicitar troca';
@@ -927,6 +1060,70 @@
       if (t.includes('already enrolled') || t.includes('already exists')) return 'MFA já está configurado nesta conta. Recarregue a página.';
       return traduzErro(m);
     }
+
+    /* ── Verificacao AAL2 (trocar senha/email com MFA ativo) ──────────────────
+       O Supabase exige sessao AAL2 para updateUser(email/senha) quando ha MFA.
+       Email/senha sozinhos dao AAL1 — so o codigo do MFA (TOTP) eleva pra AAL2.
+       garantirAAL2() resolve true se ja esta AAL2 ou nao ha MFA; senao abre o
+       modal e pede o codigo. */
+    let _resolverAAL2 = null;
+    async function garantirAAL2() {
+      const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (!aal || aal.nextLevel !== 'aal2') return true;   // MFA nao exigido
+      if (aal.currentLevel === 'aal2') return true;        // ja elevado nesta sessao
+      if (!mfaFactorId) {
+        const { data } = await sb.auth.mfa.listFactors();
+        mfaFactorId = data?.totp?.find(f => f.status === 'verified')?.id || null;
+      }
+      if (!mfaFactorId) return true;
+      return await new Promise((resolve) => { _resolverAAL2 = resolve; abrirModalVerificar(); });
+    }
+
+    function abrirModalVerificar() {
+      $('erro-verificar').classList.remove('show');
+      clearOtp($('otp-verificar-wrap'));
+      const overlay = $('modal-verificar-overlay'), card = $('modal-verificar-card');
+      overlay.classList.add('aberto'); overlay.setAttribute('aria-hidden','false');
+      if (!motion) { focusOtp($('otp-verificar-wrap')); return; }
+      anime({ targets: overlay, opacity:[0,1], duration:200, easing:'linear' });
+      anime({ targets: card, opacity:[0,1], translateY:[20,0], scale:[0.96,1], duration:320, easing:'easeOutExpo' });
+      anime({ targets:'#otp-verificar-wrap .otp-digit', opacity:[0,1], translateY:[6,0],
+              delay:anime.stagger(28,{start:200}), duration:200, easing:'easeOutQuad',
+              complete:()=>focusOtp($('otp-verificar-wrap')) });
+    }
+    function fecharModalVerificar(cb) {
+      const overlay = $('modal-verificar-overlay'), card = $('modal-verificar-card');
+      if (!motion) { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); return; }
+      anime({ targets:card, opacity:[1,0], translateY:[0,12], scale:[1,0.96], duration:240, easing:'easeInQuad' });
+      anime({ targets:overlay, opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete:()=>{ overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if(cb) cb(); } });
+    }
+    function cancelarVerificar() {
+      const r = _resolverAAL2; _resolverAAL2 = null;
+      fecharModalVerificar(() => r && r(false));
+    }
+    $('btn-fechar-verificar').onclick   = cancelarVerificar;
+    $('btn-cancelar-verificar').onclick = cancelarVerificar;
+    $('modal-verificar-overlay').addEventListener('click', e => { if (e.target === $('modal-verificar-overlay')) cancelarVerificar(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && $('modal-verificar-overlay').classList.contains('aberto')) cancelarVerificar();
+    });
+    $('btn-confirmar-verificar').onclick = async () => {
+      const code = getOtpValue($('otp-verificar-wrap'));
+      if (code.length !== 6) { mostrarErro($('erro-verificar'), 'Digite os 6 dígitos.'); return; }
+      const btn = $('btn-confirmar-verificar'); btn.disabled = true; btn.textContent = 'Verificando…';
+      try {
+        const { data: ch, error: chErr } = await sb.auth.mfa.challenge({ factorId: mfaFactorId });
+        if (chErr) throw chErr;
+        const { error: verErr } = await sb.auth.mfa.verify({ factorId: mfaFactorId, challengeId: ch.id, code });
+        if (verErr) throw verErr;
+        const r = _resolverAAL2; _resolverAAL2 = null;
+        fecharModalVerificar(() => r && r(true));
+      } catch(e) {
+        mostrarErro($('erro-verificar'), traduzErroMFA(e.message ?? ''));
+        clearOtp($('otp-verificar-wrap')); focusOtp($('otp-verificar-wrap'));
+      } finally { btn.disabled = false; btn.textContent = 'Confirmar'; }
+    };
 
     // Remover conta — placeholder
     $('btn-remover-conta').onclick = async () => {

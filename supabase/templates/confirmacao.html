@@ -14,7 +14,7 @@
     <tr>
       <td align="center" style="padding-bottom:24px;">
         <table cellpadding="0" cellspacing="0"><tr>
-          <td style="background:#1A1815;border:1px solid #2A2622;border-radius:10px;width:38px;height:38px;text-align:center;vertical-align:middle;font-size:20px;color:#E53935;">▶</td>
+          <td style="background:#1A1815;border:1px solid #2A2622;border-radius:10px;width:38px;height:38px;text-align:center;vertical-align:middle;"><div style="display:inline-block;width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-left:12px solid #E53935;"></div></td>
           <td style="padding-left:10px;font-size:16px;font-weight:700;color:#F5F1EC;white-space:nowrap;">Hero Play</td>
         </tr></table>
       </td>
@@ -32,32 +32,31 @@
         <!-- Conteúdo -->
         <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="padding:32px 36px;">
+            <td style="padding:32px 36px;text-align:center;">
 
               <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;color:#F5F1EC;line-height:1.3;">
                 Confirme seu email
               </h1>
-              <p style="margin:0 0 24px;font-size:14px;color:#A8A09A;line-height:1.6;">
-                Obrigado por criar sua conta no Hero Play! Clique no botão abaixo para confirmar seu endereço de email e ativar o acesso.
+              <p style="margin:0 0 28px;font-size:14px;color:#A8A09A;line-height:1.6;">
+                Obrigado por criar sua conta no Hero Play! Use o código abaixo para confirmar seu email e ativar o acesso.
               </p>
 
-              <!-- CTA -->
+              <!-- Código em destaque (SEM link clicavel: scanners de email
+                   pre-clicam links e consumiriam o token, invalidando o codigo) -->
               <table cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center">
-                    <a href="{{ .ConfirmationURL }}"
-                       style="display:inline-block;background:#E53935;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:10px;letter-spacing:0.2px;">
-                      Confirmar email
-                    </a>
+                    <div style="display:inline-block;background:#252220;border:1px solid #3A3530;border-radius:12px;padding:20px 40px;">
+                      <span style="font-size:36px;font-weight:800;color:#F5F1EC;letter-spacing:12px;font-family:'Courier New',monospace;">
+                        {{ .Token }}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               </table>
 
               <p style="margin:24px 0 0;font-size:12px;color:#5C5650;line-height:1.6;">
-                Se você não criou uma conta no Hero Play, ignore este email com segurança — nenhuma ação será tomada.
-              </p>
-              <p style="margin:8px 0 0;font-size:12px;color:#5C5650;">
-                O link expira em 24 horas.
+                Este código expira em 1 hora. Se você não criou uma conta no Hero Play, ignore este email com segurança.
               </p>
 
             </td>

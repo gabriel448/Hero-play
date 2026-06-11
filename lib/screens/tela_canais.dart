@@ -866,9 +866,11 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                   ),
                 ),
               ),
-              ...nomes.map((nome) {
+              ...nomes.asMap().entries.map((e) {
+                final i = e.key;
+                final nome = e.value;
                 final ativo = nome == widget.categoriaAtiva;
-                return Padding(
+                final item = Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
                   child: _ItemCategoriaTablet(
@@ -878,6 +880,13 @@ class _LayoutTabletCanaisState extends State<_LayoutTabletCanais> {
                     onTap: () => widget.onCategoriaSelecionada(nome),
                   ),
                 );
+                // Stagger nas primeiras (visiveis); as demais sem animacao.
+                return i < _kCategoriasAnimadas
+                    ? AnimadoEntrada(
+                        delay: Duration(milliseconds: 40 * i),
+                        child: item,
+                      )
+                    : item;
               }),
             ],
           ),
@@ -1299,6 +1308,10 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
     provider.registrarVisualizacao(canal);
     if (canal.tipo == TipoCanal.aoVivo) {
       provider.selecionarCanalDesktop(canal);
+      // Forca o rebuild do layout (o watch nao estava propagando a troca para
+      // a 3a coluna nesta subarvore). Com a col3 sem `const`, isto a recria e
+      // ela passa a tocar o canal recem-selecionado.
+      if (mounted) setState(() {});
     } else {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => TelaPlayer(canal: canal)),
@@ -1466,9 +1479,11 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                   ),
                 ),
               ),
-              ...nomes.map((nome) {
+              ...nomes.asMap().entries.map((e) {
+                final i = e.key;
+                final nome = e.value;
                 final ativo = nome == widget.categoriaAtiva;
-                return Padding(
+                final item = Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
                   child: _ItemCategoriaTablet(
@@ -1478,6 +1493,13 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
                     onTap: () => widget.onCategoriaSelecionada(nome),
                   ),
                 );
+                // Stagger nas primeiras (visiveis); as demais sem animacao.
+                return i < _kCategoriasAnimadas
+                    ? AnimadoEntrada(
+                        delay: Duration(milliseconds: 40 * i),
+                        child: item,
+                      )
+                    : item;
               }),
             ],
           ),
@@ -1510,7 +1532,9 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
         // ── Coluna 3: player embutido + EPG ─────────────────────────────────
         SizedBox(
           width: _col3Width,
-          child: const PlayerEmbutidoDesktop(),
+          // NAO usar const: o pai rebuilda no notifyListeners (watch) e precisa
+          // propagar a troca de canal para o player embutido (canalSelecionadoDesktop).
+          child: PlayerEmbutidoDesktop(key: const ValueKey('player_embutido')),
         ),
       ],
     );

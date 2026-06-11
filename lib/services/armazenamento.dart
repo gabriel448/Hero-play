@@ -6,6 +6,7 @@ import '../models/lista_m3u.dart';
 import '../models/perfil.dart';
 import '../models/programa.dart';
 import '../models/progresso_canal.dart';
+import '../utils/chave_conteudo.dart';
 
 /// Camada de persistencia local usando Hive (banco NoSQL leve).
 ///
@@ -307,15 +308,15 @@ class Armazenamento {
   // ===== FAVORITOS (por perfil) =====
 
   Future<void> adicionarFavorito(Canal canal) async {
-    await _boxFavoritos?.put(canal.id, canal.toMap());
+    await _boxFavoritos?.put(chaveBiblioteca(canal), canal.toMap());
   }
 
-  Future<void> removerFavorito(String idCanal) async {
-    await _boxFavoritos?.delete(idCanal);
+  Future<void> removerFavorito(Canal canal) async {
+    await _boxFavoritos?.delete(chaveBiblioteca(canal));
   }
 
-  bool ehFavorito(String idCanal) =>
-      _boxFavoritos?.containsKey(idCanal) ?? false;
+  bool ehFavorito(Canal canal) =>
+      _boxFavoritos?.containsKey(chaveBiblioteca(canal)) ?? false;
 
   List<Canal> carregarFavoritos() {
     final box = _boxFavoritos;
@@ -332,7 +333,7 @@ class Armazenamento {
     if (box == null) return;
     final agora = DateTime.now();
     final item = CanalAssistido(canal: canal, ultimaVistaEm: agora);
-    await box.put(canal.id, item.toMap());
+    await box.put(chaveBiblioteca(canal), item.toMap());
 
     // Mantemos no maximo _limiteHistorico itens - apaga os mais antigos.
     if (box.length > _limiteHistorico) {
@@ -370,13 +371,13 @@ class Armazenamento {
   // ===== PROGRESSO DE REPRODUCAO (por perfil) =====
 
   Future<void> salvarProgresso(ProgressoCanal p) async =>
-      _boxProgressos?.put(p.url, p.toMap());
+      _boxProgressos?.put(chaveConteudo(p.url), p.toMap());
 
   Future<void> removerProgresso(String url) async =>
-      _boxProgressos?.delete(url);
+      _boxProgressos?.delete(chaveConteudo(url));
 
   ProgressoCanal? obterProgresso(String url) {
-    final m = _boxProgressos?.get(url);
+    final m = _boxProgressos?.get(chaveConteudo(url));
     return m != null ? ProgressoCanal.fromMap(m as Map) : null;
   }
 

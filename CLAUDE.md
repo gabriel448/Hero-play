@@ -2,6 +2,36 @@
 
 Orientações para o Claude Code (e qualquer dev) ao trabalhar neste repositório.
 
+## ⛔ REGRA ABSOLUTA — toda mudança vale para as 3 plataformas
+
+**Toda alteração deve funcionar e ser verificada em CELULAR, TABLET e DESKTOP**
+(Android phone, Android/tablet e Windows). Sem exceções.
+
+- O app é **um único código Dart compartilhado**; o layout decide por
+  `formFactor(context)` / `isPhone`/`isTablet`/`isDesktop`
+  ([utils/layout.dart](lib/utils/layout.dart)). Uma mudança na lógica entra nos
+  três automaticamente — mas a UI **não**: cada layout (phone, tablet, desktop)
+  precisa receber a feature.
+- **Proibido** entregar um efeito/feature só em um form factor (ex.: animar uma
+  lista só no phone e deixar o sidebar do tablet/desktop sem). Se um layout não
+  puder ter exatamente o mesmo, faça o equivalente — e diga explicitamente o que
+  ficou diferente e por quê.
+- Telas de canais ao vivo têm layouts distintos por device (lista no phone,
+  sidebar+painel no tablet/desktop, 3 colunas no desktop). Ao mexer nelas,
+  cubra **todos** os caminhos em [tela_canais.dart](lib/screens/tela_canais.dart).
+- Ao concluir, **buildar e testar nos 3** quando possível (APK no aparelho +
+  Windows via cmake — ver "Cuidados de release"). Nunca assuma que "como é
+  compartilhado, já está nos três" sem conferir o layout de cada um.
+
+## ⛔ REGRA ABSOLUTA — não remover botões/funcionalidades sem perguntar
+
+**Nunca remova um botão, opção ou funcionalidade existente sem antes perguntar
+ao usuário de forma clara.** Mesmo que pareça redundante ou que "atrapalhe" a
+mudança pedida, pergunte primeiro e explique o porquê — a decisão é do usuário.
+Ao alterar telas (especialmente o player), preserve as opções já existentes
+(ex.: minimizar/fullscreen, CC/legendas, volume, copiar URL) a menos que o
+usuário autorize remover.
+
 ## O que é
 
 **Hero Play** — player IPTV multiplataforma em Flutter (Android, Windows, tablet)
@@ -85,6 +115,29 @@ website/           # Landing page + login.html + painel.html (Vercel)
 
 ## Animação e ferramentas (MCP / skills) — SEMPRE
 
+### ⛔ REGRA ABSOLUTA — toda animação a 60 fps
+
+**Toda animação (app Flutter E site) deve rodar a 60 fps.** O caminho para isso
+é animar apenas o que o **compositor (GPU)** resolve, sem reflow/repaint por frame:
+
+- **Anime só `transform` (translate/scale/rotate) e `opacity`.** Esses ficam numa
+  camada de GPU e não disparam layout. **Evite animar propriedades de layout** —
+  `width`/`height`/`top`/`left`/`margin`/`padding` no **web**; no Flutter, evite
+  rebuildar/relayoutar a subárvore por frame.
+- **Web (anime.js):** já roda em `requestAnimationFrame` (vsync). Use `transform`
+  + `opacity`; adicione `will-change: transform, opacity` (e `backface-visibility:
+  hidden`) nos elementos animados para promovê-los a camada GPU. Se for inevitável
+  animar layout (ex.: `height` num modal pequeno), mantenha curto, em subárvore
+  pequena, e ligue `will-change` só durante a animação (e limpe ao terminar).
+- **Flutter:** prefira `AnimatedBuilder`/`Transform`/`Opacity`/`FadeTransition`/
+  `SlideTransition`; mantenha o `builder` leve (sem trabalho pesado por frame) e
+  anime só a parte que muda (use `child:` para não reconstruir o resto). O app
+  renderiza no refresh do device (60/120 Hz) — não bloqueie a UI thread (trabalho
+  pesado vai pra `compute()`/isolate).
+- **Não** introduza jank: nada de animar `box-shadow`/`filter`/cores em listas
+  grandes, nem `setState` por frame em árvores caras. Confira que a animação está
+  suave (sem travos) antes de concluir.
+
 Ao trabalhar com **animação** ou **qualquer feature de Flutter**, use sempre,
 sem precisar ser solicitado:
 
@@ -113,6 +166,7 @@ flutter analyze                 # lints (flutter_lints)
 flutter run                     # dev
 flutter run --release -d <id>   # instala release num aparelho
 flutter build apk --release     # APK assinado com keystore de release
+flutter build windows --release # Windows (build direto)
 .\build_installer.ps1           # Windows: build + instalador Inno Setup
 
 # Supabase (requer Supabase CLI)
@@ -140,6 +194,23 @@ Sempre rodar `flutter analyze` após mudanças. Não há suíte de testes releva
   é versionado. Guardar junto com o keystore.
 - A Edge Function `supabase/functions/iptv/` precisa ser deployed no projeto
   Supabase remoto: `supabase functions deploy iptv`.
+- **Build Windows — gotcha do `cpp_client_wrapper`:** sem o Modo Desenvolvedor
+  do Windows, os `.cc` em `windows/flutter/ephemeral/cpp_client_wrapper/` ficam
+  faltando/quebrados e o `flutter build windows` falha com
+  `C1083: ... .cc: No such file or directory`.
+  **Workaround (ORDEM IMPORTA):** copiar os fontes reais ANTES e só então rodar
+  o `flutter build windows` — com os `.cc` presentes ele passa direto E
+  recompila o Dart (`app.so` fresco):
+  ```powershell
+  Copy-Item "C:\src\flutter\bin\cache\artifacts\engine\windows-x64\cpp_client_wrapper\*" `
+    "windows\flutter\ephemeral\cpp_client_wrapper\" -Recurse -Force
+  flutter build windows --release
+  ```
+  ⚠️ **NÃO** rodar `flutter build windows` primeiro: ele aborta no compile do
+  C++ **antes** do `flutter assemble`, e um `cmake --build` posterior reaproveita
+  o `app.so` ANTIGO → o desktop sai com Dart desatualizado (bug ja visto).
+  Conferir sempre a data de `build\windows\x64\runner\Release\data\app.so`.
+  Saída: `build\windows\x64\runner\Release\` (pasta portátil com `iptv_app.exe`).
 
 ## Ao adicionar uma feature
 
@@ -148,7 +219,10 @@ Sempre rodar `flutter analyze` após mudanças. Não há suíte de testes releva
 3. Estado/ação? → método no provider apropriado (`IptvProvider` na maioria dos
    casos) + `notifyListeners()`.
 4. UI? → `screens/` ou `widgets/`, consumindo o provider com `watch`/`read`.
+   **Cubra os 3 layouts** (phone, tablet, desktop) — ver REGRA ABSOLUTA no topo.
 5. `flutter analyze` limpo antes de concluir.
+6. **Buildar/testar nos 3**: APK no aparelho **e** Windows (ver "Cuidados de
+   release"). Não basta buildar só o APK toda vez — o desktop fica defasado.
 
 ### Regras extras para o sistema de contas
 

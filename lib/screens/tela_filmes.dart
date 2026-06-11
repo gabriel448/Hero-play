@@ -8,6 +8,7 @@ import '../models/serie.dart';
 import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/chave_conteudo.dart';
 import '../utils/layout.dart';
 import '../widgets/abertura_secao.dart';
 import '../widgets/animado_entrada.dart';
@@ -178,27 +179,23 @@ class _TelaFilmesState extends State<TelaFilmes> {
 
     compute(_computarConteudoVod, (widget.categorias, widget.tipo)).then((r) {
       if (!mounted) return;
+      // Lookups por CHAVE ESTAVEL (sobrevive a troca de IP/URL do provedor).
       final lookup = <String, Canal>{};
       final seriesPorEp = <String, Serie>{};
       for (final item in r.todosConteudos) {
         if (item is Canal) {
-          lookup[item.url] = item;
+          lookup[chaveConteudo(item.url)] = item;
         } else {
           final serie = item as Serie;
           for (final ep in serie.episodios) {
-            lookup[ep.url] = ep;
-            seriesPorEp[ep.url] = serie;
+            lookup[chaveConteudo(ep.url)] = ep;
+            seriesPorEp[chaveConteudo(ep.url)] = serie;
           }
         }
       }
       final porChave = <String, Object>{};
       for (final item in r.todosConteudos) {
-        if (item is Canal) {
-          porChave['c:${item.url}'] = item;
-        } else {
-          final s = item as Serie;
-          porChave['s:${s.nome}'] = s;
-        }
+        porChave[chaveItemMinhaLista(item)] = item;
       }
       // Guarda no cache para acelerar as proximas visitas a esta secao.
       _vodCache[widget.tipo] = _VodCacheEntry(
@@ -254,7 +251,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
 
       // Continuar assistindo (series com progresso) — primeira fila do topo.
       for (final p in provider.progressos) {
-        final s = _seriesPorUrlEpisodio[p.url];
+        final s = _seriesPorUrlEpisodio[chaveConteudo(p.url)];
         if (s != null) add(s);
       }
       // Minha lista.
@@ -510,9 +507,9 @@ class _BodyComCarrosseis extends StatelessWidget {
     final continuar = <_ItemContinuar>[];
     final seriesVistas = <String>{};
     for (final p in progressos) {
-      final canal = canaisPorUrl[p.url];
+      final canal = canaisPorUrl[chaveConteudo(p.url)];
       if (canal == null) continue;
-      final serie = seriesPorUrlEpisodio[p.url];
+      final serie = seriesPorUrlEpisodio[chaveConteudo(p.url)];
       if (serie != null) {
         if (seriesVistas.add(serie.nome)) {
           continuar.add(_ItemContinuar.serie(serie));

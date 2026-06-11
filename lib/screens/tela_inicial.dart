@@ -66,7 +66,13 @@ class _TelaInicialState extends State<TelaInicial>
     _origem = perfis.origemEntrada;
     _animar = _origem != null;
     perfis.consumirEntrada();
-    context.read<IptvProvider>().recarregarDadosDoPerfil();
+    // ADIAR para depois do frame: chamar recarregarDadosDoPerfil() aqui dispara
+    // notifyListeners() DURANTE o build (assertion "markNeedsBuild called during
+    // build"), que corrompe a entrega de notificacoes do Provider — fazendo
+    // toggles posteriores (minha lista, etc.) NAO atualizarem a UI ao vivo.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<IptvProvider>().recarregarDadosDoPerfil();
+    });
 
     _centro = AnimationController(
       vsync: this,

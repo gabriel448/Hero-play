@@ -34,10 +34,13 @@ class TelaFavoritos extends StatelessWidget {
                     ehFavorito: true,
                     mostrarGrupo: true,
                     onTap: () {
-                      provider.registrarVisualizacao(c);
+                      // Resolve para a versao ATUAL da lista (URL fresca) caso
+                      // o provedor tenha trocado o IP; cai no salvo se offline.
+                      final atual = provider.resolverCanalAtual(c);
+                      provider.registrarVisualizacao(atual);
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                            builder: (_) => TelaPlayer(canal: c)),
+                            builder: (_) => TelaPlayer(canal: atual)),
                       );
                     },
                     onToggleFavorito: () => provider.alternarFavorito(c),

@@ -28,6 +28,9 @@ class TelaPlayer extends StatefulWidget {
   /// sair, o player NAO e parado nem disposto. Usado pelo player embutido
   /// do desktop, que continua tocando depois que a TelaPlayer e fechada.
   final bool mantemPlayerAoSair;
+  /// Lista ordenada de episodios da serie (quando este canal e um episodio).
+  /// Habilita o botao "proximo episodio" no fim do episodio atual.
+  final List<Canal>? episodiosSerie;
 
   const TelaPlayer({
     super.key,
@@ -36,6 +39,7 @@ class TelaPlayer extends StatefulWidget {
     this.playerExterno,
     this.controllerExterno,
     this.mantemPlayerAoSair = false,
+    this.episodiosSerie,
   });
 
   /// Construtor usado ao maximizar o mini player ou o player embutido do
@@ -48,7 +52,8 @@ class TelaPlayer extends StatefulWidget {
     this.mantemPlayerAoSair = false,
   })  : posicaoInicial = null,
         playerExterno = player,
-        controllerExterno = controller;
+        controllerExterno = controller,
+        episodiosSerie = null;
 
   @override
   State<TelaPlayer> createState() => _TelaPlayerState();
@@ -116,9 +121,40 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   Tracks _tracks = Tracks(video: [], audio: [], subtitle: []);
   Track _track = const Track();
+  // Visibilidade do botao CC (faixas/legendas). ValueNotifier porque o slot do
+  // CC precisa estar SEMPRE presente nos controles do media_kit (que sao
+  // construidos uma vez) e so reagir internamente — senao, se os controles
+  // forem montados antes das faixas carregarem, o botao so apareceria ao
+  // recriar o Video (minimizar+maximizar).
+  final ValueNotifier<bool> _temFaixas = ValueNotifier(false);
   // Garante que a auto-selecao de audio (pelo idioma do perfil) rode uma vez
   // por stream, sem sobrescrever uma troca manual posterior do usuario.
   bool _audioAuto = false;
+
+  // ── Proximo episodio (series) ────────────────────────────────────────────
+  // Episodio atualmente em reproducao. Muda IN-PLACE ao avancar para o proximo
+  // (reabre o stream sem trocar de rota — assim o fullscreen nativo continua).
+  late Canal _episodio;
+  // Posicao de retomada atual (atualizada ao trocar de episodio).
+  Duration? _posicaoInicial;
+  // Proximo episodio na ordem da serie (null se nao houver ou nao for serie).
+  Canal? _proximoEp;
+  // Botao "proximo episodio" visivel (a partir de ~90% do episodio). ValueNotifier
+  // porque o fullscreen NATIVO do media_kit roda numa rota separada que nao
+  // rebuilda no setState desta tela — o botao reage via ValueListenableBuilder.
+  final ValueNotifier<bool> _mostrarProximoEp = ValueNotifier(false);
+  // Espelho da visibilidade dos controles do media_kit (para o botao subir/
+  // descer junto com a barra). Observado via Listener nao-consumidor.
+  final ValueNotifier<bool> _barraVodVisivel = ValueNotifier(true);
+  Timer? _timerBarraVod;
+  StreamSubscription? _subPosition;
+  // Tela cheia do VOD numa rota SO (sem o segundo Video do media_kit): imersivo
+  // + paisagem + video preenchendo, AppBar escondida. Botao de minimizar
+  // alterna para o modo janela (vertical, copiar URL, etc.). Init true p/ VOD.
+  bool _telaCheia = false;
+  // Ajuste do video: contain (mostra inteiro, pode sobrar faixa nas laterais em
+  // conteudo 16:9) ou cover (preenche cortando). Botao de zoom alterna.
+  BoxFit _ajuste = BoxFit.contain;
 
   // Quando true, o player foi transferido para o mini player e não deve
   // ser disposto neste widget.
@@ -145,8 +181,19 @@ class _TelaPlayerState extends State<TelaPlayer> {
   @override
   void initState() {
     super.initState();
+    _episodio = widget.canal;
+    _posicaoInicial = widget.posicaoInicial;
     _fonteAtual = widget.canal.temFontes ? widget.canal.fontes.first : widget.canal;
     _varianteAtual = _varianteInicial();
+
+    // VOD (filme/episodio): abre direto em TELA CHEIA (imersivo + paisagem +
+    // video preenchendo). Botao de minimizar volta ao modo janela.
+    if (widget.canal.tipo == TipoCanal.filme) {
+      _telaCheia = true;
+      _aplicarModoTela();
+    }
+
+    _recalcularProximoEp();
     if (widget.playerExterno != null) {
       // Veio do mini player: reutiliza o player que já está tocando.
       _player = widget.playerExterno!;
@@ -174,6 +221,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       _abrirStream();
     }
     _registrarStreams();
+    _atualizarTemFaixas();
   }
 
   void _boostarVolume() {
@@ -408,6 +456,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       if (!mounted) return;
       if (tocando && !_iniciado) {
         _iniciado = true;
+        _atualizarTemFaixas();
         _timeoutTimer?.cancel();
         _atualizadorStatus?.cancel();
         // Reproduziu: zera o estado de recuperacao. Uma queda futura recomeca
@@ -462,6 +511,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subTracks = _player.stream.tracks.listen((t) {
       if (!mounted) return;
       setState(() => _tracks = t);
+      _atualizarTemFaixas();
       _autoSelecionarAudio(t);
     });
 
@@ -477,6 +527,115 @@ class _TelaPlayerState extends State<TelaPlayer> {
       if (!mounted) return;
       _tentarSeekInicial();
     });
+
+    // Botao "proximo episodio": aparece a partir de ~90% do episodio. Roda
+    // enquanto houver contexto de serie (a troca in-place pode mudar _proximoEp).
+    if (widget.episodiosSerie != null) {
+      _subPosition = _player.stream.position.listen((pos) {
+        if (!mounted) return;
+        final dur = _player.state.duration;
+        _mostrarProximoEp.value = _proximoEp != null &&
+            dur.inSeconds > 30 &&
+            pos.inSeconds >= dur.inSeconds * 0.90;
+      });
+    }
+  }
+
+  /// Espelha a visibilidade da barra de controles do media_kit a cada toque no
+  /// video (Listener nao-consumidor), para o botao "proximo episodio" subir
+  /// quando a barra aparece e descer quando some. O `controlsHoverDuration` do
+  /// media_kit foi alinhado a este timer (~3.5s) para ficarem em sincronia.
+  void _aoTocarVodControles() {
+    _timerBarraVod?.cancel();
+    _barraVodVisivel.value = !_barraVodVisivel.value;
+    if (_barraVodVisivel.value) {
+      _timerBarraVod = Timer(const Duration(milliseconds: 3500), () {
+        _barraVodVisivel.value = false;
+      });
+    }
+  }
+
+  /// Aplica o modo de tela atual ao sistema: tela cheia = imersivo + paisagem;
+  /// janela = edge-to-edge + orientacoes liberadas. No desktop e no-op de fato.
+  void _aplicarModoTela() {
+    if (_telaCheia) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky,
+          overlays: []);
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    }
+  }
+
+  /// Alterna entre tela cheia e janela (botao de minimizar/maximizar).
+  void _alternarTelaCheia() {
+    setState(() => _telaCheia = !_telaCheia);
+    _aplicarModoTela();
+  }
+
+  /// Alterna o ajuste do video entre "mostrar inteiro" (contain) e "preencher"
+  /// (cover, cortando) — para quem nao quiser as faixas laterais.
+  void _alternarAjuste() {
+    setState(() {
+      _ajuste = _ajuste == BoxFit.contain ? BoxFit.cover : BoxFit.contain;
+    });
+  }
+
+  /// Atualiza a visibilidade do botao CC (faixas/legendas). Disponivel quando o
+  /// video ja iniciou e ha faixas reportadas pelo player.
+  void _atualizarTemFaixas() {
+    _temFaixas.value = _iniciado && _player.state.tracks.audio.isNotEmpty;
+  }
+
+  /// Recalcula o proximo episodio com base no [_episodio] atual.
+  void _recalcularProximoEp() {
+    final eps = widget.episodiosSerie;
+    _proximoEp = null;
+    if (eps != null) {
+      final i = eps.indexWhere((e) => e.url == _episodio.url);
+      if (i >= 0 && i + 1 < eps.length) _proximoEp = eps[i + 1];
+    }
+  }
+
+  /// Salva (ou limpa) o progresso de [ep] com base na posicao atual do player.
+  void _salvarProgressoEp(Canal ep) {
+    if (!_iniciado || ep.tipo != TipoCanal.filme) return;
+    final posicaoSeg = _player.state.position.inSeconds;
+    if (posicaoSeg <= 120) return;
+    final duracaoSeg = _player.state.duration.inSeconds;
+    final fracao = duracaoSeg > 0 ? posicaoSeg / duracaoSeg : 0.0;
+    if (fracao < 0.9) {
+      _provider
+          .salvarProgresso(ep, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null)
+          .ignore();
+    } else {
+      _provider.removerProgresso(ep).ignore();
+    }
+  }
+
+  /// Avanca para o proximo episodio IN-PLACE: salva o progresso do atual, troca
+  /// o episodio e reabre o stream — sem trocar de rota, entao a tela cheia
+  /// (fullscreen) continua ativa.
+  void _irProximoEp() {
+    final prox = _proximoEp;
+    if (prox == null) return;
+    _salvarProgressoEp(_episodio); // progresso do episodio que esta saindo
+    _provider.registrarVisualizacao(prox);
+    final prog = _provider.obterProgresso(prox);
+    _mostrarProximoEp.value = false;
+    setState(() {
+      _episodio = prox;
+      _fonteAtual = prox.temFontes ? prox.fontes.first : prox;
+      _varianteAtual = prox.agrupado ? prox.variantes.first : prox;
+      _posicaoInicial =
+          prog != null ? Duration(seconds: prog.posicaoSeg) : null;
+      _recalcularProximoEp();
+    });
+    _abrirStream();
   }
 
   /// Seleciona automaticamente a faixa de audio no idioma do perfil (config de
@@ -517,7 +676,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
   /// quanto pelo de playing.
   void _tentarSeekInicial() {
     if (_seekFeito) return;
-    final alvo = widget.posicaoInicial;
+    final alvo = _posicaoInicial;
     if (alvo == null || alvo <= Duration.zero) return;
     final duracao = _player.state.duration;
     if (duracao <= Duration.zero) return; // duração ainda desconhecida
@@ -550,6 +709,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _atualizadorStatus?.cancel();
     _cancelarTimersBuffering();
     _iniciado = false;
+    _temFaixas.value = false;
     _seekFeito = false;
     _retryPendente = false;
     _streamAberto = false;
@@ -736,21 +896,58 @@ class _TelaPlayerState extends State<TelaPlayer> {
         tooltip: 'Volume',
         onPressed: () => _mostrarVolume(state.context),
       ),
-      if (_iniciado && _tracks.audio.isNotEmpty)
-        IconButton(
-          icon: const Icon(
-            Icons.closed_caption_rounded,
-            color: Colors.white,
-            shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
-          ),
-          tooltip: 'Faixas e legendas',
-          onPressed: () => _mostrarFaixas(state.context),
+      // CC: slot SEMPRE presente (ValueListenableBuilder), so a visibilidade
+      // interna reage a `_temFaixas`. Assim o botao surge quando as faixas
+      // carregam mesmo que o media_kit nao re-invoque este builder (antes ele
+      // so aparecia ao recriar o Video — minimizar+maximizar).
+      ValueListenableBuilder<bool>(
+        valueListenable: _temFaixas,
+        builder: (_, mostra, _) => mostra
+            ? IconButton(
+                icon: const Icon(
+                  Icons.closed_caption_rounded,
+                  color: Colors.white,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                ),
+                tooltip: 'Faixas e legendas',
+                onPressed: () => _mostrarFaixas(state.context),
+              )
+            : const SizedBox.shrink(),
+      ),
+    ];
+    // Barra inferior: posicao + zoom (contain/cover) + minimizar/maximizar.
+    // Substitui o MaterialFullscreenButton do media_kit (que abriria uma rota
+    // de fullscreen separada, com problemas de reatividade) pelo nosso proprio
+    // botao de tela cheia, que apenas alterna o estado desta mesma tela.
+    List<Widget> bottomBar() => [
+      const MaterialPositionIndicator(),
+      const Spacer(),
+      IconButton(
+        icon: Icon(
+          _ajuste == BoxFit.cover
+              ? Icons.fit_screen_rounded
+              : Icons.aspect_ratio_rounded,
+          color: Colors.white,
+          shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
         ),
+        tooltip: _ajuste == BoxFit.cover ? 'Mostrar inteiro' : 'Preencher tela',
+        onPressed: _alternarAjuste,
+      ),
+      IconButton(
+        icon: Icon(
+          _telaCheia ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+          color: Colors.white,
+          shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
+        ),
+        tooltip: _telaCheia ? 'Minimizar' : 'Tela cheia',
+        onPressed: _alternarTelaCheia,
+      ),
     ];
     return MaterialVideoControlsTheme(
       normal: MaterialVideoControlsThemeData(
         topButtonBar: topBar(),
-        controlsHoverDuration: const Duration(seconds: 10),
+        bottomButtonBar: bottomBar(),
+        controlsHoverDuration: const Duration(milliseconds: 3500),
         seekBarHeight: 4.5,
         seekBarThumbSize: 14.0,
         seekBarContainerHeight: 52.0,
@@ -759,7 +956,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
       ),
       fullscreen: MaterialVideoControlsThemeData(
         topButtonBar: topBar(),
-        controlsHoverDuration: const Duration(seconds: 10),
+        bottomButtonBar: bottomBar(),
+        controlsHoverDuration: const Duration(milliseconds: 3500),
         seekBarHeight: 4.5,
         seekBarThumbSize: 14.0,
         seekBarContainerHeight: 52.0,
@@ -769,11 +967,45 @@ class _TelaPlayerState extends State<TelaPlayer> {
       child: MaterialDesktopVideoControlsTheme(
         normal: MaterialDesktopVideoControlsThemeData(topButtonBar: topBar()),
         fullscreen: MaterialDesktopVideoControlsThemeData(topButtonBar: topBar()),
-        child: Stack(
-          children: [
-            AdaptiveVideoControls(state),
-            _DoubleTapSeek(player: _player),
-          ],
+        // O botao "proximo episodio" fica DENTRO dos controles para aparecer
+        // tambem no fullscreen nativo do media_kit (que reusa este builder).
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: widget.episodiosSerie != null
+              ? (_) => _aoTocarVodControles()
+              : null,
+          child: Stack(
+            children: [
+              AdaptiveVideoControls(state),
+              _DoubleTapSeek(player: _player),
+              if (widget.episodiosSerie != null)
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation:
+                        Listenable.merge([_mostrarProximoEp, _barraVodVisivel]),
+                    builder: (context, _) => Align(
+                      alignment: Alignment.bottomRight,
+                      child: AnimatedPadding(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOut,
+                        padding: EdgeInsets.only(
+                          right: 14,
+                          bottom: _barraVodVisivel.value ? 62 : 14,
+                        ),
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 280),
+                          opacity: _mostrarProximoEp.value ? 1 : 0,
+                          child: IgnorePointer(
+                            ignoring: !_mostrarProximoEp.value,
+                            child: _BotaoProximoEp(onTap: _irProximoEp),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -781,21 +1013,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   @override
   void dispose() {
-    if (_iniciado && widget.canal.tipo == TipoCanal.filme) {
-      final posicaoSeg = _player.state.position.inSeconds;
-      if (posicaoSeg > 120) {
-        final duracaoSeg = _player.state.duration.inSeconds;
-        final fracao = duracaoSeg > 0 ? posicaoSeg / duracaoSeg : 0.0;
-        if (fracao < 0.9) {
-          _provider
-              .salvarProgresso(
-                  widget.canal, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null)
-              .ignore();
-        } else {
-          _provider.removerProgresso(widget.canal).ignore();
-        }
-      }
-    }
+    _salvarProgressoEp(_episodio);
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
     _cancelarTimersBuffering();
@@ -807,6 +1025,11 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _subTracks?.cancel();
     _subTrack?.cancel();
     _subDuration?.cancel();
+    _subPosition?.cancel();
+    _timerBarraVod?.cancel();
+    _mostrarProximoEp.dispose();
+    _barraVodVisivel.dispose();
+    _temFaixas.dispose();
     if (widget.mantemPlayerAoSair) {
       // O player nao pertence a esta tela — o widget que a abriu (ex.: player
       // embutido do desktop) continua usando o stream apos o pop.
@@ -818,7 +1041,12 @@ class _TelaPlayerState extends State<TelaPlayer> {
     } else {
       _player.dispose();
     }
+    // Ao sair do player, restaura o modo do app: orientacoes liberadas e
+    // edge-to-edge (o fullscreen nativo do media_kit deixa o sistema em modo
+    // 'manual' com as barras visiveis ao minimizar — sem isto a barra do
+    // sistema ficaria aparecendo depois de assistir um filme).
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -833,21 +1061,31 @@ class _TelaPlayerState extends State<TelaPlayer> {
         widget.canal.tvgId != null &&
         widget.canal.tvgId!.isNotEmpty;
 
+    // VOD em tela cheia esconde a AppBar (so o video). Modo janela e canais ao
+    // vivo mantem a AppBar.
+    final semAppBar = !aoVivo && _telaCheia;
+
     return PopScope(
-      // Intercepta o back em canais ao vivo (mobile) para minimizar em vez de
-      // fechar. Quando o player foi recebido de fora (ex.: embutido do desktop),
-      // o pop e normal — quem chamou cuida do stream.
-      canPop: !aoVivo || widget.mantemPlayerAoSair,
+      // Back: canais ao vivo minimizam para o mini player; VOD em tela cheia
+      // volta primeiro para o modo janela (estilo YouTube); VOD em janela fecha.
+      canPop: widget.mantemPlayerAoSair || (!aoVivo && !_telaCheia),
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && aoVivo && !widget.mantemPlayerAoSair) _minimizar();
+        if (didPop) return;
+        if (aoVivo && !widget.mantemPlayerAoSair) {
+          _minimizar();
+        } else if (!aoVivo && _telaCheia) {
+          _alternarTelaCheia(); // minimiza em vez de fechar
+        }
       },
       child: Scaffold(
         backgroundColor: AppColors.surface0,
-        appBar: AppBar(
+        appBar: semAppBar
+            ? null
+            : AppBar(
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.canal.nome, overflow: TextOverflow.ellipsis),
+              Text(_episodio.nome, overflow: TextOverflow.ellipsis),
               Text(
                 _subtituloPlayer,
                 style: const TextStyle(fontSize: 11, color: Colors.white70),
@@ -926,7 +1164,11 @@ class _TelaPlayerState extends State<TelaPlayer> {
         widget.canal.tvgId!.isNotEmpty;
 
     if (!podeSplit) {
-      return SafeArea(top: false, child: _buildAreaPlayer(aoVivo: aoVivo));
+      // VOD em tela cheia: video preenche a tela inteira (sem box 16:9 nem
+      // SafeArea). Caso contrario, mantem o comportamento original.
+      final cheia = _telaCheia && !aoVivo;
+      final area = _buildAreaPlayer(aoVivo: aoVivo, comAspectRatio: !cheia);
+      return cheia ? area : SafeArea(top: false, child: area);
     }
 
     // Layout estilo YouTube: video 16:9 no topo, EPG rolavel embaixo.
@@ -958,10 +1200,16 @@ class _TelaPlayerState extends State<TelaPlayer> {
     bool comAspectRatio = true,
   }) {
     final conectando = _erro == null && !_iniciado;
-    final video = Video(
+    // O botao "proximo episodio" e o CC vivem DENTRO dos controles
+    // (_buildControls). `fit: _ajuste` permite alternar contain/cover (zoom).
+    // O CC reage por conta propria via ValueListenableBuilder(_temFaixas) — nao
+    // depende do media_kit re-invocar o builder de controles.
+    final Widget video = Video(
       controller: _controller,
+      fit: _ajuste,
       controls: aoVivo ? _buildControlesAoVivo : _buildControls,
     );
+
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -989,6 +1237,46 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 }
 
+
+// ─── Botao "Proximo episodio" (series) ────────────────────────────────────────
+
+class _BotaoProximoEp extends StatelessWidget {
+  final VoidCallback onTap;
+  const _BotaoProximoEp({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.62),
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.base,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Próximo episódio',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              const Icon(Icons.skip_next_rounded, color: Colors.white, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _DoubleTapSeek extends StatefulWidget {
   final Player player;
@@ -1034,6 +1322,9 @@ class _DoubleTapSeekState extends State<_DoubleTapSeek> {
     _timer?.cancel();
     setState(() => _label = _accumSecs > 0 ? '+${_accumSecs}s' : '${_accumSecs}s');
     _timer = Timer(const Duration(milliseconds: 1000), () {
+      // Zera _timer tambem: senao o proximo toque na mesma direcao entra no
+      // ramo "acumular" com _seekBase ja nulo e estoura o null-check.
+      _timer = null;
       if (mounted) setState(() { _label = null; _accumSecs = 0; _seekBase = null; });
     });
   }

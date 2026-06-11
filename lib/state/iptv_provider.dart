@@ -5,12 +5,12 @@ import '../models/categoria_personalizada.dart';
 import '../models/lista_m3u.dart';
 import '../models/lista_remota.dart';
 import '../models/progresso_canal.dart';
-import '../models/serie.dart';
 import '../services/armazenamento.dart';
 import '../services/carregador_lista.dart';
 import '../services/parser_m3u.dart';
 import '../services/servico_conta.dart';
 import '../services/servico_epg.dart';
+import '../utils/chave_conteudo.dart';
 
 /// Provider central do app: mantem o estado e expoe acoes para a UI.
 ///
@@ -579,16 +579,32 @@ class IptvProvider extends ChangeNotifier {
 
   // ===== FAVORITOS =====
 
-  bool ehFavorito(Canal canal) => _armazenamento.ehFavorito(canal.id);
+  bool ehFavorito(Canal canal) => _armazenamento.ehFavorito(canal);
 
   Future<void> alternarFavorito(Canal canal) async {
     if (ehFavorito(canal)) {
-      await _armazenamento.removerFavorito(canal.id);
+      await _armazenamento.removerFavorito(canal);
     } else {
       await _armazenamento.adicionarFavorito(canal);
     }
     _favoritos = _armazenamento.carregarFavoritos();
     notifyListeners();
+  }
+
+  /// Dado um canal salvo (favorito/historico), tenta achar a versao ATUAL na
+  /// lista ativa pela chave estavel (tvgId ou id de conteudo) — assim a URL
+  /// fica fresca mesmo se o provedor trocou o IP/dominio. Sem a lista (ou sem
+  /// match) devolve o proprio canal salvo (modo offline).
+  Canal resolverCanalAtual(Canal salvo) {
+    final lista = _listaAtiva;
+    if (lista == null) return salvo;
+    final tvg = salvo.tvgId?.trim();
+    final ck = chaveConteudo(salvo.url);
+    for (final c in lista.canais) {
+      if (tvg != null && tvg.isNotEmpty && c.tvgId?.trim() == tvg) return c;
+      if (chaveConteudo(c.url) == ck) return c;
+    }
+    return salvo;
   }
 
   // ===== HISTORICO =====
@@ -737,23 +753,28 @@ class IptvProvider extends ChangeNotifier {
 
   // ===== MINHA LISTA =====
 
-  static String _chaveMinhaLista(Object item) {
-    if (item is Canal) return 'c:${item.url}';
-    return 's:${(item as Serie).nome}';
-  }
+  static String _chaveMinhaLista(Object item) => chaveItemMinhaLista(item);
 
   bool ehMinhaLista(Object item) =>
       _minhaListaChaves.contains(_chaveMinhaLista(item));
 
   Future<void> alternarMinhaLista(Object item) async {
     final chave = _chaveMinhaLista(item);
-    if (_minhaListaChaves.contains(chave)) {
+    final estava = _minhaListaChaves.contains(chave);
+    // Atualizacao OTIMISTA: reflete na UI imediatamente (sem esperar o disco),
+    // depois persiste. Garante que o botao vire "na hora" do clique.
+    _minhaListaChaves = List.of(_minhaListaChaves);
+    if (estava) {
+      _minhaListaChaves.remove(chave);
+    } else {
+      _minhaListaChaves.add(chave);
+    }
+    notifyListeners();
+    if (estava) {
       await _armazenamento.removerDeMinhaLista(chave);
     } else {
       await _armazenamento.adicionarAMinhaLista(chave);
     }
-    _minhaListaChaves = _armazenamento.carregarMinhaLista();
-    notifyListeners();
   }
 }
 
