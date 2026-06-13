@@ -43,6 +43,50 @@ class ServicoConta {
 
   Future<void> sair() => _cliente.auth.signOut();
 
+  // ===== MFA (TOTP) =====
+
+  /// `true` quando o login atual ainda precisa do 2o fator (sessao em AAL1 mas
+  /// a conta exige AAL2). Best-effort: erro de rede assume que nao precisa.
+  Future<bool> precisaMfa() async {
+    try {
+      final aal = _cliente.auth.mfa.getAuthenticatorAssuranceLevel();
+      return aal.nextLevel == AuthenticatorAssuranceLevels.aal2 &&
+          aal.currentLevel != AuthenticatorAssuranceLevels.aal2;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Inicia o desafio TOTP do primeiro fator verificado. Retorna os ids
+  /// necessarios para verificar, ou null se nao ha fator verificado.
+  Future<({String factorId, String challengeId})?> iniciarDesafioMfa() async {
+    final fatores = await _cliente.auth.mfa.listFactors();
+    Factor? totp;
+    for (final f in fatores.totp) {
+      if (f.status == FactorStatus.verified) {
+        totp = f;
+        break;
+      }
+    }
+    if (totp == null) return null;
+    final desafio = await _cliente.auth.mfa.challenge(factorId: totp.id);
+    return (factorId: totp.id, challengeId: desafio.id);
+  }
+
+  /// Verifica o codigo de 6 digitos do app autenticador (eleva a sessao a AAL2).
+  /// Lanca em caso de codigo invalido/expirado.
+  Future<void> verificarMfa({
+    required String factorId,
+    required String challengeId,
+    required String code,
+  }) async {
+    await _cliente.auth.mfa.verify(
+      factorId: factorId,
+      challengeId: challengeId,
+      code: code,
+    );
+  }
+
   // ===== LISTAS (via Edge Function) =====
 
   /// Todas as listas da conta logada. As URLs retornadas ja vem reconstruidas

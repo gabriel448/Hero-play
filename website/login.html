@@ -250,6 +250,9 @@
     $('tab-entrar').onclick = () => setModo('entrar');
     $('tab-criar').onclick  = () => setModo('criar');
 
+    // Deep-link do app: ?modo=criar abre direto na aba de cadastro.
+    if (new URLSearchParams(location.search).get('modo') === 'criar') setModo('criar');
+
     document.querySelectorAll('a[href="index.html"]').forEach(a =>
       a.addEventListener('click', e => { e.preventDefault(); navegar('index.html'); }));
 

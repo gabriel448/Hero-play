@@ -2,7 +2,7 @@ name: iptv_app
 description: "Leitor de listas IPTV M3U - foco didatico"
 publish_to: 'none'
 
-version: 1.5.0+8
+version: 1.6.0+9
 
 environment:
   sdk: ^3.12.0
@@ -46,6 +46,9 @@ dependencies:
   # Renderiza os avatares animados (Lottie) dos perfis. Os JSONs ficam em
   # assets/avatars/ — ver tool/gerar_avatares.py.
   lottie: ^3.1.2
+
+  # Abre o site no navegador (criar conta acontece no site, nao no app).
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

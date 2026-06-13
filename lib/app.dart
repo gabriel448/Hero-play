@@ -42,12 +42,20 @@ class _TelaRaiz extends StatelessWidget {
     final disponivel =
         context.select<ContaProvider, bool>((c) => c.disponivel);
     final logado = context.select<ContaProvider, bool>((c) => c.estaLogado);
+    final aguardandoMfa =
+        context.select<ContaProvider, bool>((c) => c.aguardandoMfa);
+    final resolvendoLogin =
+        context.select<ContaProvider, bool>((c) => c.resolvendoLogin);
     final primeiraSync =
         context.select<IptvProvider, bool>((p) => p.primeiraSync);
     final perfilConfirmado =
         context.select<PerfilProvider, bool>((p) => p.perfilConfirmado);
 
-    final precisaLogin = disponivel && !logado && !pulouLogin;
+    // Mantem na tela de login enquanto o 2o fator (MFA) nao foi cumprido — mesmo
+    // com sessao AAL1 ativa — e durante a checagem logo apos logar.
+    final precisaLogin = disponivel &&
+        !pulouLogin &&
+        (!logado || aguardandoMfa || resolvendoLogin);
     final importandoPrimeiraVez = logado && primeiraSync;
 
     final Widget tela;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../state/conta_provider.dart';
 import '../state/iptv_provider.dart';
@@ -28,18 +29,22 @@ class _TelaLoginState extends State<TelaLogin> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _senhaCtrl = TextEditingController();
-  final _confirmarCtrl = TextEditingController();
+  final _mfaCtrl = TextEditingController();
 
   bool _modoCriar = false;
   bool _carregando = false;
   String? _erro;
   String? _info;
 
+  // Etapa MFA (2o fator)
+  bool _mfaCarregando = false;
+  String? _mfaErro;
+
   @override
   void dispose() {
     _emailCtrl.dispose();
     _senhaCtrl.dispose();
-    _confirmarCtrl.dispose();
+    _mfaCtrl.dispose();
     super.dispose();
   }
 
@@ -59,37 +64,22 @@ class _TelaLoginState extends State<TelaLogin> {
     if (!_formKey.currentState!.validate()) return;
 
     final conta = context.read<ContaProvider>();
-    final iptv = context.read<IptvProvider>();
-    final perfis = context.read<PerfilProvider>();
     final email = _emailCtrl.text.trim();
     final senha = _senhaCtrl.text;
 
     setState(() => _carregando = true);
     try {
-      if (_modoCriar) {
-        final logou = await conta.criarConta(email: email, senha: senha);
-        if (!logou) {
-          // Projeto exige confirmacao de email antes do primeiro login.
-          if (!mounted) return;
-          setState(() {
-            _modoCriar = false;
-            _info = 'Conta criada! Confirme seu email e depois entre.';
-          });
-          return;
-        }
-      } else {
-        await conta.entrar(email: email, senha: senha);
+      // Criar conta acontece no site — aqui so login.
+      final pendenteMfa = await conta.entrar(email: email, senha: senha);
+
+      if (pendenteMfa) {
+        // Mostra a etapa de codigo (o build reage a conta.aguardandoMfa). O
+        // gate (app.dart) segura nesta tela ate o 2o fator ser verificado.
+        if (mounted) setState(() => _carregando = false);
+        return;
       }
 
-      // Logado: dispara o sync das listas da conta. Nao esperamos concluir
-      // aqui — `sincronizarDoSupabase` ja marca `sincronizando` de imediato,
-      // e o app.dart troca para a tela "Importando listas". Assim a navegacao
-      // nao trava enquanto as listas baixam.
-      unawaited(iptv.sincronizarDoSupabase());
-      // Tambem traz os perfis da conta (best-effort, em paralelo).
-      unawaited(perfis.sincronizarDoSupabase());
-      if (!mounted) return;
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      _concluirLogin();
     } on AuthException catch (e) {
       if (mounted) setState(() => _erro = _traduzir(e.message));
     } catch (e) {
@@ -99,8 +89,70 @@ class _TelaLoginState extends State<TelaLogin> {
     }
   }
 
+  /// Login completo (sem ou apos o MFA): dispara o sync e sai da tela. O sync
+  /// nao trava a navegacao — o `app.dart` troca para "Importando listas".
+  void _concluirLogin() {
+    if (!mounted) return;
+    unawaited(context.read<IptvProvider>().sincronizarDoSupabase());
+    unawaited(context.read<PerfilProvider>().sincronizarDoSupabase());
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+  }
+
+  Future<void> _verificarMfa() async {
+    final code = _mfaCtrl.text.replaceAll(RegExp(r'\D'), '');
+    if (code.length != 6) {
+      setState(() => _mfaErro = 'Digite os 6 dígitos.');
+      return;
+    }
+    setState(() {
+      _mfaCarregando = true;
+      _mfaErro = null;
+    });
+    try {
+      await context.read<ContaProvider>().verificarMfaCodigo(code);
+      if (!mounted) return;
+      _concluirLogin();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _mfaErro = 'Código inválido ou expirado.';
+          _mfaCtrl.clear();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _mfaCarregando = false);
+    }
+  }
+
+  Future<void> _cancelarMfa() async {
+    _mfaCtrl.clear();
+    setState(() => _mfaErro = null);
+    await context.read<ContaProvider>().cancelarMfa();
+  }
+
   Future<void> _continuarSemConta() async {
     await context.read<PreferenciasProvider>().pularLogin();
+  }
+
+  /// Criar conta acontece no site (evita ter que reimplementar verificacao de
+  /// email/MFA no app). Abre o site ja na aba de cadastro.
+  static const _urlCriarConta =
+      'https://hero-play.vercel.app/login.html?modo=criar';
+
+  Future<void> _abrirCriarContaSite() async {
+    bool ok = false;
+    try {
+      ok = await launchUrl(
+        Uri.parse(_urlCriarConta),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && mounted) {
+      setState(() => _erro =
+          'Não foi possível abrir o navegador. Acesse o site para criar sua conta.');
+    }
   }
 
   String _traduzir(String m) {
@@ -127,6 +179,9 @@ class _TelaLoginState extends State<TelaLogin> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    // Quando logado mas em AAL1 com MFA exigido, mostra a etapa de codigo.
+    final aguardandoMfa =
+        context.select<ContaProvider, bool>((c) => c.aguardandoMfa);
 
     // Card cinza (como no site) sobre o fundo preto, para o formulario e os
     // campos nao se perderem no preto. Inputs ganham fill/borda contrastantes.
@@ -162,7 +217,15 @@ class _TelaLoginState extends State<TelaLogin> {
                 ),
                 child: Theme(
                   data: temaCard,
-                  child: Form(
+                  child: aguardandoMfa
+                      ? _MfaStep(
+                          carregando: _mfaCarregando,
+                          erro: _mfaErro,
+                          controller: _mfaCtrl,
+                          onVerificar: _verificarMfa,
+                          onCancelar: _carregando ? null : _cancelarMfa,
+                        )
+                      : Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -252,100 +315,127 @@ class _TelaLoginState extends State<TelaLogin> {
                       const SizedBox(height: AppSpacing.md),
                     ],
 
-                    // ── Campos ─────────────────────────────────────────────
-                    AnimadoEntrada(
-                      delay: const Duration(milliseconds: 240),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _Label('Email'),
-                          const SizedBox(height: AppSpacing.sm),
-                          TextFormField(
-                            controller: _emailCtrl,
-                            enabled: !_carregando,
-                            keyboardType: TextInputType.emailAddress,
-                            autofillHints: const [AutofillHints.email],
-                            decoration: const InputDecoration(
-                              hintText: 'voce@email.com',
+                    // ── Conteudo: form de login OU CTA p/ criar no site ────
+                    if (_modoCriar)
+                      AnimadoEntrada(
+                        delay: const Duration(milliseconds: 240),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(AppSpacing.base),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface2,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.base),
+                                border: Border.all(
+                                    color: AppColors.outlineSubtle),
+                              ),
+                              child: Text(
+                                'A criação de conta é feita no nosso site, em '
+                                'poucos segundos. Depois é só voltar e entrar '
+                                'aqui com seu email e senha.',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  height: 1.5,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
-                            validator: (v) {
-                              final t = v?.trim() ?? '';
-                              if (t.isEmpty) return 'Informe o email';
-                              if (!t.contains('@') || !t.contains('.')) {
-                                return 'Email inválido';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: AppSpacing.lg),
-                          _Label('Senha'),
-                          const SizedBox(height: AppSpacing.sm),
-                          TextFormField(
-                            controller: _senhaCtrl,
-                            enabled: !_carregando,
-                            obscureText: true,
-                            decoration: const InputDecoration(
-                              hintText: 'mínimo 6 caracteres',
-                            ),
-                            validator: (v) {
-                              if (v == null || v.length < 6) {
-                                return 'A senha precisa ter ao menos 6 caracteres';
-                              }
-                              return null;
-                            },
-                          ),
-                          if (_modoCriar) ...[
                             const SizedBox(height: AppSpacing.lg),
-                            _Label('Confirmar senha'),
+                            FilledButton.icon(
+                              onPressed:
+                                  _carregando ? null : _abrirCriarContaSite,
+                              icon: const Icon(Icons.open_in_new_rounded,
+                                  size: 18),
+                              label: const Text('Criar conta no site'),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            TextButton(
+                              onPressed:
+                                  _carregando ? null : _continuarSemConta,
+                              child: const Text('Continuar sem conta'),
+                            ),
+                          ],
+                        ),
+                      )
+                    else ...[
+                      // ── Campos (Entrar) ────────────────────────────────
+                      AnimadoEntrada(
+                        delay: const Duration(milliseconds: 240),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _Label('Email'),
                             const SizedBox(height: AppSpacing.sm),
                             TextFormField(
-                              controller: _confirmarCtrl,
+                              controller: _emailCtrl,
+                              enabled: !_carregando,
+                              keyboardType: TextInputType.emailAddress,
+                              autofillHints: const [AutofillHints.email],
+                              decoration: const InputDecoration(
+                                hintText: 'voce@email.com',
+                              ),
+                              validator: (v) {
+                                final t = v?.trim() ?? '';
+                                if (t.isEmpty) return 'Informe o email';
+                                if (!t.contains('@') || !t.contains('.')) {
+                                  return 'Email inválido';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                            _Label('Senha'),
+                            const SizedBox(height: AppSpacing.sm),
+                            TextFormField(
+                              controller: _senhaCtrl,
                               enabled: !_carregando,
                               obscureText: true,
                               decoration: const InputDecoration(
-                                hintText: 'repita a senha',
+                                hintText: 'sua senha',
                               ),
                               validator: (v) {
-                                if (!_modoCriar) return null;
-                                if (v != _senhaCtrl.text) {
-                                  return 'As senhas não coincidem';
+                                if (v == null || v.isEmpty) {
+                                  return 'Informe a senha';
                                 }
                                 return null;
                               },
                             ),
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
+                      const SizedBox(height: AppSpacing.xl),
 
-                    // ── Botoes ─────────────────────────────────────────────
-                    AnimadoEntrada(
-                      delay: const Duration(milliseconds: 320),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          FilledButton(
-                            onPressed: _carregando ? null : _enviar,
-                            child: _carregando
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.accentOn,
-                                    ),
-                                  )
-                                : Text(_modoCriar ? 'Criar conta' : 'Entrar'),
-                          ),
-                          const SizedBox(height: AppSpacing.md),
-                          TextButton(
-                            onPressed: _carregando ? null : _continuarSemConta,
-                            child: const Text('Continuar sem conta'),
-                          ),
-                        ],
+                      // ── Botoes (Entrar) ────────────────────────────────
+                      AnimadoEntrada(
+                        delay: const Duration(milliseconds: 320),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            FilledButton(
+                              onPressed: _carregando ? null : _enviar,
+                              child: _carregando
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.accentOn,
+                                      ),
+                                    )
+                                  : const Text('Entrar'),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            TextButton(
+                              onPressed:
+                                  _carregando ? null : _continuarSemConta,
+                              child: const Text('Continuar sem conta'),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -355,6 +445,107 @@ class _TelaLoginState extends State<TelaLogin> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Etapa do 2o fator (TOTP) ─────────────────────────────────────────────────
+class _MfaStep extends StatelessWidget {
+  final bool carregando;
+  final String? erro;
+  final TextEditingController controller;
+  final VoidCallback onVerificar;
+  final VoidCallback? onCancelar;
+
+  const _MfaStep({
+    required this.carregando,
+    required this.erro,
+    required this.controller,
+    required this.onVerificar,
+    required this.onCancelar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: AppColors.surface2,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+            ),
+            child: const Icon(
+              Icons.verified_user_rounded,
+              size: 36,
+              color: AppColors.accent,
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          'Verificação em duas etapas',
+          style: textTheme.titleLarge,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          'Digite o código de 6 dígitos do seu app autenticador.',
+          style: textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        if (erro != null) ...[
+          _Aviso(texto: erro!, erro: true),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        TextField(
+          controller: controller,
+          enabled: !carregando,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          maxLength: 6,
+          style: textTheme.headlineSmall?.copyWith(
+            letterSpacing: 8,
+            fontWeight: FontWeight.w700,
+          ),
+          decoration: const InputDecoration(
+            hintText: '000000',
+            counterText: '',
+          ),
+          onChanged: (v) {
+            if (!carregando &&
+                v.replaceAll(RegExp(r'\D'), '').length == 6) {
+              onVerificar();
+            }
+          },
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        FilledButton(
+          onPressed: carregando ? null : onVerificar,
+          child: carregando
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.accentOn,
+                  ),
+                )
+              : const Text('Verificar'),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        TextButton(
+          onPressed: onCancelar,
+          child: const Text('Usar outra conta'),
+        ),
+      ],
     );
   }
 }
