@@ -134,6 +134,58 @@ class ServicoConta {
     await _cliente.from(_tabelaPerfis).delete().eq('id', id);
   }
 
+  // ===== BIBLIOTECA (favoritos / minha lista / progresso) =====
+  //
+  // Igual a `perfis`: sem segredos a cifrar, acesso direto a tabela protegida
+  // por RLS. Upsert/delete pela PK composta (user_id+perfil_id+tipo+chave).
+
+  static const _tabelaBiblioteca = 'biblioteca';
+
+  /// Todos os itens da biblioteca de um perfil (qualquer tipo).
+  Future<List<Map<String, dynamic>>> carregarBiblioteca(String perfilId) async {
+    final dados = await _cliente
+        .from(_tabelaBiblioteca)
+        .select()
+        .eq('perfil_id', perfilId);
+    return (dados as List).cast<Map<String, dynamic>>();
+  }
+
+  /// Insere/atualiza um item da biblioteca.
+  Future<void> salvarItemBiblioteca({
+    required String perfilId,
+    required String tipo,
+    required String chave,
+    Map<String, dynamic> dados = const {},
+  }) async {
+    final uid = usuario?.id;
+    if (uid == null) return;
+    await _cliente.from(_tabelaBiblioteca).upsert({
+      'user_id': uid,
+      'perfil_id': perfilId,
+      'tipo': tipo,
+      'chave': chave,
+      'dados': dados,
+      'atualizado_em': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
+  /// Remove um item da biblioteca.
+  Future<void> removerItemBiblioteca({
+    required String perfilId,
+    required String tipo,
+    required String chave,
+  }) async {
+    final uid = usuario?.id;
+    if (uid == null) return;
+    await _cliente
+        .from(_tabelaBiblioteca)
+        .delete()
+        .eq('user_id', uid)
+        .eq('perfil_id', perfilId)
+        .eq('tipo', tipo)
+        .eq('chave', chave);
+  }
+
   // ── helpers ───────────────────────────────────────────────────────────────
 
   void _checarResposta(FunctionResponse resp) {

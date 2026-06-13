@@ -166,7 +166,7 @@
           <div class="config-card perigo">
             <div class="config-card-head">
               <h3>Zona de perigo</h3>
-              <p>Esta ação é <strong>irreversível</strong>. Sua conta e todas as listas cadastradas serão removidas permanentemente.</p>
+              <p>Esta ação é <strong>irreversível</strong>. Sua conta, listas, perfis e biblioteca (favoritos, "minha lista" e progresso) serão removidos permanentemente.</p>
             </div>
             <div class="msg error" id="erro-remover"></div>
             <button class="btn btn-danger" id="btn-remover-conta" type="button">Remover minha conta</button>
@@ -210,27 +210,58 @@
 
   <!-- ── Modal: Desativar MFA ─────────────────────────────────────────────── -->
   <div class="modal-overlay" id="modal-desativar-mfa-overlay" aria-hidden="true">
-    <div class="modal-card" id="modal-desativar-mfa-card" role="dialog" aria-modal="true">
-      <div class="modal-cab">
-        <h2>Desativar autenticação em dois fatores</h2>
-        <button class="btn btn-ghost modal-fechar" id="btn-fechar-desativar-mfa" type="button" aria-label="Fechar">✕</button>
-      </div>
-      <div class="msg error" id="erro-desativar-mfa"></div>
+    <div class="modal-card" id="modal-desativar-mfa-card" role="dialog" aria-modal="true"
+         style="text-align:center;position:relative;overflow:hidden;">
+      <button class="btn btn-ghost modal-fechar" id="btn-fechar-desativar-mfa" type="button"
+              aria-label="Fechar" style="position:absolute;top:12px;right:12px;z-index:2;">✕</button>
+      <div id="desativar-conteudo" style="position:relative;">
 
-      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px;line-height:1.55;">
-        Digite o código do seu app autenticador para confirmar a desativação.
-      </p>
-      <div class="otp-wrap" id="otp-desativar-wrap" data-submit="btn-confirmar-desativar">
-        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
-        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
-        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
-        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
-        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
-        <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
-      </div>
-      <div class="mfa-acoes" style="margin-top:16px;">
-        <button class="btn btn-danger"  id="btn-confirmar-desativar" type="button" style="flex:1;">Desativar</button>
-        <button class="btn btn-outline" id="btn-cancelar-desativar"  type="button">Cancelar</button>
+        <!-- Passo 1: TOTP -->
+        <div id="desativar-step-totp">
+          <h2 style="font-size:20px;font-weight:800;margin:4px 0 6px;">Desativar autenticação em dois fatores</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 auto 16px;max-width:320px;line-height:1.55;">
+            Digite o código do seu app autenticador para confirmar a desativação.
+          </p>
+          <div class="msg error" id="erro-desativar-mfa" style="text-align:left;"></div>
+          <div class="otp-wrap" id="otp-desativar-wrap" data-submit="btn-confirmar-desativar" style="justify-content:center;">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+          </div>
+          <button class="btn btn-danger" id="btn-confirmar-desativar" type="button" style="width:100%;margin-top:18px;">Desativar</button>
+          <button class="btn btn-ghost" id="btn-desativar-via-email" type="button"
+                  style="width:100%;margin-top:10px;font-size:13px;color:var(--text-secondary);">
+            Não tenho mais acesso ao app autenticador →
+          </button>
+        </div>
+
+        <!-- Passo 2: Email OTP -->
+        <div id="desativar-step-email" style="display:none">
+          <h2 style="font-size:20px;font-weight:800;margin:4px 0 6px;">Confirme pelo email</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 auto 16px;max-width:320px;line-height:1.55;">
+            Enviamos um código de 6 dígitos para <b id="desativar-email-dest"></b>. Digite abaixo para desativar o MFA.
+          </p>
+          <div class="msg error" id="erro-desativar-email" style="text-align:left;"></div>
+          <div class="otp-wrap" id="otp-desativar-email-wrap" data-submit="btn-confirmar-desativar-email" style="justify-content:center;">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+            <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off">
+          </div>
+          <button class="btn btn-danger" id="btn-confirmar-desativar-email" type="button" style="width:100%;margin-top:18px;">
+            Confirmar e desativar
+          </button>
+          <button class="btn btn-ghost" id="btn-reenviar-desativar-email" type="button"
+                  style="width:100%;margin-top:10px;font-size:13px;">Reenviar código</button>
+          <button class="btn btn-ghost" id="btn-voltar-desativar" type="button"
+                  style="width:100%;margin-top:4px;font-size:13px;color:var(--text-secondary);">← Voltar</button>
+        </div>
+
       </div>
     </div>
   </div>
@@ -299,6 +330,28 @@
         </div>
 
       </div>
+    </div>
+  </div>
+
+  <!-- ── Modal: Excluir conta ──────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-excluir-overlay" aria-hidden="true">
+    <div class="modal-card" id="modal-excluir-card" role="dialog" aria-modal="true" aria-labelledby="modal-excluir-titulo" style="text-align:center;position:relative;">
+      <button class="btn btn-ghost modal-fechar" id="btn-fechar-excluir" type="button" aria-label="Fechar" style="position:absolute;top:12px;right:12px;z-index:2;">✕</button>
+      <div style="width:52px;height:52px;margin:2px auto 14px;border-radius:50%;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;">
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" fill="none" stroke="var(--accent-bright)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+          <path d="M10 11v6M14 11v6"/>
+        </svg>
+      </div>
+      <h2 id="modal-excluir-titulo" style="font-size:20px;font-weight:800;margin:0 0 6px;">Excluir conta</h2>
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 auto 16px;max-width:340px;line-height:1.55;">
+        Esta ação é <strong style="color:var(--text-primary)">irreversível</strong>. Sua conta, listas, perfis e biblioteca (favoritos, "minha lista" e progresso) serão apagados permanentemente.
+      </p>
+      <div class="msg error" id="erro-excluir" style="text-align:left;"></div>
+      <label for="excluir-confirmacao" style="display:block;font-size:12px;color:var(--text-tertiary);text-align:left;margin:0 0 6px;">Digite <strong style="color:var(--accent-bright)">EXCLUIR</strong> para confirmar</label>
+      <input type="text" id="excluir-confirmacao" placeholder="EXCLUIR" autocomplete="off" autocapitalize="characters" spellcheck="false" style="text-align:center;letter-spacing:2px;font-weight:700;text-transform:uppercase;">
+      <button class="btn btn-danger" id="btn-confirmar-excluir" type="button" style="width:100%;margin-top:18px;" disabled>Excluir minha conta</button>
+      <button class="btn btn-ghost" id="btn-cancelar-excluir" type="button" style="width:100%;margin-top:8px;">Cancelar</button>
     </div>
   </div>
 
@@ -992,7 +1045,12 @@
     /* ── Modal: desativar MFA ──────────────────────────────────────────────── */
     function abrirModalDesativarMFA() {
       $('erro-desativar-mfa').classList.remove('show');
+      $('erro-desativar-email').classList.remove('show');
       clearOtp($('otp-desativar-wrap'));
+      // Garante que sempre abre no passo 1 (TOTP)
+      $('desativar-step-totp').style.display  = '';
+      $('desativar-step-email').style.display = 'none';
+      $('desativar-conteudo').style.height    = '';
 
       const overlay = $('modal-desativar-mfa-overlay');
       const card    = $('modal-desativar-mfa-card');
@@ -1023,8 +1081,7 @@
     $('modal-desativar-mfa-overlay').addEventListener('click', e => {
       if (e.target === $('modal-desativar-mfa-overlay')) fecharModalDesativarMFA();
     });
-    $('btn-fechar-desativar-mfa').onclick   = () => fecharModalDesativarMFA();
-    $('btn-cancelar-desativar').onclick     = () => fecharModalDesativarMFA();
+    $('btn-fechar-desativar-mfa').onclick = () => fecharModalDesativarMFA();
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && $('modal-desativar-mfa-overlay').classList.contains('aberto'))
         fecharModalDesativarMFA();
@@ -1051,6 +1108,106 @@
         mostrarErro($('erro-desativar-mfa'), traduzErroMFA(e.message ?? ''));
         clearOtp($('otp-desativar-wrap')); focusOtp($('otp-desativar-wrap'));
       } finally { btn.disabled = false; btn.textContent = 'Desativar'; }
+    };
+
+    // Não tenho acesso ao app → transição para passo email
+    $('btn-desativar-via-email').onclick = async () => {
+      const btn = $('btn-desativar-via-email');
+      btn.disabled = true; btn.textContent = 'Enviando código…';
+      try {
+        const { error } = await sb.auth.signInWithOtp({
+          email: usuario.email, options: { shouldCreateUser: false },
+        });
+        if (error) throw error;
+      } catch(e) {
+        mostrarErro($('erro-desativar-mfa'), 'Erro ao enviar código: ' + (e.message ?? ''));
+        btn.disabled = false; btn.textContent = 'Não tenho mais acesso ao app autenticador →';
+        return;
+      }
+      btn.disabled = false; btn.textContent = 'Não tenho mais acesso ao app autenticador →';
+
+      $('desativar-email-dest').textContent = usuario.email;
+      $('erro-desativar-email').classList.remove('show');
+      clearOtp($('otp-desativar-email-wrap'));
+
+      const cont = $('desativar-conteudo'), de = $('desativar-step-totp'), pa = $('desativar-step-email');
+      if (!motion) { de.style.display='none'; pa.style.display=''; focusOtp($('otp-desativar-email-wrap')); return; }
+
+      const h0 = cont.offsetHeight;
+      anime({ targets: de, opacity:[1,0], translateX:[0,-26], duration:200, easing:'easeInQuad', complete:()=>{
+        de.style.display='none'; pa.style.display=''; pa.style.opacity='0';
+        const h1 = cont.offsetHeight;
+        cont.style.height = h0+'px'; cont.style.willChange = 'height';
+        requestAnimationFrame(()=>{
+          anime({ targets: cont, height:[h0,h1], duration:320, easing:'easeOutExpo',
+                  complete:()=>{ cont.style.height=''; cont.style.willChange=''; } });
+          anime({ targets: pa, opacity:[0,1], translateX:[26,0], duration:340, easing:'easeOutExpo' });
+          anime({ targets:'#otp-desativar-email-wrap .otp-digit', opacity:[0,1], translateY:[6,0],
+                  delay:anime.stagger(28,{start:200}), duration:200, easing:'easeOutQuad',
+                  complete:()=>focusOtp($('otp-desativar-email-wrap')) });
+        });
+      }});
+    };
+
+    // Voltar ao passo TOTP
+    $('btn-voltar-desativar').onclick = () => {
+      const cont = $('desativar-conteudo'), de = $('desativar-step-email'), pa = $('desativar-step-totp');
+      $('erro-desativar-mfa').classList.remove('show');
+      clearOtp($('otp-desativar-wrap'));
+      if (!motion) { de.style.display='none'; pa.style.display=''; focusOtp($('otp-desativar-wrap')); return; }
+      const h0 = cont.offsetHeight;
+      anime({ targets: de, opacity:[1,0], translateX:[0,26], duration:200, easing:'easeInQuad', complete:()=>{
+        de.style.display='none'; pa.style.display=''; pa.style.opacity='0';
+        const h1 = cont.offsetHeight;
+        cont.style.height = h0+'px'; cont.style.willChange = 'height';
+        requestAnimationFrame(()=>{
+          anime({ targets: cont, height:[h0,h1], duration:320, easing:'easeOutExpo',
+                  complete:()=>{ cont.style.height=''; cont.style.willChange=''; } });
+          anime({ targets: pa, opacity:[0,1], translateX:[-26,0], duration:340, easing:'easeOutExpo' });
+          anime({ targets:'#otp-desativar-wrap .otp-digit', opacity:[0,1], translateY:[6,0],
+                  delay:anime.stagger(28,{start:160}), duration:200, easing:'easeOutQuad',
+                  complete:()=>focusOtp($('otp-desativar-wrap')) });
+        });
+      }});
+    };
+
+    // Confirmar via email
+    $('btn-confirmar-desativar-email').onclick = async () => {
+      const code = getOtpValue($('otp-desativar-email-wrap'));
+      if (code.length !== 6) { mostrarErro($('erro-desativar-email'), 'Digite os 6 dígitos.'); return; }
+      const btn = $('btn-confirmar-desativar-email');
+      btn.disabled = true; btn.textContent = 'Verificando…';
+      try {
+        const { error: verErr } = await sb.auth.verifyOtp({ email: usuario.email, token: code, type: 'email' });
+        if (verErr) throw verErr;
+        const { error: unErr } = await sb.auth.mfa.unenroll({ factorId: mfaFactorId });
+        if (unErr) throw unErr;
+        fecharModalDesativarMFA(() => {
+          mfaFactorId = null; setMFAEstado('inativo');
+          mostrarOk($('ok-mfa'), 'MFA desativado com sucesso.');
+        });
+      } catch(e) {
+        const msg = e.message ?? '';
+        if (msg.toLowerCase().includes('aal2') || msg.toLowerCase().includes('assurance')) {
+          mostrarErro($('erro-desativar-email'),
+            'Por segurança, esta operação exige o app autenticador. Se perdeu o acesso, entre em contato com o suporte.');
+        } else {
+          mostrarErro($('erro-desativar-email'), traduzErroMFA(msg));
+        }
+        clearOtp($('otp-desativar-email-wrap')); focusOtp($('otp-desativar-email-wrap'));
+      } finally { btn.disabled = false; btn.textContent = 'Confirmar e desativar'; }
+    };
+
+    // Reenviar código de email
+    $('btn-reenviar-desativar-email').onclick = async () => {
+      const btn = $('btn-reenviar-desativar-email');
+      btn.disabled = true; btn.textContent = 'Enviando…';
+      const { error } = await sb.auth.signInWithOtp({
+        email: usuario.email, options: { shouldCreateUser: false },
+      });
+      btn.disabled = false; btn.textContent = 'Reenviar código';
+      if (error) mostrarErro($('erro-desativar-email'), 'Erro ao reenviar: ' + error.message);
+      else { clearOtp($('otp-desativar-email-wrap')); focusOtp($('otp-desativar-email-wrap')); }
     };
 
 
@@ -1125,13 +1282,62 @@
       } finally { btn.disabled = false; btn.textContent = 'Confirmar'; }
     };
 
-    // Remover conta — placeholder
-    $('btn-remover-conta').onclick = async () => {
-      const confirmado = confirm(
-        'Tem certeza? Esta ação é irreversível.\n\nSua conta e todas as listas serão removidas permanentemente.'
-      );
-      if (!confirmado) return;
-      mostrarErro($('erro-remover'), 'Remoção de conta via painel será ativada em breve. Por enquanto entre em contato com o suporte.');
+    // Remover conta — exclusão real via Edge Function (service role apaga o
+    // usuário do Auth; as FKs com ON DELETE CASCADE limpam listas/perfis/biblioteca).
+    // Abre o modal animado de confirmação (sem pop-up do navegador).
+    $('btn-remover-conta').onclick = () => abrirModalExcluir();
+
+    function abrirModalExcluir() {
+      $('erro-excluir').classList.remove('show');
+      $('excluir-confirmacao').value = '';
+      $('btn-confirmar-excluir').disabled = true;
+      const overlay = $('modal-excluir-overlay'), card = $('modal-excluir-card');
+      overlay.classList.add('aberto'); overlay.setAttribute('aria-hidden', 'false');
+      const focar = () => $('excluir-confirmacao').focus();
+      if (!motion) { focar(); return; }
+      anime({ targets: overlay, opacity:[0,1], duration:200, easing:'linear' });
+      anime({ targets: card, opacity:[0,1], translateY:[20,0], scale:[0.96,1], duration:320, easing:'easeOutExpo', complete: focar });
+    }
+
+    function fecharModalExcluir(cb) {
+      const overlay = $('modal-excluir-overlay'), card = $('modal-excluir-card');
+      if (!motion) { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if (cb) cb(); return; }
+      anime({ targets: card, opacity:[1,0], translateY:[0,12], scale:[1,0.96], duration:240, easing:'easeInQuad' });
+      anime({ targets: overlay, opacity:[1,0], duration:280, easing:'easeInQuad',
+              complete: () => { overlay.classList.remove('aberto'); overlay.setAttribute('aria-hidden','true'); if (cb) cb(); } });
+    }
+
+    // Habilita "Excluir" só quando o usuário digita EXCLUIR.
+    $('excluir-confirmacao').addEventListener('input', e => {
+      $('btn-confirmar-excluir').disabled = e.target.value.trim().toUpperCase() !== 'EXCLUIR';
+    });
+    $('excluir-confirmacao').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !$('btn-confirmar-excluir').disabled) $('btn-confirmar-excluir').click();
+    });
+    $('btn-fechar-excluir').onclick   = () => fecharModalExcluir();
+    $('btn-cancelar-excluir').onclick = () => fecharModalExcluir();
+    $('modal-excluir-overlay').addEventListener('click', e => { if (e.target === $('modal-excluir-overlay')) fecharModalExcluir(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && $('modal-excluir-overlay').classList.contains('aberto')) fecharModalExcluir();
+    });
+
+    $('btn-confirmar-excluir').onclick = async () => {
+      if ($('excluir-confirmacao').value.trim().toUpperCase() !== 'EXCLUIR') return;
+      const btn = $('btn-confirmar-excluir');
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = 'Excluindo…';
+      $('erro-excluir').classList.remove('show');
+      const { error } = await sb.functions.invoke('excluir-conta', { method: 'POST', body: {} });
+      if (error) {
+        btn.disabled = false;
+        btn.textContent = orig;
+        mostrarErro($('erro-excluir'), 'Não foi possível excluir a conta: ' + (error.message || error));
+        return;
+      }
+      await sb.auth.signOut().catch(() => {});
+      try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+      fecharModalExcluir(() => location.replace('index.html'));
     };
 
     function traduzErro(m) {

@@ -886,6 +886,18 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   Widget _buildControls(VideoState state) {
     List<Widget> topBar() => [
+      // Voltar — só no player maximizado (que força paisagem). No modo janela
+      // /retrato a AppBar já tem a seta, então não duplicamos.
+      if (_telaCheia)
+        IconButton(
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: Colors.white,
+            shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+          ),
+          tooltip: 'Voltar',
+          onPressed: () => Navigator.of(state.context).maybePop(),
+        ),
       const Spacer(),
       IconButton(
         icon: const Icon(

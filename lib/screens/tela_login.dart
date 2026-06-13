@@ -128,14 +128,41 @@ class _TelaLoginState extends State<TelaLogin> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
+    // Card cinza (como no site) sobre o fundo preto, para o formulario e os
+    // campos nao se perderem no preto. Inputs ganham fill/borda contrastantes.
+    final temaCard = Theme.of(context).copyWith(
+      inputDecorationTheme:
+          Theme.of(context).inputDecorationTheme.copyWith(
+        fillColor: AppColors.surface2,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadius.base),
+          borderSide: const BorderSide(color: AppColors.outlineSubtle),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadius.base),
+          borderSide: const BorderSide(color: AppColors.outlineSubtle),
+        ),
+      ),
+    );
+
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: 440),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(AppSpacing.xl),
-              child: Form(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Container(
+                padding: const EdgeInsets.all(AppSpacing.xl),
+                decoration: BoxDecoration(
+                  // Cinza levemente mais claro que o preto do fundo (como o site).
+                  color: const Color(0xFF1A1815),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Theme(
+                  data: temaCard,
+                  child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -320,6 +347,8 @@ class _TelaLoginState extends State<TelaLogin> {
                       ),
                     ),
                   ],
+                ),
+              ),
                 ),
               ),
             ),

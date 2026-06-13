@@ -2,7 +2,7 @@ name: iptv_app
 description: "Leitor de listas IPTV M3U - foco didatico"
 publish_to: 'none'
 
-version: 1.4.0+7
+version: 1.5.0+8
 
 environment:
   sdk: ^3.12.0

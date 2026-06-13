@@ -149,3 +149,50 @@ revoke select, insert, update, delete on public.perfis from anon;
 grant select, insert, update, delete on public.perfis to authenticated;
 
 notify pgrst, 'reload schema';
+
+-- ============================================================================
+-- Biblioteca por perfil (favoritos, "minha lista" e progresso).
+--
+-- Sincroniza a biblioteca do usuario entre dispositivos. Cada linha e um item
+-- de um tipo, identificado por uma `chave` estavel (gerada no cliente a partir
+-- do conteudo). `dados` (jsonb) guarda o payload minimo para exibir/retomar o
+-- titulo (sem o catalogo inteiro). O HISTORICO continua so no aparelho.
+--
+-- Sem credenciais a cifrar — acesso direto a tabela, protegido por RLS. PK
+-- composta (user_id+perfil_id+tipo+chave) permite upsert idempotente.
+-- ============================================================================
+create table if not exists public.biblioteca (
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  perfil_id     uuid not null,
+  tipo          text not null,        -- 'favorito' | 'minha_lista' | 'progresso'
+  chave         text not null,        -- identificador estavel do item
+  dados         jsonb not null default '{}'::jsonb,
+  atualizado_em timestamptz not null default now(),
+  primary key (user_id, perfil_id, tipo, chave)
+);
+
+create index if not exists biblioteca_user_perfil_idx
+  on public.biblioteca (user_id, perfil_id);
+
+alter table public.biblioteca enable row level security;
+
+drop policy if exists "biblioteca_select_propria" on public.biblioteca;
+create policy "biblioteca_select_propria" on public.biblioteca
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "biblioteca_insert_propria" on public.biblioteca;
+create policy "biblioteca_insert_propria" on public.biblioteca
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "biblioteca_update_propria" on public.biblioteca;
+create policy "biblioteca_update_propria" on public.biblioteca
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "biblioteca_delete_propria" on public.biblioteca;
+create policy "biblioteca_delete_propria" on public.biblioteca
+  for delete using (auth.uid() = user_id);
+
+revoke select, insert, update, delete on public.biblioteca from anon;
+grant select, insert, update, delete on public.biblioteca to authenticated;
+
+notify pgrst, 'reload schema';

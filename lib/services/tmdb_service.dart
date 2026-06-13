@@ -1,6 +1,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+/// Um ator do elenco: nome + foto (opcional) vindos do TMDB.
+class AtorTmdb {
+  final String nome;
+  final String? fotoUrl;
+  const AtorTmdb({required this.nome, this.fotoUrl});
+}
+
 /// Informacoes de um filme/serie vindas do TMDB — sinopse, ano e elenco.
 ///
 /// O poster NAO entra aqui de proposito: filmes usam o banner da propria
@@ -8,7 +15,7 @@ import 'package:http/http.dart' as http;
 class TmdbInfo {
   final String? sinopse;
   final int? ano;
-  final List<String> elenco;
+  final List<AtorTmdb> elenco;
 
   /// Nota media (0..10) do TMDB — aproxima a nota do IMDB. Null se indisponivel.
   final double? nota;
@@ -45,6 +52,8 @@ class TmdbInfo {
 ///   5. Primeiro resultado (mais popular segundo o TMDB)
 class TmdbService {
   static const _imgBase = 'https://image.tmdb.org/t/p/w500';
+  // Foto de perfil do elenco — w185 é o tamanho ideal para avatares.
+  static const _perfilBase = 'https://image.tmdb.org/t/p/w185';
 
   final String proxyBaseUrl;
   final _cachePoster = <String, String?>{};
@@ -124,7 +133,7 @@ class TmdbService {
         : null;
 
     final elenco =
-        id != null ? await _elenco(id, ehTv, idioma) : const <String>[];
+        id != null ? await _elenco(id, ehTv, idioma) : const <AtorTmdb>[];
 
     final notaRaw = (item['vote_average'] as num?)?.toDouble();
     final nota = (notaRaw != null && notaRaw > 0) ? notaRaw : null;
@@ -182,8 +191,8 @@ class TmdbService {
     }
   }
 
-  /// Top 5 atores do elenco. Lista vazia em caso de erro.
-  Future<List<String>> _elenco(int id, bool ehTv, String idioma) async {
+  /// Top 10 atores do elenco (nome + foto). Lista vazia em caso de erro.
+  Future<List<AtorTmdb>> _elenco(int id, bool ehTv, String idioma) async {
     try {
       final endpoint = ehTv ? '/3/tv/$id/credits' : '/3/movie/$id/credits';
       final uri = Uri.parse(
@@ -194,12 +203,18 @@ class TmdbService {
 
       final body = jsonDecode(resp.body) as Map<String, dynamic>;
       final cast = (body['cast'] as List<dynamic>?) ?? const [];
-      return cast
-          .take(5)
-          .map((c) => (c as Map<String, dynamic>)['name'] as String?)
-          .whereType<String>()
-          .where((nome) => nome.isNotEmpty)
-          .toList();
+      final atores = <AtorTmdb>[];
+      for (final c in cast.take(10)) {
+        final m = c as Map<String, dynamic>;
+        final nome = (m['name'] as String?)?.trim();
+        if (nome == null || nome.isEmpty) continue;
+        final foto = m['profile_path'] as String?;
+        atores.add(AtorTmdb(
+          nome: nome,
+          fotoUrl: (foto != null && foto.isNotEmpty) ? '$_perfilBase$foto' : null,
+        ));
+      }
+      return atores;
     } catch (_) {
       return const [];
     }

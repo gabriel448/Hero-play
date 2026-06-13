@@ -62,6 +62,10 @@ class Armazenamento {
 
   String? _perfilAtivoId;
 
+  /// Id do perfil atualmente ativo (boxes apontadas), ou null antes de
+  /// [ativarPerfil]. Usado pela sincronizacao da biblioteca na nuvem.
+  String? get perfilAtivoId => _perfilAtivoId;
+
   /// Inicializa o Hive e abre as boxes GLOBAIS. Deve ser chamado UMA vez no
   /// main() antes de runApp. As boxes por perfil sao abertas sob demanda em
   /// [ativarPerfil], depois que o usuario escolhe "quem esta assistindo".

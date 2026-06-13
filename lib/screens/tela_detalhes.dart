@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:ui';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/serie.dart';
@@ -31,8 +32,14 @@ class TelaDetalhes extends StatefulWidget {
   final Canal? filme;
   final Serie? serie;
 
-  const TelaDetalhes.filme(Canal this.filme, {super.key}) : serie = null;
-  const TelaDetalhes.serie(Serie this.serie, {super.key}) : filme = null;
+  /// Tag do Hero do banner de origem (carrossel/destaque). Quando presente, o
+  /// banner anima da posição clicada até aqui.
+  final Object? heroTag;
+
+  const TelaDetalhes.filme(Canal this.filme, {super.key, this.heroTag})
+      : serie = null;
+  const TelaDetalhes.serie(Serie this.serie, {super.key, this.heroTag})
+      : filme = null;
 
   bool get ehSerie => serie != null;
 
@@ -47,9 +54,30 @@ typedef _EpisodiosAgrupados = ({
   List<Object> itens, // int = marcador de temporada, Canal = episodio
 });
 
+/// Seleciona até 10 filmes do mesmo grupo (tag) do [filme], aleatórios.
+/// `Serie.agrupar` separa filmes puros de episódios de série dentro do grupo.
+List<Canal> _selecionarRelacionados(List<Canal> canais, Canal filme) {
+  final mesmoGrupo = canais
+      .where((c) => c.tipo == TipoCanal.filme && c.grupo == filme.grupo)
+      .toList();
+  if (mesmoGrupo.isEmpty) return const [];
+  final ag = Serie.agrupar(mesmoGrupo);
+  final rel = ag.filmes
+      .where((c) => chaveConteudo(c.url) != chaveConteudo(filme.url))
+      .toList()
+    ..shuffle();
+  return rel.take(10).toList();
+}
+
 class _TelaDetalhesState extends State<TelaDetalhes> {
   late final Future<TmdbInfo> _infoFuture;
   Future<String?>? _posterSerieFuture;
+  // Filmes relacionados (mesmo grupo/tag) — calculado async para não atrasar
+  // a abertura da tela (FutureBuilder mostra skeleton enquanto seleciona).
+  Future<List<Canal>>? _relacionadosFuture;
+  // Escopo único deste detalhe para as tags Hero dos relacionados — evita
+  // flights cruzados quando o próximo detalhe tem os mesmos filmes do grupo.
+  late final String _heroEscopo = 'rel${identityHashCode(this)}';
   _EpisodiosAgrupados? _agrup;
   int? _temporadaSelecionada;
 
@@ -71,13 +99,55 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
       _agrup = _agruparEpisodios(widget.serie!);
       _temporadaSelecionada =
           _agrup!.temporadas.isNotEmpty ? _agrup!.temporadas.first : null;
+    } else {
+      // Captura o catálogo agora (sync) e seleciona depois, fora do 1º frame.
+      final canais =
+          context.read<IptvProvider>().listaAtiva?.canais ?? const <Canal>[];
+      final filme = widget.filme!;
+      _relacionadosFuture = Future(() => _selecionarRelacionados(canais, filme));
     }
+  }
+
+  /// Envolve o banner num Hero (destino da animação vinda do carrossel).
+  /// Trajetória reta (diagonal) em vez do arco padrão do Material.
+  Widget _bannerComHero(Widget banner) {
+    if (widget.heroTag == null) return banner;
+    return Hero(
+      tag: widget.heroTag!,
+      createRectTween: (begin, end) => RectTween(begin: begin, end: end),
+      child: banner,
+    );
+  }
+
+  /// Envolve o cabeçalho com o fundo desfocado do banner (que some em preto
+  /// na base). Em série a URL do banner vem do TMDB (fallback: logo M3U).
+  Widget _cabecalhoComFundo(Widget cabecalho) {
+    if (!widget.ehSerie) {
+      return _HeaderComFundo(url: widget.filme!.logoUrl, child: cabecalho);
+    }
+    return FutureBuilder<String?>(
+      future: _posterSerieFuture,
+      builder: (context, snap) {
+        final url = (snap.data != null && snap.data!.isNotEmpty)
+            ? snap.data
+            : (widget.serie!.logoUrl?.isNotEmpty == true
+                ? widget.serie!.logoUrl
+                : null);
+        return _HeaderComFundo(url: url, child: cabecalho);
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_nome, overflow: TextOverflow.ellipsis)),
+      // Fundo blur do banner sobe atrás da appbar transparente (até o "voltar").
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
       body: isDesktop(context)
           ? _buildDesktop(context)
           : tabletBody(
@@ -110,15 +180,22 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
     return ListView(
       padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
       children: [
-        _Cabecalho(
-          nome: _nome,
-          banner: _BannerFilme(url: widget.filme!.logoUrl),
-          infoFuture: _infoFuture,
-          acao: _AcaoFilme(filme: widget.filme!),
+        _cabecalhoComFundo(
+          _Cabecalho(
+            nome: _nome,
+            banner: _bannerComHero(_BannerFilme(url: widget.filme!.logoUrl)),
+            infoFuture: _infoFuture,
+            acao: _AcaoFilme(filme: widget.filme!),
+          ),
         ),
         const _Divisoria(),
         _SecaoSinopse(infoFuture: _infoFuture),
         _SecaoElenco(infoFuture: _infoFuture),
+        if (_relacionadosFuture != null)
+          _SecaoRelacionados(
+            future: _relacionadosFuture!,
+            escopo: _heroEscopo,
+          ),
       ],
     );
   }
@@ -134,17 +211,19 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
         SliverToBoxAdapter(
           child: Column(
             children: [
-              _Cabecalho(
-                nome: _nome,
-                banner: _BannerSerie(
-                  posterFuture: _posterSerieFuture,
-                  logoM3U: serie.logoUrl,
-                ),
-                infoFuture: _infoFuture,
-                acao: _AcaoSerie(serie: serie),
-                subtitulo: _descricaoSerie(
-                  agrup.temporadas.length,
-                  serie.totalEpisodios,
+              _cabecalhoComFundo(
+                _Cabecalho(
+                  nome: _nome,
+                  banner: _bannerComHero(_BannerSerie(
+                    posterFuture: _posterSerieFuture,
+                    logoM3U: serie.logoUrl,
+                  )),
+                  infoFuture: _infoFuture,
+                  acao: _AcaoSerie(serie: serie),
+                  subtitulo: _descricaoSerie(
+                    agrup.temporadas.length,
+                    serie.totalEpisodios,
+                  ),
                 ),
               ),
               const _Divisoria(),
@@ -190,12 +269,14 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
           ),
         ],
       ),
-      child: widget.ehSerie
-          ? _BannerSerie(
-              posterFuture: _posterSerieFuture,
-              logoM3U: serie!.logoUrl,
-            )
-          : _BannerFilme(url: widget.filme!.logoUrl),
+      child: _bannerComHero(
+        widget.ehSerie
+            ? _BannerSerie(
+                posterFuture: _posterSerieFuture,
+                logoM3U: serie!.logoUrl,
+              )
+            : _BannerFilme(url: widget.filme!.logoUrl),
+      ),
     );
 
     // Coluna de conteudo ao lado do poster.
@@ -229,23 +310,40 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
       ],
     );
 
-    final cabecalho = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        banner,
-        const SizedBox(width: AppSpacing.xxl),
-        Expanded(child: info),
-      ],
+    final cabecalho = _cabecalhoComFundo(
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          banner,
+          const SizedBox(width: AppSpacing.xxl),
+          Expanded(child: info),
+        ],
+      ),
     );
 
-    // Filme: rolagem simples do cabeçalho.
+    // Filme: rolagem simples do cabeçalho + relacionados.
     if (agrup == null) {
       return Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: _kMaxLarguraDesktop),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.xxl),
-            child: cabecalho,
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xxl, 0, AppSpacing.xxl, AppSpacing.xxl),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                cabecalho,
+                if (_relacionadosFuture != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: AppSpacing.xl),
+                    child: _SecaoRelacionados(
+                      future: _relacionadosFuture!,
+                      escopo: _heroEscopo,
+                      padH: 0,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       );
@@ -261,12 +359,7 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.xxl,
-                AppSpacing.xxl,
-                AppSpacing.xxl,
-                0,
-              ),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, 0, AppSpacing.xxl, 0),
               sliver: SliverToBoxAdapter(child: cabecalho),
             ),
             SliverPadding(
@@ -660,6 +753,111 @@ _Retomada _calcularRetomada(Serie serie, IptvProvider provider) {
   );
 }
 
+// ─── Fundo desfocado do topo (estilo destaque) ─────────────────────────────
+
+/// Empilha o fundo desfocado do banner atrás do cabeçalho. O blur preenche
+/// toda a área (inclusive atrás da appbar transparente) e some em preto na
+/// base; o cabeçalho recebe um respiro no topo para não ficar sob o "voltar".
+class _HeaderComFundo extends StatelessWidget {
+  final String? url;
+  final Widget child;
+  const _HeaderComFundo({required this.url, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final topInset = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    return Stack(
+      children: [
+        Positioned.fill(child: _FundoBlur(url: url)),
+        Padding(
+          padding: EdgeInsets.only(top: topInset),
+          child: child,
+        ),
+      ],
+    );
+  }
+}
+
+/// Fundo desfocado: imagem borrada sobre base preta sólida. A imagem some
+/// (vira transparente) antes da borda inferior via ShaderMask, deixando só a
+/// base preta — assim o corte do ClipRect cai sobre preto e não há linha nem
+/// rebarba do blur (mesma técnica do carrossel de destaque).
+class _FundoBlur extends StatelessWidget {
+  final String? url;
+  const _FundoBlur({required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    if (url == null || url!.isEmpty) {
+      return const ColoredBox(color: AppColors.surface0);
+    }
+    // No desktop o blur é um retângulo dentro do conteúdo centralizado — as
+    // bordas precisam dissolver em preto (no mobile ele ocupa a largura toda).
+    final desktop = isDesktop(context);
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.hardEdge,
+        children: [
+          const ColoredBox(color: AppColors.surface0),
+          ShaderMask(
+            shaderCallback: (rect) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: [0.0, 0.45, 0.72],
+              colors: [Colors.white, Colors.white, Colors.transparent],
+            ).createShader(rect),
+            blendMode: BlendMode.dstIn,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+              child: Image.network(
+                url!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    const ColoredBox(color: AppColors.surface0),
+              ),
+            ),
+          ),
+          // Topo dissolve em preto (e dá contraste para o botão voltar).
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0.0, 0.28],
+                colors: [AppColors.surface0, Colors.transparent],
+              ),
+            ),
+          ),
+          // Laterais (desktop): dissolvem as bordas retas do retângulo.
+          if (desktop) ...[
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  stops: [0.0, 0.16],
+                  colors: [AppColors.surface0, Colors.transparent],
+                ),
+              ),
+            ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerRight,
+                  end: Alignment.centerLeft,
+                  stops: [0.0, 0.16],
+                  colors: [AppColors.surface0, Colors.transparent],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Banners ───────────────────────────────────────────────────────────────
 
 class _BannerFilme extends StatelessWidget {
@@ -798,82 +996,455 @@ class _SecaoSinopse extends StatelessWidget {
   }
 }
 
-class _SecaoElenco extends StatelessWidget {
+class _SecaoElenco extends StatefulWidget {
   final Future<TmdbInfo> infoFuture;
   final double padH;
 
   const _SecaoElenco({required this.infoFuture, this.padH = AppSpacing.lg});
 
   @override
+  State<_SecaoElenco> createState() => _SecaoElencoState();
+}
+
+class _SecaoElencoState extends State<_SecaoElenco> {
+  static const double _altura = 118;
+  // 3 cards (avatar 72 + separador 16) por clique.
+  static const double _passo = (72 + AppSpacing.base) * 3;
+
+  final _ctrl = ScrollController();
+  bool _podeEsq = false;
+  bool _podeDir = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_atualizar);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _atualizar());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _atualizar() {
+    if (!_ctrl.hasClients) return;
+    final pos = _ctrl.position;
+    final e = pos.pixels > 0;
+    final d = pos.pixels < pos.maxScrollExtent;
+    if (e != _podeEsq || d != _podeDir) {
+      setState(() {
+        _podeEsq = e;
+        _podeDir = d;
+      });
+    }
+  }
+
+  void _rolar(double delta) {
+    if (!_ctrl.hasClients) return;
+    final pos = _ctrl.position;
+    _ctrl.animateTo(
+      (pos.pixels + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final padH = widget.padH;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _TituloSecao('Elenco', padH: padH),
-        Padding(
-          padding: EdgeInsets.fromLTRB(padH, 0, padH, AppSpacing.base),
-          child: FutureBuilder<TmdbInfo>(
-            future: infoFuture,
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const Shimmer(
-                  child: Wrap(
-                    spacing: AppSpacing.sm,
-                    runSpacing: AppSpacing.sm,
-                    children: [
-                      SkeletonBox(width: 110, height: 30),
-                      SkeletonBox(width: 88, height: 30),
-                      SkeletonBox(width: 124, height: 30),
-                      SkeletonBox(width: 96, height: 30),
-                      SkeletonBox(width: 104, height: 30),
-                    ],
+        FutureBuilder<TmdbInfo>(
+          future: widget.infoFuture,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return SizedBox(
+                height: _altura,
+                child: Shimmer(
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    padding: EdgeInsets.fromLTRB(padH, 0, padH, AppSpacing.base),
+                    itemCount: 5,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(width: AppSpacing.base),
+                    itemBuilder: (_, _) => const _CardAtorSkeleton(),
                   ),
-                );
-              }
-              final elenco = snap.data?.elenco ?? const <String>[];
-              if (elenco.isEmpty) {
-                return Text(
+                ),
+              );
+            }
+            final elenco = snap.data?.elenco ?? const <AtorTmdb>[];
+            if (elenco.isEmpty) {
+              return Padding(
+                padding: EdgeInsets.fromLTRB(padH, 0, padH, AppSpacing.base),
+                child: Text(
                   'Elenco não disponível.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.textTertiary,
                       ),
-                );
-              }
-              return Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  for (final ator in elenco) _ChipAtor(nome: ator),
-                ],
+                ),
               );
-            },
-          ),
+            }
+            return SizedBox(
+              height: _altura,
+              child: Stack(
+                children: [
+                  ListView.separated(
+                    controller: _ctrl,
+                    scrollDirection: Axis.horizontal,
+                    padding:
+                        EdgeInsets.fromLTRB(padH, 0, padH, AppSpacing.base),
+                    itemCount: elenco.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(width: AppSpacing.base),
+                    itemBuilder: (_, i) => _CardAtor(ator: elenco[i]),
+                  ),
+                  // Setas discretas — só desktop, alinhadas ao avatar.
+                  if (isDesktop(context) && _podeEsq)
+                    Positioned(
+                      left: AppSpacing.sm,
+                      top: 0,
+                      height: _kAvatarElenco,
+                      child: Center(
+                        child: _SetaElenco(
+                          icone: Icons.chevron_left_rounded,
+                          onTap: () => _rolar(-_passo),
+                        ),
+                      ),
+                    ),
+                  if (isDesktop(context) && _podeDir)
+                    Positioned(
+                      right: AppSpacing.sm,
+                      top: 0,
+                      height: _kAvatarElenco,
+                      child: Center(
+                        child: _SetaElenco(
+                          icone: Icons.chevron_right_rounded,
+                          onTap: () => _rolar(_passo),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         ),
       ],
     );
   }
 }
 
-class _ChipAtor extends StatelessWidget {
-  final String nome;
-  const _ChipAtor({required this.nome});
+class _SetaElenco extends StatelessWidget {
+  final IconData icone;
+  final VoidCallback onTap;
+  const _SetaElenco({required this.icone, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.md,
-        vertical: AppSpacing.sm,
+    return Material(
+      color: AppColors.surface2.withValues(alpha: 0.92),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(icone, size: 18, color: AppColors.textSecondary),
+        ),
       ),
-      decoration: BoxDecoration(
+    );
+  }
+}
+
+// ─── Filmes relacionados ───────────────────────────────────────────────────
+
+class _SecaoRelacionados extends StatefulWidget {
+  final Future<List<Canal>> future;
+  final String escopo;
+  final double padH;
+
+  const _SecaoRelacionados({
+    required this.future,
+    required this.escopo,
+    this.padH = AppSpacing.lg,
+  });
+
+  @override
+  State<_SecaoRelacionados> createState() => _SecaoRelacionadosState();
+}
+
+class _SecaoRelacionadosState extends State<_SecaoRelacionados> {
+  static const double _cardW = 108;
+  static const double _cardH = _cardW * 1.5; // pôster 2:3
+  static const double _altura = _cardH + AppSpacing.base;
+  static const double _passo = (_cardW + AppSpacing.sm) * 3;
+
+  final _ctrl = ScrollController();
+  bool _podeEsq = false;
+  bool _podeDir = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_atualizar);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _atualizar());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _atualizar() {
+    if (!_ctrl.hasClients) return;
+    final pos = _ctrl.position;
+    final e = pos.pixels > 0;
+    final d = pos.pixels < pos.maxScrollExtent;
+    if (e != _podeEsq || d != _podeDir) {
+      setState(() {
+        _podeEsq = e;
+        _podeDir = d;
+      });
+    }
+  }
+
+  void _rolar(double delta) {
+    if (!_ctrl.hasClients) return;
+    final pos = _ctrl.position;
+    _ctrl.animateTo(
+      (pos.pixels + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final padH = widget.padH;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FutureBuilder<List<Canal>>(
+          future: widget.future,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              // Skeleton: a tela abre na hora; aqui mostra "carregando".
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _TituloSecao('Relacionados', padH: padH),
+                  SizedBox(
+                    height: _altura,
+                    child: Shimmer(
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.fromLTRB(
+                            padH, 0, padH, AppSpacing.base),
+                        itemCount: 6,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(width: AppSpacing.sm),
+                        itemBuilder: (_, _) =>
+                            const SkeletonBox(width: _cardW, height: _cardH),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+            final filmes = snap.data ?? const <Canal>[];
+            if (filmes.isEmpty) return const SizedBox.shrink();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _TituloSecao('Relacionados', padH: padH),
+                SizedBox(
+                  height: _altura,
+                  child: Stack(
+                    children: [
+                      ListView.separated(
+                        controller: _ctrl,
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.fromLTRB(
+                            padH, 0, padH, AppSpacing.base),
+                        itemCount: filmes.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(width: AppSpacing.sm),
+                        itemBuilder: (_, i) => _CardRelacionado(
+                          filme: filmes[i],
+                          escopo: widget.escopo,
+                          width: _cardW,
+                        ),
+                      ),
+                      if (isDesktop(context) && _podeEsq)
+                        Positioned(
+                          left: AppSpacing.sm,
+                          top: 0,
+                          bottom: AppSpacing.base,
+                          child: Center(
+                            child: _SetaElenco(
+                              icone: Icons.chevron_left_rounded,
+                              onTap: () => _rolar(-_passo),
+                            ),
+                          ),
+                        ),
+                      if (isDesktop(context) && _podeDir)
+                        Positioned(
+                          right: AppSpacing.sm,
+                          top: 0,
+                          bottom: AppSpacing.base,
+                          child: Center(
+                            child: _SetaElenco(
+                              icone: Icons.chevron_right_rounded,
+                              onTap: () => _rolar(_passo),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _CardRelacionado extends StatelessWidget {
+  final Canal filme;
+  final String escopo;
+  final double width;
+
+  const _CardRelacionado({
+    required this.filme,
+    required this.escopo,
+    required this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tag = 'hero-$escopo-${filme.url}';
+    final temLogo = filme.logoUrl != null && filme.logoUrl!.isNotEmpty;
+    return SizedBox(
+      width: width,
+      child: Material(
         color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-      ),
-      child: Text(
-        nome,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: AppColors.textPrimary,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TelaDetalhes.filme(filme, heroTag: tag),
             ),
+          ),
+          child: Hero(
+            tag: tag,
+            createRectTween: (b, e) => RectTween(begin: b, end: e),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: temLogo
+                  ? Image.network(
+                      filme.logoUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const _BannerFallback(),
+                    )
+                  : const _BannerFallback(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const double _kAvatarElenco = 64;
+
+class _CardAtor extends StatelessWidget {
+  final AtorTmdb ator;
+  const _CardAtor({required this.ator});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 72,
+      child: Column(
+        children: [
+          ClipOval(
+            child: SizedBox(
+              width: _kAvatarElenco,
+              height: _kAvatarElenco,
+              child: (ator.fotoUrl != null)
+                  ? Image.network(
+                      ator.fotoUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const _AvatarVazio(),
+                      loadingBuilder: (_, child, p) =>
+                          p == null ? child : const _AvatarVazio(),
+                    )
+                  : const _AvatarVazio(),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: Text(
+              ator.nome,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppColors.textPrimary,
+                    height: 1.15,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AvatarVazio extends StatelessWidget {
+  const _AvatarVazio();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: AppColors.surface2,
+      child: Center(
+        child: Icon(
+          Icons.person_rounded,
+          color: AppColors.textTertiary,
+          size: 30,
+        ),
+      ),
+    );
+  }
+}
+
+class _CardAtorSkeleton extends StatelessWidget {
+  const _CardAtorSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 72,
+      child: Column(
+        children: [
+          ClipOval(
+            child: SkeletonBox(
+              width: _kAvatarElenco,
+              height: _kAvatarElenco,
+            ),
+          ),
+          SizedBox(height: 6),
+          SkeletonBox(width: 56, height: 10),
+        ],
       ),
     );
   }

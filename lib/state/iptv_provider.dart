@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/canal.dart';
 import '../models/canal_assistido.dart';
@@ -123,6 +124,8 @@ class IptvProvider extends ChangeNotifier {
         _armazenamento.carregarCategoriasPersonalizadas();
     _minhaListaChaves = _armazenamento.carregarMinhaLista();
     notifyListeners();
+    // Une a biblioteca local com a da nuvem (best-effort, nao bloqueia).
+    unawaited(sincronizarBiblioteca());
   }
 
   /// Restaura a lista marcada como ativa pelo usuario, ou fallback para a
@@ -582,13 +585,20 @@ class IptvProvider extends ChangeNotifier {
   bool ehFavorito(Canal canal) => _armazenamento.ehFavorito(canal);
 
   Future<void> alternarFavorito(Canal canal) async {
-    if (ehFavorito(canal)) {
-      await _armazenamento.removerFavorito(canal);
-    } else {
+    final adicionar = !ehFavorito(canal);
+    if (adicionar) {
       await _armazenamento.adicionarFavorito(canal);
+    } else {
+      await _armazenamento.removerFavorito(canal);
     }
     _favoritos = _armazenamento.carregarFavoritos();
     notifyListeners();
+    _espelharBiblioteca(
+      tipo: _bibFavorito,
+      chave: chaveConteudo(canal.url),
+      dados: adicionar ? _favParaNuvem(canal) : const {},
+      adicionar: adicionar,
+    );
   }
 
   /// Dado um canal salvo (favorito/historico), tenta achar a versao ATUAL na
@@ -743,12 +753,23 @@ class IptvProvider extends ChangeNotifier {
     await _armazenamento.salvarProgresso(p);
     _progressos = _armazenamento.carregarProgressos();
     notifyListeners();
+    _espelharBiblioteca(
+      tipo: _bibProgresso,
+      chave: chaveConteudo(canal.url),
+      dados: _progParaNuvem(p),
+      adicionar: true,
+    );
   }
 
   Future<void> removerProgresso(Canal canal) async {
     await _armazenamento.removerProgresso(canal.url);
     _progressos = _armazenamento.carregarProgressos();
     notifyListeners();
+    _espelharBiblioteca(
+      tipo: _bibProgresso,
+      chave: chaveConteudo(canal.url),
+      adicionar: false,
+    );
   }
 
   // ===== MINHA LISTA =====
@@ -774,6 +795,196 @@ class IptvProvider extends ChangeNotifier {
       await _armazenamento.removerDeMinhaLista(chave);
     } else {
       await _armazenamento.adicionarAMinhaLista(chave);
+    }
+    _espelharBiblioteca(
+      tipo: _bibMinhaLista,
+      chave: chave,
+      adicionar: !estava,
+    );
+  }
+
+  // ===== BIBLIOTECA NA NUVEM (favoritos / minha lista / progresso) =====
+  //
+  // Espelha as acoes da biblioteca no Supabase (best-effort) e faz o merge
+  // ADITIVO ao trocar de perfil/logar. A biblioteca e por perfil. O historico
+  // NAO sobe. Falha de rede nunca quebra o fluxo local.
+
+  static const _bibFavorito = 'favorito';
+  static const _bibMinhaLista = 'minha_lista';
+  static const _bibProgresso = 'progresso';
+
+  // ── Serializacao p/ nuvem SEM a URL do stream ────────────────────────────
+  // CRITICO: a URL Xtream carrega usuario/senha na querystring. Nunca subimos
+  // a URL — gravamos so a `chave` estavel (sem credenciais) + campos de
+  // exibicao. No outro aparelho, a chave resolve contra a lista carregada
+  // (`resolverCanalAtual`/lookup por chaveConteudo) para recuperar a URL real.
+
+  static Map<String, dynamic> _favParaNuvem(Canal c) => {
+        'nome': c.nome,
+        if (c.logoUrl != null) 'logoUrl': c.logoUrl,
+        'grupo': c.grupo,
+        if (c.tvgId != null) 'tvgId': c.tvgId,
+        'tipo': c.tipo.name,
+        if (c.idGrupo != null) 'idGrupo': c.idGrupo,
+        if (c.duracaoSegundos != null) 'duracaoSegundos': c.duracaoSegundos,
+      };
+
+  /// Reconstroi o favorito da nuvem usando a `chave` como url (sem
+  /// credenciais). `chaveConteudo(chave) == chave`, entao ele resolve contra a
+  /// lista carregada exatamente como um favorito local.
+  static Canal _favDaNuvem(String chave, Map dados) => Canal(
+        url: chave,
+        nome: dados['nome'] as String? ?? 'Sem nome',
+        logoUrl: dados['logoUrl'] as String?,
+        grupo: dados['grupo'] as String? ?? 'Sem categoria',
+        tvgId: dados['tvgId'] as String?,
+        tipo: TipoCanal.values.firstWhere(
+          (t) => t.name == dados['tipo'],
+          orElse: () => TipoCanal.aoVivo,
+        ),
+        idGrupo: dados['idGrupo'] as String?,
+        duracaoSegundos: dados['duracaoSegundos'] as int?,
+      );
+
+  static Map<String, dynamic> _progParaNuvem(ProgressoCanal p) => {
+        'posicaoSeg': p.posicaoSeg,
+        if (p.duracaoSeg != null) 'duracaoSeg': p.duracaoSeg,
+        'atualizadoEm': p.atualizadoEm.toIso8601String(),
+      };
+
+  static ProgressoCanal _progDaNuvem(String chave, Map dados) => ProgressoCanal(
+        url: chave,
+        posicaoSeg: (dados['posicaoSeg'] as num?)?.toInt() ?? 0,
+        duracaoSeg: (dados['duracaoSeg'] as num?)?.toInt(),
+        atualizadoEm:
+            DateTime.tryParse(dados['atualizadoEm'] as String? ?? '') ??
+                DateTime.now(),
+      );
+
+  bool get _podeSincronizarBiblioteca =>
+      _conta != null &&
+      _conta.estaLogado &&
+      _armazenamento.perfilAtivoId != null;
+
+  void _espelharBiblioteca({
+    required String tipo,
+    required String chave,
+    Map<String, dynamic> dados = const {},
+    required bool adicionar,
+  }) {
+    if (!_podeSincronizarBiblioteca) return;
+    final perfilId = _armazenamento.perfilAtivoId!;
+    final conta = _conta!;
+    if (adicionar) {
+      conta
+          .salvarItemBiblioteca(
+              perfilId: perfilId, tipo: tipo, chave: chave, dados: dados)
+          .catchError((_) {/* rede: silencioso */});
+    } else {
+      conta
+          .removerItemBiblioteca(perfilId: perfilId, tipo: tipo, chave: chave)
+          .catchError((_) {/* silencioso */});
+    }
+  }
+
+  /// Une a biblioteca local com a da nuvem (favoritos, minha lista, progresso).
+  /// Merge ADITIVO: traz itens da nuvem que faltam aqui e sobe os que so existem
+  /// localmente; em progresso vence o mais recente. Chamado ao ativar o perfil.
+  Future<void> sincronizarBiblioteca() async {
+    if (!_podeSincronizarBiblioteca) return;
+    final perfilId = _armazenamento.perfilAtivoId!;
+    final conta = _conta!;
+
+    List<Map<String, dynamic>> remoto;
+    try {
+      remoto = await conta.carregarBiblioteca(perfilId);
+    } catch (_) {
+      return;
+    }
+
+    final remFav = <String, Map>{};
+    final remMinha = <String>{};
+    final remProg = <String, Map>{};
+    for (final row in remoto) {
+      final tipo = row['tipo'] as String?;
+      final chave = row['chave'] as String?;
+      if (chave == null) continue;
+      final dados = (row['dados'] as Map?) ?? const {};
+      switch (tipo) {
+        case _bibFavorito:
+          remFav[chave] = dados;
+        case _bibMinhaLista:
+          remMinha.add(chave);
+        case _bibProgresso:
+          remProg[chave] = dados;
+      }
+    }
+
+    // ── Nuvem → local (aditivo) ──
+    final favLocais = {for (final c in _favoritos) chaveConteudo(c.url)};
+    for (final e in remFav.entries) {
+      if (!favLocais.contains(e.key)) {
+        try {
+          await _armazenamento.adicionarFavorito(_favDaNuvem(e.key, e.value));
+        } catch (_) {/* payload invalido: ignora */}
+      }
+    }
+    final minhaLocais = _minhaListaChaves.toSet();
+    for (final chave in remMinha) {
+      if (!minhaLocais.contains(chave)) {
+        await _armazenamento.adicionarAMinhaLista(chave);
+      }
+    }
+    final progLocais = {
+      for (final p in _progressos) chaveConteudo(p.url): p,
+    };
+    for (final e in remProg.entries) {
+      try {
+        final rp = _progDaNuvem(e.key, e.value);
+        final lp = progLocais[e.key];
+        if (lp == null || rp.atualizadoEm.isAfter(lp.atualizadoEm)) {
+          await _armazenamento.salvarProgresso(rp);
+        }
+      } catch (_) {/* payload invalido */}
+    }
+
+    _favoritos = _armazenamento.carregarFavoritos();
+    _minhaListaChaves = _armazenamento.carregarMinhaLista();
+    _progressos = _armazenamento.carregarProgressos();
+    notifyListeners();
+
+    // ── Local → nuvem (sobe o que so existe aqui, SEM a url) ──
+    for (final c in _favoritos) {
+      final k = chaveConteudo(c.url);
+      if (!remFav.containsKey(k)) {
+        conta
+            .salvarItemBiblioteca(
+                perfilId: perfilId,
+                tipo: _bibFavorito,
+                chave: k,
+                dados: _favParaNuvem(c))
+            .catchError((_) {});
+      }
+    }
+    for (final chave in _minhaListaChaves) {
+      if (!remMinha.contains(chave)) {
+        conta
+            .salvarItemBiblioteca(
+                perfilId: perfilId, tipo: _bibMinhaLista, chave: chave)
+            .catchError((_) {});
+      }
+    }
+    for (final p in _progressos) {
+      final k = chaveConteudo(p.url);
+      if (!remProg.containsKey(k)) {
+        conta
+            .salvarItemBiblioteca(
+                perfilId: perfilId,
+                tipo: _bibProgresso,
+                chave: k,
+                dados: _progParaNuvem(p))
+            .catchError((_) {});
+      }
     }
   }
 }

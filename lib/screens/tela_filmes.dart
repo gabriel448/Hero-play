@@ -1,20 +1,51 @@
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:marquee/marquee.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
+import '../models/canal_assistido.dart';
 import '../models/progresso_canal.dart';
 import '../models/serie.dart';
 import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
+import '../state/perfil_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/chave_conteudo.dart';
 import '../utils/layout.dart';
+import '../utils/qualidade.dart';
 import '../widgets/abertura_secao.dart';
 import '../widgets/animado_entrada.dart';
 import 'tela_detalhes.dart';
 
 enum TipoVod { filmes, series }
+
+/// Callback de toque num item de conteúdo. [heroTag] (opcional) identifica o
+/// banner de origem para a animação Hero até a tela de detalhes.
+typedef AoTocarItem = void Function(Object item, [Object? heroTag]);
+
+/// Tag estável de um item para o Hero (igual na origem e no destino).
+String chaveHero(String prefixo, Object item) {
+  final k = item is Canal ? 'c:${item.url}' : 's:${(item as Serie).nome}';
+  return 'hero-$prefixo-$k';
+}
+
+/// Envolve [child] num Hero quando [tag] não é nulo (origem da animação até a
+/// tela de detalhes). `flightShuttleBuilder` mantém o recorte arredondado.
+Widget _comHero(Object? tag, Widget child) {
+  if (tag == null) return child;
+  return Hero(
+    tag: tag,
+    // Trajetória reta (diagonal) em vez do arco padrão do Material, que faz o
+    // banner ir pro lado e depois pra cima.
+    createRectTween: (begin, end) => RectTween(begin: begin, end: end),
+    flightShuttleBuilder: (_, _, _, _, toCtx) => ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: (toCtx.widget as Hero).child,
+    ),
+    child: child,
+  );
+}
 
 const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
 
@@ -56,7 +87,6 @@ const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
 
 const double _kPosterWidth = 100.0;
 const double _kPosterHeight = 150.0;
-const double _kPosterLabel = 28.0;
 
 const int _kDesktopVisibleCount = 14;
 
@@ -117,6 +147,9 @@ class _VodCacheEntry {
 // Invalida sozinho quando muda a identidade do mapa `categorias` (lista/perfil).
 int? _vodCacheIdentidade;
 final Map<TipoVod, _VodCacheEntry> _vodCache = {};
+final Map<TipoVod, List<Object>> _destaqueCache = {};
+// ID do perfil ativo quando o cache de destaque foi preenchido — invalida se trocar.
+String? _destaquePerfilId;
 
 /// Tela estilo streaming: carrosseis por categoria — filmes ou séries.
 class TelaFilmes extends StatefulWidget {
@@ -160,6 +193,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
     final identidade = identityHashCode(widget.categorias);
     if (_vodCacheIdentidade != identidade) {
       _vodCache.clear();
+      _destaqueCache.clear();
       _vodCacheIdentidade = identidade;
     }
 
@@ -220,17 +254,55 @@ class _TelaFilmesState extends State<TelaFilmes> {
   }
 
   /// Sinaliza para a animacao de abertura que o conteudo esta pronto. Em SERIES,
-  /// antes disso pre-carrega as capas (TMDB) dos primeiros banners — assim a
-  /// tela so abre quando os posters visiveis ja estao prontos (sem pop-in). Na
-  /// reentrada (cache), tanto o agrupamento quanto as capas ja estao em cache,
-  /// entao isto resolve quase instantaneamente.
+  /// antes disso pre-carrega as capas (TMDB) dos primeiros banners E computa o
+  /// carrossel de destaque — assim a tela so abre com tudo pronto (sem pop-in).
   void _finalizarCarga() {
-    if (widget.aoCarregar == null) return;
-    if (widget.tipo == TipoVod.series) {
-      _precarregarCapasSeries().whenComplete(() => widget.aoCarregar?.call());
-    } else {
-      widget.aoCarregar!.call();
+    if (widget.aoCarregar == null) {
+      _garantirDestaqueCache();
+      return;
     }
+    if (widget.tipo == TipoVod.series) {
+      Future.wait([
+        _precarregarCapasSeries(),
+        _garantirDestaqueCache(),
+      ]).whenComplete(() => widget.aoCarregar?.call());
+    } else {
+      _garantirDestaqueCache()
+          .whenComplete(() => widget.aoCarregar?.call());
+    }
+  }
+
+  /// Preenche [_destaqueCache] para este tipo se nao existir ou se o perfil
+  /// ativo mudou desde o ultimo preenchimento. Usa gêneros TMDB do histórico
+  /// VOD do perfil para selecionar e ordenar os títulos em destaque.
+  Future<void> _garantirDestaqueCache() async {
+    if (!mounted) return;
+    final perfilProvider = context.read<PerfilProvider>();
+    final perfilId = perfilProvider.perfilAtivo?.id ?? '';
+
+    // Invalida o cache quando o perfil muda (listas sao compartilhadas,
+    // entao a identidade do mapa categorias nao muda na troca de perfil).
+    if (_destaquePerfilId != perfilId) {
+      _destaqueCache.clear();
+      _destaquePerfilId = perfilId;
+    }
+
+    if (_destaqueCache.containsKey(widget.tipo)) return;
+
+    final provider = context.read<IptvProvider>();
+    final tmdb = context.read<TmdbService>();
+    final idioma = perfilProvider.perfilAtivo?.idioma ?? 'pt-BR';
+    final gostos = await _gostosTmdb(provider.historico, tmdb, idioma);
+
+    final List<Object> itens;
+    if (widget.tipo == TipoVod.filmes) {
+      itens = await _selecionarFilmesDestaqueAsync(
+          _todosConteudos, tmdb, idioma, gostos);
+    } else {
+      itens = await _selecionarSeriesDestaqueAsync(
+          _todosConteudos, tmdb, idioma, gostos);
+    }
+    if (mounted) _destaqueCache[widget.tipo] = itens;
   }
 
   /// Pre-carrega (TMDB + cache de imagem) as capas das primeiras series na
@@ -311,13 +383,13 @@ class _TelaFilmesState extends State<TelaFilmes> {
     }).toList();
   }
 
-  void _navegar(BuildContext context, Object item) {
+  void _navegar(BuildContext context, Object item, [Object? heroTag]) {
     // Filme ou série: sempre abre a tela de detalhes.
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => item is Canal
-            ? TelaDetalhes.filme(item)
-            : TelaDetalhes.serie(item as Serie),
+            ? TelaDetalhes.filme(item, heroTag: heroTag)
+            : TelaDetalhes.serie(item as Serie, heroTag: heroTag),
       ),
     );
   }
@@ -360,7 +432,12 @@ class _TelaFilmesState extends State<TelaFilmes> {
         }
       },
       child: Scaffold(
+      // Banner do destaque flutua atrás da appbar transparente (estilo Prime).
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: !_buscando,
         titleSpacing: 0,
         title: _buscando
@@ -409,12 +486,21 @@ class _TelaFilmesState extends State<TelaFilmes> {
       body: !revelar
           ? const SizedBox.shrink()
           : _buscando && _busca.isNotEmpty
-          ? _GradeResultados(
-              itens: _filtrar(_busca),
-              onTap: (item) => _navegar(context, item),
+          ? Padding(
+              // Busca e vazio respeitam a appbar (só o destaque flutua atrás).
+              padding: EdgeInsets.only(
+                  top: MediaQuery.paddingOf(context).top + kToolbarHeight),
+              child: _GradeResultados(
+                itens: _filtrar(_busca),
+                onTap: (item, [tag]) => _navegar(context, item, tag),
+              ),
             )
           : _conteudo.isEmpty
-              ? _Vazio(tipo: widget.tipo)
+              ? Padding(
+                  padding: EdgeInsets.only(
+                      top: MediaQuery.paddingOf(context).top + kToolbarHeight),
+                  child: _Vazio(tipo: widget.tipo),
+                )
               : Builder(builder: (context) {
                   final provider = context.watch<IptvProvider>();
                   final minhaListaItens = provider.minhaListaChaves
@@ -430,10 +516,737 @@ class _TelaFilmesState extends State<TelaFilmes> {
                     minhaListaItens: minhaListaItens,
                     todosItens: _todosConteudos,
                     tipo: widget.tipo,
-                    onTap: (item) => _navegar(context, item),
+                    onTap: (item, [tag]) => _navegar(context, item, tag),
                   );
                 }),
       ),
+    );
+  }
+}
+
+// ─── Destaque (hero banner, estilo Prime Video) ──────────────────────────────
+
+/// Gêneros TMDB mais frequentes no histórico VOD do perfil ativo.
+/// Ignora canais ao vivo (tipo == aoVivo). Async porque consulta o TMDB,
+/// mas os resultados ficam em cache na sessão — resolve rápido na segunda vez.
+Future<List<String>> _gostosTmdb(
+  List<CanalAssistido> historico,
+  TmdbService tmdb,
+  String idioma,
+) async {
+  final vod =
+      historico.where((a) => a.canal.tipo == TipoCanal.filme).toList();
+  if (vod.isEmpty) return const [];
+
+  // Deduplica por nome e limita a 12 títulos únicos mais recentes.
+  final vistos = <String>{};
+  final candidatos = <Canal>[];
+  for (final a in vod) {
+    final nome = a.canal.nome.trim();
+    if (nome.isNotEmpty && vistos.add(nome)) {
+      candidatos.add(a.canal);
+      if (candidatos.length >= 12) break;
+    }
+  }
+
+  final freq = <String, int>{};
+  await Future.wait(candidatos.map((c) async {
+    try {
+      final info = await tmdb
+          .info(nome: c.nome, ehSerie: false, idioma: idioma)
+          .timeout(const Duration(seconds: 5));
+      for (final g in info.generos) {
+        freq[g] = (freq[g] ?? 0) + 1;
+      }
+    } catch (_) {}
+  }));
+
+  if (freq.isEmpty) return const [];
+  return (freq.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
+      .map((e) => e.key)
+      .take(5)
+      .toList();
+}
+
+/// Seleciona até [n] filmes 4K para o destaque, pontuando por gêneros TMDB.
+/// Amostra 25 filmes aleatórios e prefere os que mais batem com [gostos].
+Future<List<Canal>> _selecionarFilmesDestaqueAsync(
+  List<Object> todos,
+  TmdbService tmdb,
+  String idioma,
+  List<String> gostos, {
+  int n = 5,
+}) async {
+  final filmes4k = todos
+      .whereType<Canal>()
+      .where((c) => detectarQualidade(c.nome) == Qualidade.uhd)
+      .toList();
+  if (filmes4k.isEmpty) return const [];
+
+  final amostra = (List.of(filmes4k)..shuffle()).take(n + 20).toList();
+  if (gostos.isEmpty) return amostra.take(n).toList();
+
+  final gostoSet = gostos.toSet();
+  final pontos = List<int>.filled(amostra.length, 0);
+  await Future.wait(List.generate(amostra.length, (i) async {
+    try {
+      final info = await tmdb
+          .info(nome: amostra[i].nome, ehSerie: false, idioma: idioma)
+          .timeout(const Duration(seconds: 5));
+      pontos[i] = info.generos.where(gostoSet.contains).length;
+    } catch (_) {}
+  }));
+
+  final indices = List.generate(amostra.length, (i) => i)
+    ..sort((a, b) => pontos[b].compareTo(pontos[a]));
+  return indices.take(n).map((i) => amostra[i]).toList();
+}
+
+/// Seleciona até [n] séries com banner TMDB, priorizando gostos do perfil.
+Future<List<Object>> _selecionarSeriesDestaqueAsync(
+  List<Object> todos,
+  TmdbService tmdb,
+  String idioma,
+  List<String> gostos, {
+  int n = 5,
+}) async {
+  final todas = (todos.whereType<Serie>().toList()..shuffle()).take(40).toList();
+  final comBanner = <Serie>[];
+  for (final s in todas) {
+    if (comBanner.length >= 15) break;
+    try {
+      final url =
+          await tmdb.posterSerie(s.nome).timeout(const Duration(seconds: 3));
+      if (url != null && url.isNotEmpty) comBanner.add(s);
+    } catch (_) {}
+  }
+  if (comBanner.isEmpty) return const [];
+  if (gostos.isEmpty) return (comBanner..shuffle()).take(n).toList();
+
+  // Pontua cada série pelo número de gêneros TMDB que batem com os gostos.
+  final gostoSet = gostos.toSet();
+  final pontos = List<int>.filled(comBanner.length, 0);
+  await Future.wait(List.generate(comBanner.length, (i) async {
+    try {
+      final info = await tmdb
+          .info(nome: comBanner[i].nome, ehSerie: true, idioma: idioma)
+          .timeout(const Duration(seconds: 5));
+      pontos[i] = info.generos.where(gostoSet.contains).length;
+    } catch (_) {}
+  }));
+
+  final indices = List.generate(comBanner.length, (i) => i)
+    ..sort((a, b) => pontos[b].compareTo(pontos[a]));
+  return indices.take(n).map((i) => comBanner[i]).toList();
+}
+
+class _SecaoDestaque extends StatefulWidget {
+  final List<Object> todosItens;
+  final TipoVod tipo;
+  final AoTocarItem onTap;
+
+  const _SecaoDestaque({
+    required this.todosItens,
+    required this.tipo,
+    required this.onTap,
+  });
+
+  @override
+  State<_SecaoDestaque> createState() => _SecaoDestaqueState();
+}
+
+class _SecaoDestaqueState extends State<_SecaoDestaque>
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+  final _pageCtrl = PageController();
+  late final AnimationController _animCtrl;
+  Timer? _autoTimer;
+
+  int _pagina = 0;
+  List<Object> _itens = const [];
+  final _posterUrls = <int, String?>{};
+  final _infos = <int, TmdbInfo>{};
+
+  static const _intervalo = Duration(seconds: 7);
+  static const _duracaoAnim = Duration(milliseconds: 700);
+  static const _duracaoTransicao = Duration(milliseconds: 500);
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(vsync: this, duration: _duracaoAnim);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_itens.isEmpty) _lerCache();
+  }
+
+  void _lerCache() {
+    final cached = _destaqueCache[widget.tipo];
+    if (cached == null || cached.isEmpty) return;
+    setState(() => _itens = cached);
+    _animCtrl.forward();
+    _iniciarTimer();
+    _precarregarInfos();
+  }
+
+  Future<void> _precarregarInfos() async {
+    if (!mounted) return;
+    final tmdb = context.read<TmdbService>();
+    final idioma =
+        context.read<PerfilProvider>().perfilAtivo?.idioma ?? 'pt-BR';
+
+    for (int i = 0; i < _itens.length; i++) {
+      if (!mounted) return;
+      final item = _itens[i];
+      final nome = item is Canal ? item.nome : (item as Serie).nome;
+      final ehSerie = item is Serie;
+
+      if (!_posterUrls.containsKey(i)) {
+        if (item is Canal) {
+          _posterUrls[i] =
+              (item.logoUrl?.isNotEmpty == true) ? item.logoUrl : null;
+        } else {
+          try {
+            _posterUrls[i] = await tmdb
+                .posterSerie((item as Serie).nome)
+                .timeout(const Duration(seconds: 4));
+          } catch (_) {
+            _posterUrls[i] = null;
+          }
+        }
+      }
+
+      if (!_infos.containsKey(i)) {
+        try {
+          _infos[i] = await tmdb
+              .info(nome: nome, ehSerie: ehSerie, idioma: idioma)
+              .timeout(const Duration(seconds: 5));
+        } catch (_) {
+          _infos[i] = TmdbInfo.vazio;
+        }
+      }
+
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _iniciarTimer() {
+    _autoTimer?.cancel();
+    if (_itens.length <= 1) return;
+    _autoTimer = Timer.periodic(_intervalo, (_) {
+      if (!mounted) return;
+      final prox = (_pagina + 1) % _itens.length;
+      _pageCtrl.animateToPage(
+        prox,
+        duration: _duracaoTransicao,
+        curve: Curves.easeInOutCubic,
+      );
+    });
+  }
+
+  void _irPara(int i) {
+    _autoTimer?.cancel();
+    _pageCtrl.animateToPage(
+      i,
+      duration: _duracaoTransicao,
+      curve: Curves.easeInOutCubic,
+    );
+    _iniciarTimer();
+  }
+
+  @override
+  void dispose() {
+    _autoTimer?.cancel();
+    _pageCtrl.dispose();
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  // ── Animações (só opacity + transform → compositor GPU, 60 fps) ──────────
+
+  Animation<double> _fade(double from, double to) => CurvedAnimation(
+        parent: _animCtrl,
+        curve: Interval(from, to, curve: Curves.easeOut),
+      );
+
+  Animation<Offset> _slide(double from, double to) =>
+      Tween<Offset>(begin: const Offset(0, 0.22), end: Offset.zero).animate(
+        CurvedAnimation(
+          parent: _animCtrl,
+          curve: Interval(from, to, curve: Curves.easeOutCubic),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin
+    if (_itens.isEmpty) return const SizedBox.shrink();
+
+    final ff = formFactor(context);
+    final isPhone = ff == FormFactor.phone;
+    final isTabletLandscape = ff == FormFactor.tablet &&
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final centrado = ff == FormFactor.desktop || isTabletLandscape;
+    final h = isPhone ? 220.0 : (ff == FormFactor.tablet ? 300.0 : 360.0);
+
+    // Espaço atrás da appbar transparente: o fundo blur sobe até o topo da tela
+    // (status bar + toolbar), com gradiente no topo.
+    final topInset = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    final alturaTotal = h + topInset;
+    // Conteúdo (poster/info) sobe um pouco para dentro da zona da appbar
+    // transparente — menos distância vazia entre a barra e o destaque.
+    final topConteudo = topInset - 22;
+    final alturaConteudo = alturaTotal - topConteudo;
+
+    // Gradiente até AppColors.surface0 em vez de ShaderMask+dstIn.
+    // dstIn cria pixels transparentes → linha visível ao scrollar no ListView.
+    Widget banner = SizedBox(
+      height: alturaTotal,
+      // ClipRect: o blur (ImageFiltered) expande a camada além dos limites do
+      // banner e sangra para baixo/laterais — sem clip, esse sangramento vira
+      // a linha visível abaixo do destaque. Clipamos para a área real.
+      child: ClipRect(
+        child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          // ── Banners (fundo blur + poster) — preenche tudo, atrás da appbar ─
+          PageView.builder(
+            controller: _pageCtrl,
+            onPageChanged: (i) {
+              setState(() => _pagina = i);
+              _animCtrl.forward(from: 0);
+              _iniciarTimer();
+            },
+            itemCount: _itens.length,
+            itemBuilder: (_, i) => _buildBackground(i, topConteudo, isPhone),
+          ),
+
+          // ── Info animada (sobreposta) — alinhada ao topo (abaixo da appbar).
+          // Animação de SAÍDA: a opacidade do texto cai conforme o PageView se
+          // afasta da página atual, então o texto antigo some antes do banner
+          // novo passar por trás (e volta com o stagger quando assenta).
+          Positioned(
+            top: topInset,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _pageCtrl,
+                builder: (context, child) {
+                  final page = _pageCtrl.hasClients
+                      ? (_pageCtrl.page ?? _pagina.toDouble())
+                      : _pagina.toDouble();
+                  final dist = (page - page.roundToDouble()).abs();
+                  final op = (1 - dist / 0.5).clamp(0.0, 1.0);
+                  return Opacity(opacity: op, child: child);
+                },
+                child: AnimatedBuilder(
+                  animation: _animCtrl,
+                  builder: (_, _) =>
+                      _buildInfo(context, isPhone, alturaConteudo, centrado),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Tap overlay ────────────────────────────────────────────────
+          Positioned(
+            top: topConteudo,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _pagina < _itens.length
+                  ? () => widget.onTap(
+                        _itens[_pagina],
+                        chaveHero('destaque', _itens[_pagina]),
+                      )
+                  : null,
+            ),
+          ),
+
+          // ── Fade superior (gradiente no topo, atrás da appbar) ─────────
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: topInset + 24,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [AppColors.surface0, Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Blend do blur para o preto, logo acima da barra opaca ──────
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 22,
+            height: h * 0.34,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, AppColors.surface0],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Fades laterais (desktop / tablet landscape) ────────────────
+          if (centrado) ...[
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 72,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [AppColors.surface0, Colors.transparent],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 72,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerRight,
+                      end: Alignment.centerLeft,
+                      colors: [AppColors.surface0, Colors.transparent],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          // ── Barra preta OPACA da base até logo acima das bolinhas. O
+          // gradiente é semi-transparente e deixava o blur passar em banner
+          // claro; esta barra é 100% opaca, então nada vaza no fim. ─────────
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 22,
+            child: const ColoredBox(color: AppColors.surface0),
+          ),
+
+          // ── Bolinhas (na frente de tudo p/ não escurecerem) ────────────
+          Positioned(
+            bottom: 10,
+            left: 0,
+            right: 0,
+            child: _buildDots(),
+          ),
+        ],
+        ),
+      ),
+    );
+
+    // Phone e tablet portrait: largura toda
+    if (!centrado) return banner;
+
+    // Desktop/tablet landscape: 70% centrado.
+    // Setas nas margens externas — apenas desktop.
+    final mostrarSetas = ff == FormFactor.desktop && _itens.length > 1;
+
+    return SizedBox(
+      height: alturaTotal,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 15,
+            child: mostrarSetas
+                ? Center(child: _buildSeta(esquerda: true))
+                : const SizedBox.shrink(),
+          ),
+          Expanded(flex: 70, child: banner),
+          Expanded(
+            flex: 15,
+            child: mostrarSetas
+                ? Center(child: _buildSeta(esquerda: false))
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBackground(int i, double topConteudo, bool isPhone) {
+    final poster = _posterUrls[i];
+
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.hardEdge,
+      children: [
+        // Base sólida = fundo do app. Garante que nenhuma transparência/void
+        // apareça sob a deformação do overscroll (sem linha na borda).
+        const ColoredBox(color: AppColors.surface0),
+
+        // Fundo desfocado (sobre a base sólida). A imagem desaparece (vira
+        // transparente) antes da borda inferior via ShaderMask → no fim só
+        // sobra a base preta sólida, então o corte do ClipRect cai sobre
+        // preto e não há linha brilhante do blur. dstIn aqui é seguro porque
+        // a base (ColoredBox surface0) mantém o banner opaco.
+        if (poster != null)
+          ShaderMask(
+            shaderCallback: (rect) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              // Imagem 100% transparente já em 0.80 → os ~20% finais são só a
+              // base preta sólida (blur nem é pintado lá). Em banner branco
+              // não sobra nada para o clip antiserrilhar na borda.
+              stops: [0.0, 0.58, 0.80],
+              colors: [Colors.white, Colors.white, Colors.transparent],
+            ).createShader(rect),
+            blendMode: BlendMode.dstIn,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+              child: Image.network(
+                poster,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    Container(color: AppColors.surface2),
+              ),
+            ),
+          )
+        else
+          const ColoredBox(color: AppColors.surface2),
+
+        // Gradiente escuro (horizontal: direita → esquerda)
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerRight,
+              end: Alignment.centerLeft,
+              stops: const [0.0, 0.4, 1.0],
+              colors: [
+                Colors.transparent,
+                Colors.black54,
+                Colors.black.withValues(alpha: 0.92),
+              ],
+            ),
+          ),
+        ),
+        // Poster à esquerda (na região abaixo da appbar)
+        if (poster != null)
+          Positioned(
+            left: AppSpacing.lg,
+            top: topConteudo,
+            bottom: AppSpacing.xl + 4, // acima das bolinhas
+            child: AspectRatio(
+              aspectRatio: 2 / 3,
+              child: _comHero(
+                i < _itens.length
+                    ? chaveHero('destaque', _itens[i])
+                    : null,
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    poster,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) =>
+                        Container(color: AppColors.surface2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildInfo(BuildContext context, bool isPhone, double alturaConteudo,
+      bool centrado) {
+    if (_pagina >= _itens.length) return const SizedBox.shrink();
+
+    final item = _itens[_pagina];
+    final nome = item is Canal ? item.nome : (item as Serie).nome;
+    final info = _infos[_pagina];
+    // Largura real do poster: o poster ocupa a região de conteúdo de
+    // topConteudo até (bottom: xl+4) — concordância evita o texto começar
+    // antes do fim do poster.
+    final posterAlturaReal = alturaConteudo - AppSpacing.xl - 4;
+    final posterW = posterAlturaReal * (2 / 3);
+    final leftMargin = AppSpacing.lg + posterW + AppSpacing.base;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: leftMargin,
+        right: centrado ? AppSpacing.xl : AppSpacing.base,
+        top: 6,
+        bottom: 16,
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Nome
+          FadeTransition(
+            opacity: _fade(0.0, 0.55),
+            child: SlideTransition(
+              position: _slide(0.0, 0.55),
+              child: Text(
+                nome,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      fontSize: centrado ? 26.0 : null,
+                      shadows: const [
+                        Shadow(color: Colors.black54, blurRadius: 8)
+                      ],
+                    ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+
+          SizedBox(height: centrado ? 8 : 6),
+
+          // Nota + ano
+          if (info != null && (info.nota != null || info.ano != null))
+            FadeTransition(
+              opacity: _fade(0.25, 0.70),
+              child: Row(
+                children: [
+                  if (info.nota != null) ...[
+                    Icon(Icons.star_rounded,
+                        size: centrado ? 16 : 13,
+                        color: Colors.amber.shade400),
+                    const SizedBox(width: 3),
+                    Text(
+                      info.nota!.toStringAsFixed(1),
+                      style:
+                          Theme.of(context).textTheme.labelMedium?.copyWith(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w700,
+                                fontSize: centrado ? 15.0 : null,
+                              ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (info.ano != null)
+                    Text(
+                      '${info.ano}',
+                      style:
+                          Theme.of(context).textTheme.labelMedium?.copyWith(
+                                color: Colors.white54,
+                                fontSize: centrado ? 15.0 : null,
+                              ),
+                    ),
+                ],
+              ),
+            ),
+
+          SizedBox(height: centrado ? 10 : 8),
+
+          // Sinopse
+          if (info?.sinopse != null)
+            FadeTransition(
+              opacity: _fade(0.45, 1.0),
+              child: SlideTransition(
+                position: _slide(0.45, 1.0),
+                child: Text(
+                  info!.sinopse!,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(
+                        color: Colors.white60,
+                        height: 1.45,
+                        fontSize: centrado ? 13.5 : null,
+                      ),
+                  maxLines: isPhone ? 4 : 6,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSeta({required bool esquerda}) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _irPara(
+          esquerda
+              ? (_pagina - 1 + _itens.length) % _itens.length
+              : (_pagina + 1) % _itens.length,
+        ),
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.10),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.22),
+              width: 1,
+            ),
+          ),
+          child: Icon(
+            esquerda
+                ? Icons.chevron_left_rounded
+                : Icons.chevron_right_rounded,
+            color: Colors.white.withValues(alpha: 0.80),
+            size: 20,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDots() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(_itens.length, (i) {
+        final ativo = i == _pagina;
+        return GestureDetector(
+          onTap: () => _irPara(i),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            width: ativo ? 18 : 5,
+            height: 5,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2.5),
+              color: ativo ? AppColors.accent : Colors.white30,
+            ),
+          ),
+        );
+      }),
     );
   }
 }
@@ -484,7 +1297,7 @@ class _BodyComCarrosseis extends StatelessWidget {
   final List<Object> minhaListaItens;
   final List<Object> todosItens;
   final TipoVod tipo;
-  final void Function(Object) onTap;
+  final AoTocarItem onTap;
 
   const _BodyComCarrosseis({
     required this.nomes,
@@ -545,45 +1358,71 @@ class _BodyComCarrosseis extends StatelessWidget {
 
     return ListView.builder(
       padding: const EdgeInsets.only(
-        top: AppSpacing.sm,
         bottom: AppSpacing.xxl,
       ),
-      itemCount: total,
+      itemCount: total + 1, // +1 para a seção destaque no topo
       itemBuilder: (_, i) {
+        // Item 0 → seção destaque (hero banner)
+        if (i == 0) {
+          return _SecaoDestaque(
+            todosItens: todosItens,
+            tipo: tipo,
+            onTap: onTap,
+          );
+        }
+        final j = i - 1; // índice real nos carrosseis
         final Widget linha;
-        if (temAndamento && i == 0) {
+        if (temAndamento && j == 0) {
           linha = _CarrosselContinuar(itens: continuar, onTap: onTap);
-        } else if (temMinhaLista && i == (temAndamento ? 1 : 0)) {
+        } else if (temMinhaLista && j == (temAndamento ? 1 : 0)) {
           linha = _CarrosselCategoria(
             nomeCategoria: 'Minha lista',
             itens: minhaListaItens,
             onTap: onTap,
           );
-        } else if (i == especialCount - 1) {
-          // Carrossel "Todos"/"Todas" — sempre no topo após os especiais acima.
+        } else if (j == especialCount - 1) {
           linha = _CarrosselCategoria(
             nomeCategoria: nomeTodos,
             itens: todosOrdenados,
             onTap: onTap,
           );
         } else {
-          final idx = i - especialCount;
+          final idx = j - especialCount;
           final nome = ordemCategorias[idx];
           linha = _CarrosselCategoria(
             nomeCategoria: nome,
             itens: conteudo[nome]!,
-            onTap: (item) => onTap(item),
+            onTap: onTap,
           );
         }
-        // Entrada animada (fade + slide) escalonada nas primeiras filas — as
-        // visiveis no topo. As demais (so vistas ao rolar) entram sem animacao.
-        if (i < _kFilasAnimadas) {
-          return AnimadoEntrada(
-            delay: Duration(milliseconds: 70 * i),
-            child: linha,
+        final Widget conteudoLinha = j < _kFilasAnimadas
+            ? AnimadoEntrada(
+                delay: Duration(milliseconds: 70 * j),
+                child: linha,
+              )
+            : linha;
+
+        // Primeira categoria: "chapéu" preto opaco que invade pra cima o
+        // espaço do destaque (até perto das bolinhas), cobrindo qualquer
+        // resíduo/linha do blur que sobre na borda — sem engordar a barra.
+        if (j == 0) {
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              conteudoLinha,
+              const Positioned(
+                // Bolinhas ficam a 10px da borda do destaque; sobe só 8px
+                // para cobrir a linha sem tampar a seleção.
+                top: -8,
+                left: 0,
+                right: 0,
+                height: 10,
+                child: ColoredBox(color: AppColors.surface0),
+              ),
+            ],
           );
         }
-        return linha;
+        return conteudoLinha;
       },
     );
   }
@@ -609,7 +1448,7 @@ class _ItemContinuar {
 
 class _CarrosselContinuar extends StatefulWidget {
   final List<_ItemContinuar> itens;
-  final void Function(Object) onTap;
+  final AoTocarItem onTap;
 
   const _CarrosselContinuar({required this.itens, required this.onTap});
 
@@ -665,7 +1504,7 @@ class _CarrosselContinuarState extends State<_CarrosselContinuar> {
             final itemExtent = itemW + AppSpacing.sm;
             return _CarrosselComBotoes(
               ctrl: _ctrl,
-              height: posterH + _kPosterLabel,
+              height: posterH,
               scrollStep: itemExtent * 3,
               child: ListView.builder(
                 controller: _ctrl,
@@ -677,19 +1516,23 @@ class _CarrosselContinuarState extends State<_CarrosselContinuar> {
                   final item = widget.itens[i];
                   final serie = item.serie;
                   if (serie != null) {
+                    final tag = chaveHero('cont', serie);
                     return _PosterSerie(
                       key: ValueKey('cont:${serie.nome}'),
                       serie: serie,
                       width: itemW,
-                      onTap: () => widget.onTap(serie),
+                      heroTag: tag,
+                      onTap: () => widget.onTap(serie, tag),
                     );
                   }
                   final filme = item.filme!;
+                  final tag = chaveHero('cont', filme);
                   return _Poster(
                     canal: filme,
                     progresso: item.progresso,
                     width: itemW,
-                    onTap: () => widget.onTap(filme),
+                    heroTag: tag,
+                    onTap: () => widget.onTap(filme, tag),
                   );
                 },
               ),
@@ -704,7 +1547,7 @@ class _CarrosselContinuarState extends State<_CarrosselContinuar> {
 class _CarrosselCategoria extends StatefulWidget {
   final String nomeCategoria;
   final List<Object> itens;
-  final void Function(Object) onTap;
+  final AoTocarItem onTap;
 
   const _CarrosselCategoria({
     required this.nomeCategoria,
@@ -786,7 +1629,7 @@ class _CarrosselCategoriaState extends State<_CarrosselCategoria> {
             final itemExtent = itemW + AppSpacing.sm;
             return _CarrosselComBotoes(
               ctrl: _ctrl,
-              height: posterH + _kPosterLabel,
+              height: posterH,
               scrollStep: itemExtent * 3,
               child: ListView.builder(
                 controller: _ctrl,
@@ -795,11 +1638,16 @@ class _CarrosselCategoriaState extends State<_CarrosselCategoria> {
                     const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                 itemCount: widget.itens.length,
                 itemExtent: itemExtent,
-                itemBuilder: (_, i) => _CardConteudo(
-                  item: widget.itens[i],
-                  width: itemW,
-                  onTap: () => widget.onTap(widget.itens[i]),
-                ),
+                itemBuilder: (_, i) {
+                  final item = widget.itens[i];
+                  final tag = chaveHero(widget.nomeCategoria, item);
+                  return _CardConteudo(
+                    item: item,
+                    width: itemW,
+                    heroTag: tag,
+                    onTap: () => widget.onTap(item, tag),
+                  );
+                },
               ),
             );
           },
@@ -939,16 +1787,23 @@ class _CardConteudo extends StatelessWidget {
   final Object item;
   final VoidCallback onTap;
   final double width;
+  final Object? heroTag;
   const _CardConteudo({
     required this.item,
     required this.onTap,
     this.width = _kPosterWidth,
+    this.heroTag,
   });
 
   @override
   Widget build(BuildContext context) {
     if (item is Canal) {
-      return _Poster(canal: item as Canal, onTap: onTap, width: width);
+      return _Poster(
+        canal: item as Canal,
+        onTap: onTap,
+        width: width,
+        heroTag: heroTag,
+      );
     }
     final serie = item as Serie;
     return _PosterSerie(
@@ -956,6 +1811,7 @@ class _CardConteudo extends StatelessWidget {
       serie: serie,
       onTap: onTap,
       width: width,
+      heroTag: heroTag,
     );
   }
 }
@@ -965,11 +1821,13 @@ class _Poster extends StatelessWidget {
   final VoidCallback onTap;
   final ProgressoCanal? progresso;
   final double width;
+  final Object? heroTag;
   const _Poster({
     required this.canal,
     required this.onTap,
     this.progresso,
     this.width = _kPosterWidth,
+    this.heroTag,
   });
 
   @override
@@ -991,20 +1849,23 @@ class _Poster extends StatelessWidget {
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: canal.logoUrl != null &&
-                                canal.logoUrl!.isNotEmpty
-                            ? Image.network(
-                                canal.logoUrl!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (ctx, err, st) =>
-                                    const _PosterFallback(serie: false),
-                                loadingBuilder: (_, child, p) =>
-                                    p == null
-                                        ? child
-                                        : const _PosterFallback(
-                                            serie: false),
-                              )
-                            : const _PosterFallback(serie: false),
+                        child: _comHero(
+                          heroTag,
+                          canal.logoUrl != null &&
+                                  canal.logoUrl!.isNotEmpty
+                              ? Image.network(
+                                  canal.logoUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (ctx, err, st) =>
+                                      const _PosterFallback(serie: false),
+                                  loadingBuilder: (_, child, p) =>
+                                      p == null
+                                          ? child
+                                          : const _PosterFallback(
+                                              serie: false),
+                                )
+                              : const _PosterFallback(serie: false),
+                        ),
                       ),
                       if (progresso != null)
                         Positioned(
@@ -1022,27 +1883,6 @@ class _Poster extends StatelessWidget {
                     ],
                   ),
                 ),
-                SizedBox(
-                  height: _kPosterLabel,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xs,
-                      vertical: AppSpacing.xs,
-                    ),
-                    child: Marquee(
-                      text: canal.nome,
-                      style: Theme.of(context).textTheme.labelSmall!,
-                      scrollAxis: Axis.horizontal,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      blankSpace: 32.0,
-                      velocity: 30.0,
-                      pauseAfterRound: const Duration(seconds: 3),
-                      startAfter: const Duration(seconds: 2),
-                      fadingEdgeStartFraction: 0.0,
-                      fadingEdgeEndFraction: 0.12,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -1056,11 +1896,13 @@ class _PosterSerie extends StatefulWidget {
   final Serie serie;
   final VoidCallback onTap;
   final double width;
+  final Object? heroTag;
   const _PosterSerie({
     super.key,
     required this.serie,
     required this.onTap,
     this.width = _kPosterWidth,
+    this.heroTag,
   });
 
   @override
@@ -1105,7 +1947,9 @@ class _PosterSerieState extends State<_PosterSerie> {
                       return Stack(
                         children: [
                           Positioned.fill(
-                            child: url != null
+                            child: _comHero(
+                              widget.heroTag,
+                              url != null
                                 ? Image.network(
                                     url,
                                     fit: BoxFit.cover,
@@ -1118,29 +1962,6 @@ class _PosterSerieState extends State<_PosterSerie> {
                                                 serie: true),
                                   )
                                 : const _PosterFallback(serie: true),
-                          ),
-                          // Badge "SÉRIE"
-                          Positioned(
-                            top: 4,
-                            left: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.accentDim,
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: const Text(
-                                'SÉRIE',
-                                style: TextStyle(
-                                  color: AppColors.accentBright,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.4,
-                                ),
-                              ),
                             ),
                           ),
                           // Contagem de episodios
@@ -1171,27 +1992,6 @@ class _PosterSerieState extends State<_PosterSerie> {
                         ],
                       );
                     },
-                  ),
-                ),
-                SizedBox(
-                  height: _kPosterLabel,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xs,
-                      vertical: AppSpacing.xs,
-                    ),
-                    child: Marquee(
-                      text: widget.serie.nome,
-                      style: Theme.of(context).textTheme.labelSmall!,
-                      scrollAxis: Axis.horizontal,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      blankSpace: 32.0,
-                      velocity: 30.0,
-                      pauseAfterRound: const Duration(seconds: 3),
-                      startAfter: const Duration(seconds: 2),
-                      fadingEdgeStartFraction: 0.0,
-                      fadingEdgeEndFraction: 0.12,
-                    ),
                   ),
                 ),
               ],
@@ -1226,7 +2026,7 @@ class _PosterFallback extends StatelessWidget {
 
 class _GradeResultados extends StatelessWidget {
   final List<Object> itens;
-  final void Function(Object) onTap;
+  final AoTocarItem onTap;
 
   const _GradeResultados({required this.itens, required this.onTap});
 
@@ -1248,15 +2048,20 @@ class _GradeResultados extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.base),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: posterColumns(context),
-        childAspectRatio: _kPosterWidth / (_kPosterHeight + _kPosterLabel),
+        childAspectRatio: _kPosterWidth / _kPosterHeight,
         crossAxisSpacing: AppSpacing.sm,
         mainAxisSpacing: AppSpacing.sm,
       ),
       itemCount: itens.length,
-      itemBuilder: (_, i) => _CardConteudo(
-        item: itens[i],
-        onTap: () => onTap(itens[i]),
-      ),
+      itemBuilder: (_, i) {
+        final item = itens[i];
+        final tag = chaveHero('busca', item);
+        return _CardConteudo(
+          item: item,
+          heroTag: tag,
+          onTap: () => onTap(item, tag),
+        );
+      },
     );
   }
 }
@@ -1372,12 +2177,12 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
     });
   }
 
-  void _navegar(Object item) {
+  void _navegar(Object item, [Object? heroTag]) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => item is Canal
-            ? TelaDetalhes.filme(item)
-            : TelaDetalhes.serie(item as Serie),
+            ? TelaDetalhes.filme(item, heroTag: heroTag)
+            : TelaDetalhes.serie(item as Serie, heroTag: heroTag),
       ),
     );
   }
@@ -1537,16 +2342,20 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
               padding: const EdgeInsets.all(AppSpacing.base),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: posterColumns(context),
-                childAspectRatio:
-                    _kPosterWidth / (_kPosterHeight + _kPosterLabel),
+                childAspectRatio: _kPosterWidth / _kPosterHeight,
                 crossAxisSpacing: AppSpacing.sm,
                 mainAxisSpacing: AppSpacing.sm,
               ),
               itemCount: exibidos.length,
-              itemBuilder: (_, i) => _CardConteudo(
-                item: exibidos[i],
-                onTap: () => _navegar(exibidos[i]),
-              ),
+              itemBuilder: (_, i) {
+                final item = exibidos[i];
+                final tag = chaveHero('cat', item);
+                return _CardConteudo(
+                  item: item,
+                  heroTag: tag,
+                  onTap: () => _navegar(item, tag),
+                );
+              },
             ),
     );
   }

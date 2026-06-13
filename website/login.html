@@ -59,6 +59,15 @@
             </span>
             <span class="lembrar-text">Lembrar deste dispositivo</span>
           </label>
+          <div id="field-termos" style="display:none">
+            <label class="lembrar termos" id="termos-wrap">
+              <input type="checkbox" id="termos">
+              <span class="lembrar-box">
+                <svg class="lembrar-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>
+              </span>
+              <span class="lembrar-text">Li e concordo com os <a href="termos.html" target="_blank" rel="noopener">Termos de Serviço</a> e a <a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span>
+            </label>
+          </div>
           <button class="btn btn-primary" id="btn-enviar" type="submit">Entrar</button>
         </form>
       </div>
@@ -144,6 +153,35 @@
       cb.addEventListener('change', () => aplicar(true));
     })();
 
+    /* ── Checkbox "Concordo com os termos" (obrigatorio no cadastro) ───────── */
+    (function initTermos() {
+      const cb = $('termos');
+      if (!cb) return;
+      const cont = $('field-termos');
+      const box = cont.querySelector('.lembrar-box');
+      const check = cont.querySelector('.lembrar-check path');
+      const comprimento = check && check.getTotalLength ? check.getTotalLength() : 24;
+      if (check) { check.style.strokeDasharray = comprimento; check.style.strokeDashoffset = cb.checked ? 0 : comprimento; }
+      const aplicar = (animar) => {
+        if (!check) return;
+        if (!motion || !animar) { check.style.strokeDashoffset = cb.checked ? 0 : comprimento; return; }
+        anime.remove(box); anime.remove(check);
+        anime({ targets: box, scale: [1, 1.18, 1], duration: 340, easing: 'easeOutBack' });
+        anime({ targets: check, strokeDashoffset: cb.checked ? [comprimento, 0] : [0, comprimento],
+                duration: cb.checked ? 320 : 200, easing: 'easeOutQuad' });
+      };
+      aplicar(false);
+      cb.addEventListener('change', () => { aplicar(true); if (cb.checked) limparMsgs(); });
+    })();
+
+    // Chacoalha o checkbox de termos quando o cadastro e tentado sem aceitar.
+    function shakeTermos() {
+      const cont = $('field-termos');
+      if (!motion || !cont) return;
+      anime.remove(cont);
+      anime({ targets: cont, translateX: [0,-7,7,-5,5,0], duration: 380, easing: 'easeInOutQuad' });
+    }
+
     function moverIndicador(instantaneo) {
       const ind  = $('tab-indicator');
       const alvo = modo === 'entrar' ? $('tab-entrar') : $('tab-criar');
@@ -153,8 +191,8 @@
               duration:instantaneo?0:420, easing:'spring(1, 90, 12, 0)' });
     }
 
-    function animarCampoConfirmar(mostrar) {
-      const f=$('field-confirmar');
+    function animarCampo(f, mostrar) {
+      if (!f) return;
       if (!motion) { f.style.display=mostrar?'block':'none'; return; }
       anime.remove(f);
       const atual=f.getBoundingClientRect().height;
@@ -199,7 +237,8 @@
         : 'Crie sua conta com email e senha.';
       $('btn-enviar').textContent = entrar?'Entrar':'Criar conta';
       $('senha').setAttribute('autocomplete', entrar?'current-password':'new-password');
-      animarCampoConfirmar(!entrar);
+      animarCampo($('field-confirmar'), !entrar);
+      animarCampo($('field-termos'), !entrar);
       moverIndicador(false);
       if (motion) {
         anime.remove('#titulo,#subtitulo');
@@ -236,6 +275,11 @@
 
       if (modo==='criar' && senhaVal!==$('confirmar').value)
         return mostrarErro('As senhas não coincidem.');
+
+      if (modo==='criar' && !$('termos').checked) {
+        shakeTermos();
+        return mostrarErro('Você precisa aceitar os Termos de Serviço e a Política de Privacidade para criar a conta.');
+      }
 
       btn.disabled=true; btn.textContent='Aguarde…';
 
