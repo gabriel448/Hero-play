@@ -196,3 +196,59 @@ revoke select, insert, update, delete on public.biblioteca from anon;
 grant select, insert, update, delete on public.biblioteca to authenticated;
 
 notify pgrst, 'reload schema';
+
+-- ============================================================================
+-- BETA FECHADO (mobile/desktop) — ativacao por codigo de criacao.
+--
+-- O mobile/desktop e um beta fechado (custo de nuvem por conta). A conta so e
+-- criada PELO SITE informando um "codigo de criacao" que o dev gera e envia.
+-- Com o codigo valido, a conta nasce JA ATIVADA (flag) e o codigo e "queimado".
+-- A confirmacao de e-mail CONTINUA valendo (gate separado): a pessoa confirma o
+-- e-mail para conseguir entrar. O app so confere o flag de ativacao no login.
+--
+-- IMPORTANTE: a TV (Samsung/LG/Roku) NAO usa estas tabelas — ela tera projeto
+-- Supabase proprio (ver PLANO-TV-E-PAINEIS.md). Isto e so do mobile/desktop.
+-- ============================================================================
+
+-- Codigos de criacao (uso unico). Gere com INSERT no SQL Editor, por exemplo:
+--   insert into public.codigos_ativacao (codigo, nota) values ('AMIGO-1A2B', 'Fulano');
+-- Ninguem (anon/authenticated) le ou escreve aqui — SO a service role (Edge
+-- Function). Sem isto, a anon key poderia listar/forjar codigos.
+create table if not exists public.codigos_ativacao (
+  codigo     text primary key,           -- o codigo em si (ex.: 'AMIGO-1A2B')
+  ativo      boolean not null default true,
+  usado_por  uuid references auth.users(id) on delete set null,
+  usado_em   timestamptz,
+  nota       text,                        -- p/ voce lembrar pra quem mandou
+  criado_em  timestamptz not null default now()
+);
+
+alter table public.codigos_ativacao enable row level security;
+-- Sem policies de propósito: nem anon nem authenticated acessam. A service role
+-- (usada pela Edge Function) ignora RLS e e a unica via de acesso.
+revoke select, insert, update, delete on public.codigos_ativacao from anon;
+revoke select, insert, update, delete on public.codigos_ativacao from authenticated;
+
+-- Status de ativacao por CONTA. O app le a propria linha (RLS) para decidir o
+-- gate. A escrita (ativar) so acontece via Edge Function (service role).
+create table if not exists public.contas_ativacao (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  ativado    boolean not null default false,
+  ativado_em timestamptz,
+  codigo     text,                        -- codigo usado na criacao
+  criado_em  timestamptz not null default now()
+);
+
+alter table public.contas_ativacao enable row level security;
+
+drop policy if exists "contas_ativacao_select_propria" on public.contas_ativacao;
+create policy "contas_ativacao_select_propria" on public.contas_ativacao
+  for select using (auth.uid() = user_id);
+
+-- Usuario so LE o proprio status; ativar/alterar so pela Edge Function.
+revoke insert, update, delete on public.contas_ativacao from anon;
+revoke insert, update, delete on public.contas_ativacao from authenticated;
+revoke select on public.contas_ativacao from anon;
+grant  select on public.contas_ativacao to authenticated;
+
+notify pgrst, 'reload schema';

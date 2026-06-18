@@ -52,6 +52,10 @@
             <label for="confirmar">Confirmar senha</label>
             <input type="password" id="confirmar" minlength="6" placeholder="repita a senha" autocomplete="new-password">
           </div>
+          <div class="field" id="field-codigo" style="display:none">
+            <label for="codigo-criacao">Código de criação</label>
+            <input type="text" id="codigo-criacao" placeholder="código enviado pelo desenvolvedor" autocomplete="off" spellcheck="false">
+          </div>
           <label class="lembrar" id="lembrar-wrap">
             <input type="checkbox" id="lembrar" checked>
             <span class="lembrar-box">
@@ -234,10 +238,11 @@
       $('titulo').textContent = entrar?'Entrar':'Criar conta';
       $('subtitulo').textContent = entrar
         ? 'Acesse sua conta para gerenciar suas listas.'
-        : 'Crie sua conta com email e senha.';
+        : 'Beta fechado: crie sua conta com o código que você recebeu.';
       $('btn-enviar').textContent = entrar?'Entrar':'Criar conta';
       $('senha').setAttribute('autocomplete', entrar?'current-password':'new-password');
       animarCampo($('field-confirmar'), !entrar);
+      animarCampo($('field-codigo'), !entrar);
       animarCampo($('field-termos'), !entrar);
       moverIndicador(false);
       if (motion) {
@@ -284,6 +289,10 @@
         return mostrarErro('Você precisa aceitar os Termos de Serviço e a Política de Privacidade para criar a conta.');
       }
 
+      if (modo==='criar' && !$('codigo-criacao').value.trim()) {
+        return mostrarErro('Informe o código de criação enviado pelo desenvolvedor.');
+      }
+
       btn.disabled=true; btn.textContent='Aguarde…';
 
       try {
@@ -300,10 +309,33 @@
             navegar('painel.html');
           }
         } else {
+          // Beta fechado: valida o codigo de criacao ANTES de criar a conta
+          // (evita criar conta sem codigo valido).
+          const codigo = $('codigo-criacao').value.trim().toUpperCase();
+          const val = await sb.functions.invoke('codigo-beta', {
+            body: { acao: 'validar', codigo },
+          });
+          if (val.error || !val.data?.ok) {
+            throw new Error(val.data?.error || 'Código de criação inválido ou já utilizado.');
+          }
+
+          // Cria a conta (dispara o e-mail de confirmacao via Resend — mantido).
           const { data, error } = await sb.auth.signUp({ email:emailVal, password:senhaVal });
           if (error) throw error;
+
+          // Ativa a conta (libera o beta) e QUEIMA o codigo, usando o id recem-criado.
+          const uid = data.user?.id;
+          if (uid) {
+            const at = await sb.functions.invoke('codigo-beta', {
+              body: { acao: 'ativar', codigo, userId: uid },
+            });
+            if (at.error || !at.data?.ok) {
+              console.error('Falha ao ativar conta:', at.error || at.data);
+            }
+          }
+
           if (data.session) {
-            // "Confirm email" desligado no projeto: ja logou direto.
+            // (Confirmacao de e-mail desligada): ja logou direto.
             mostrarOk('Conta criada! Redirecionando…');
             setTimeout(() => navegar('painel.html'), 900);
           } else {
@@ -314,7 +346,16 @@
           }
         }
       } catch (err) {
-        mostrarErro(traduzErro(err.message||'Erro inesperado.'));
+        // Loga o erro completo no console p/ diagnostico (Error nao serializa
+        // em JSON.stringify — por isso antes aparecia "{}").
+        console.error('Falha em entrar/criar conta:', err);
+        const bruto = err?.message || err?.error_description || err?.error
+                   || err?.msg || (err?.status ? 'Erro '+err.status : '')
+                   || 'Erro inesperado.';
+        // Evita exibir "{}"/"[object Object]" caso a mensagem venha vazia.
+        const limpo = (!bruto || bruto==='{}' || bruto==='[object Object]')
+                   ? 'Erro inesperado. Tente novamente.' : bruto;
+        mostrarErro(traduzErro(limpo));
       } finally {
         btn.disabled=false; btn.textContent=modo==='entrar'?'Entrar':'Criar conta';
       }

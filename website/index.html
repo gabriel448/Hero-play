@@ -934,11 +934,19 @@
 <section class="section" id="download">
   <div class="section-header fade-in">
     <p class="section-eyebrow">Download</p>
-    <h2 class="section-title">Disponível gratuitamente</h2>
-    <p class="section-subtitle">Escolha a versão para o seu dispositivo e comece a assistir agora.</p>
+    <h2 class="section-title">Acesso ao beta</h2>
+    <p class="section-subtitle">O app de celular e desktop está em <b>beta fechado</b>. Entre com sua conta para liberar os downloads.</p>
   </div>
 
-  <div class="download-grid">
+  <!-- Aviso para quem NAO esta logado (beta fechado). Some quando ha sessao. -->
+  <div class="fade-in" id="downloadLock" style="max-width:520px;margin:0 auto;text-align:center;background:var(--surface-2,#1a1815);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:32px 24px">
+    <div style="font-size:34px;line-height:1;margin-bottom:12px">🔒</div>
+    <h3 style="margin:0 0 8px;font-size:18px;color:#fff">Beta fechado</h3>
+    <p style="margin:0 0 18px;color:#A8A09A;font-size:14px">Os downloads do app de celular e desktop ficam disponíveis após entrar com uma conta liberada. Não tem conta? Peça um código de criação ao desenvolvedor.</p>
+    <a href="login.html" class="btn btn-primary">Entrar para baixar</a>
+  </div>
+
+  <div class="download-grid" id="downloadGrid" style="display:none">
     <!-- PC -->
     <div class="dl-card fade-in">
       <div class="dl-card-icon pc">
@@ -1203,6 +1211,11 @@
         if (entrar) entrar.style.display = 'none';
         if (perfil) perfil.style.display = 'inline-flex';
         if (mob) { mob.textContent = 'Minha conta'; mob.href = 'painel.html'; }
+        // Beta fechado: libera os botoes de download so para quem esta logado.
+        const grid = document.getElementById('downloadGrid');
+        const lock = document.getElementById('downloadLock');
+        if (grid) grid.style.display = '';
+        if (lock) lock.style.display = 'none';
       } catch (_) { /* offline: mantem o botao Entrar */ }
     })();
 
