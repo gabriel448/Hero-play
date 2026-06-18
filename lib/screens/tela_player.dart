@@ -1,10 +1,13 @@
 ﻿import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
+import 'package:screen_brightness/screen_brightness.dart';
+import 'package:volume_controller/volume_controller.dart';
 import '../models/canal.dart';
 import '../services/player_ao_vivo.dart';
 import '../services/player_vod.dart';
@@ -225,9 +228,13 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   void _boostarVolume() {
-    // Volume inicial = o ultimo escolhido pelo usuario (padrao 100% = sem
-    // atenuacao, dependendo so do volume do aparelho). Boost ate 200 disponivel.
-    final salvo = context.read<PreferenciasProvider>().volume;
+    // Ao vivo: o volume passa a seguir o volume do DISPOSITIVO (volume do
+    // sistema, via volume_controller na barra dos controles). Por isso o player
+    // fica em 100% (sem atenuacao propria) e quem regula e o volume do aparelho.
+    // VOD/mini: mantem o ultimo volume escolhido no app (com boost ate 200).
+    final aoVivo = widget.canal.tipo == TipoCanal.aoVivo;
+    final salvo =
+        aoVivo ? 100.0 : context.read<PreferenciasProvider>().volume;
     final native = _player.platform;
     if (native is NativePlayer) {
       native.setProperty('volume-max', '200').then((_) {
@@ -1053,6 +1060,17 @@ class _TelaPlayerState extends State<TelaPlayer> {
     } else {
       _player.dispose();
     }
+    // Ao sair de um canal ao vivo, devolve o brilho REAL da tela ao valor do
+    // sistema (no mobile a barra de luminosidade altera o brilho do app). O
+    // reset fica aqui, no dispose da TELA, e nao nos controles — o fullscreen
+    // nativo recria os controles numa rota separada e nao deve resetar o brilho
+    // enquanto o usuario ainda esta assistindo.
+    if (widget.canal.tipo == TipoCanal.aoVivo &&
+        (Platform.isAndroid || Platform.isIOS)) {
+      ScreenBrightness().resetApplicationScreenBrightness().catchError(
+            (Object _) {},
+          );
+    }
     // Ao sair do player, restaura o modo do app: orientacoes liberadas e
     // edge-to-edge (o fullscreen nativo do media_kit deixa o sistema em modo
     // 'manual' com as barras visiveis ao minimizar — sem isto a barra do
@@ -1683,22 +1701,54 @@ class _ControlesAoVivo extends StatefulWidget {
 class _ControlesAoVivoState extends State<_ControlesAoVivo> {
   bool _visivel = false;
   Timer? _timer;
-  double _volume = 50.0;
+
+  // Volume do DISPOSITIVO (volume do sistema, 0.0–1.0) via volume_controller.
+  double _volume = 0.5;
   StreamSubscription<double>? _subVolume;
+
+  // Luminosidade (0.0–1.0). No mobile altera o brilho REAL do app
+  // (screen_brightness). No desktop (Windows), onde controlar o brilho do
+  // monitor e instavel, a barra escurece o video com uma camada (dimmer).
+  double _brilho = 1.0;
+  StreamSubscription<double>? _subBrilho;
+
+  // Brilho real so faz sentido no mobile; no desktop usamos o dimmer.
+  bool get _brilhoReal => Platform.isAndroid || Platform.isIOS;
 
   @override
   void initState() {
     super.initState();
-    _volume = widget.player.state.volume;
-    _subVolume = widget.player.stream.volume.listen((v) {
+
+    // ── Volume do sistema ──────────────────────────────────────────────────
+    // Nao mostra a UI nativa de volume do SO — temos a nossa propria barra.
+    VolumeController.instance.showSystemUI = false;
+    VolumeController.instance.getVolume().then((v) {
       if (mounted) setState(() => _volume = v);
-    });
+    }).catchError((Object _) {});
+    _subVolume = VolumeController.instance.addListener(
+      (v) {
+        if (mounted) setState(() => _volume = v);
+      },
+      fetchInitialVolume: false,
+    );
+
+    // ── Brilho (so no mobile le/observa o brilho real) ─────────────────────
+    if (_brilhoReal) {
+      ScreenBrightness().application.then((v) {
+        if (mounted) setState(() => _brilho = v);
+      }).catchError((Object _) {});
+      _subBrilho =
+          ScreenBrightness().onApplicationScreenBrightnessChanged.listen((v) {
+        if (mounted) setState(() => _brilho = v);
+      });
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     _subVolume?.cancel();
+    _subBrilho?.cancel();
     super.dispose();
   }
 
@@ -1714,108 +1764,206 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
     });
   }
 
+  void _definirVolume(double v) {
+    setState(() => _volume = v);
+    VolumeController.instance.setVolume(v);
+  }
+
+  void _definirBrilho(double v) {
+    setState(() => _brilho = v);
+    // Mobile: brilho real do app. Desktop: o dimmer reage ao _brilho no build.
+    if (_brilhoReal) {
+      ScreenBrightness()
+          .setApplicationScreenBrightness(v)
+          .catchError((Object _) {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final emTela = isFullscreen(context);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: _onTap,
-      child: AnimatedOpacity(
-        opacity: _visivel ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 200),
-        child: IgnorePointer(
-          ignoring: !_visivel,
-          child: Stack(
-            children: [
-              Container(color: Colors.black38),
-              const Positioned(
-                top: 12,
-                left: 12,
-                child: _BadgeAoVivo(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Barras com altura proporcional a area do video (cobre split + cheio).
+        final alturaBarra = (constraints.maxHeight * 0.55).clamp(110.0, 240.0);
+        return Stack(
+          children: [
+            // ── Dimmer (desktop): escurece SO o video conforme o brilho ─────
+            // Fica fora do AnimatedOpacity dos controles para persistir mesmo
+            // quando a barra some. So opacidade — 60 fps garantido.
+            if (!_brilhoReal)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ColoredBox(
+                    color: Colors.black
+                        .withValues(alpha: (1 - _brilho).clamp(0.0, 1.0) * 0.85),
+                  ),
+                ),
               ),
-              // Barra inferior: volume (esquerda) + CC/fullscreen (direita).
-              Positioned(
-                bottom: 4,
-                left: 4,
-                right: 4,
-                child: SafeArea(
-                  child: Row(
+            // ── Controles (auto-hide ao toque) ──────────────────────────────
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _onTap,
+              child: AnimatedOpacity(
+                opacity: _visivel ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_visivel,
+                  child: Stack(
                     children: [
-                      // ── Volume ───────────────────────────────────────────
-                      Icon(
-                        _volume == 0
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.white,
-                        size: 20,
+                      Container(color: Colors.black38),
+                      const Positioned(
+                        top: 12,
+                        left: 12,
+                        child: _BadgeAoVivo(),
                       ),
-                      Expanded(
-                        child: SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: Colors.white,
-                            inactiveTrackColor: Colors.white30,
-                            thumbColor: Colors.white,
-                            overlayColor: Colors.white24,
-                            trackHeight: 2.0,
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 6,
-                            ),
-                          ),
-                          child: Slider(
-                            // max = 150 para manter o boost configurado.
-                            value: _volume.clamp(0.0, 150.0),
-                            min: 0,
-                            max: 150,
-                            onChanged: (v) => widget.player.setVolume(v),
-                            // Pausa o auto-hide enquanto arrasta o slider.
+                      // ── Luminosidade (esquerda, vertical) ─────────────────
+                      Positioned(
+                        left: 10,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(
+                          child: _BarraVertical(
+                            icone: Icons.brightness_6_rounded,
+                            valor: _brilho,
+                            altura: alturaBarra,
                             onChangeStart: (_) => _timer?.cancel(),
-                            onChangeEnd: (v) {
-                              _resetTimer();
-                              context
-                                  .read<PreferenciasProvider>()
-                                  .definirVolume(v);
-                            },
+                            onChanged: _definirBrilho,
+                            onChangeEnd: (_) => _resetTimer(),
                           ),
                         ),
                       ),
-                      // ── EPG / CC / Fullscreen ─────────────────────────────
-                      if (widget.onEpg != null)
-                        IconButton(
-                          icon: const Icon(
-                            Icons.event_note_rounded,
-                            color: Colors.white,
+                      // ── Volume do dispositivo (direita, vertical) ─────────
+                      Positioned(
+                        right: 10,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(
+                          child: _BarraVertical(
+                            icone: _volume == 0
+                                ? Icons.volume_off_rounded
+                                : Icons.volume_up_rounded,
+                            valor: _volume,
+                            altura: alturaBarra,
+                            onChangeStart: (_) => _timer?.cancel(),
+                            onChanged: _definirVolume,
+                            onChangeEnd: (_) => _resetTimer(),
                           ),
-                          tooltip: 'Programacao',
-                          onPressed: widget.onEpg,
                         ),
-                      if (widget.iniciado &&
-                          (widget.tracks.audio.isNotEmpty ||
-                              widget.temQualidades))
-                        IconButton(
-                          icon: const Icon(
-                            Icons.closed_caption_rounded,
-                            color: Colors.white,
+                      ),
+                      // ── Barra inferior: EPG / CC / Fullscreen (direita) ───
+                      Positioned(
+                        bottom: 4,
+                        left: 4,
+                        right: 4,
+                        child: SafeArea(
+                          child: Row(
+                            children: [
+                              const Spacer(),
+                              if (widget.onEpg != null)
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.event_note_rounded,
+                                    color: Colors.white,
+                                  ),
+                                  tooltip: 'Programacao',
+                                  onPressed: widget.onEpg,
+                                ),
+                              if (widget.iniciado &&
+                                  (widget.tracks.audio.isNotEmpty ||
+                                      widget.temQualidades))
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.closed_caption_rounded,
+                                    color: Colors.white,
+                                  ),
+                                  tooltip: 'Qualidade, faixas e legendas',
+                                  onPressed: widget.onFaixas,
+                                ),
+                              IconButton(
+                                icon: Icon(
+                                  emTela
+                                      ? Icons.fullscreen_exit_rounded
+                                      : Icons.fullscreen_rounded,
+                                  color: Colors.white,
+                                ),
+                                tooltip:
+                                    emTela ? 'Sair da tela cheia' : 'Tela cheia',
+                                onPressed: () => toggleFullscreen(context),
+                              ),
+                            ],
                           ),
-                          tooltip: 'Qualidade, faixas e legendas',
-                          onPressed: widget.onFaixas,
                         ),
-                      IconButton(
-                        icon: Icon(
-                          emTela
-                              ? Icons.fullscreen_exit_rounded
-                              : Icons.fullscreen_rounded,
-                          color: Colors.white,
-                        ),
-                        tooltip: emTela ? 'Sair da tela cheia' : 'Tela cheia',
-                        onPressed: () => toggleFullscreen(context),
                       ),
                     ],
                   ),
                 ),
               ),
-            ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ─── Barra vertical reutilizavel (volume / luminosidade) ─────────────────────
+
+class _BarraVertical extends StatelessWidget {
+  final IconData icone;
+  final double valor; // 0.0–1.0
+  final double altura;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeStart;
+  final ValueChanged<double>? onChangeEnd;
+
+  const _BarraVertical({
+    required this.icone,
+    required this.valor,
+    required this.altura,
+    required this.onChanged,
+    this.onChangeStart,
+    this.onChangeEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.32),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: altura,
+            // quarterTurns: 3 deixa o minimo embaixo e o maximo em cima.
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white30,
+                  thumbColor: Colors.white,
+                  overlayColor: Colors.white24,
+                  trackHeight: 3.0,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 7),
+                ),
+                child: Slider(
+                  value: valor.clamp(0.0, 1.0),
+                  onChanged: onChanged,
+                  onChangeStart: onChangeStart,
+                  onChangeEnd: onChangeEnd,
+                ),
+              ),
+            ),
           ),
-        ),
+          const SizedBox(height: 6),
+          Icon(icone, color: Colors.white, size: 20),
+        ],
       ),
     );
   }

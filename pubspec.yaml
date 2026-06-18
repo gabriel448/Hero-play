@@ -49,6 +49,8 @@ dependencies:
 
   # Abre o site no navegador (criar conta acontece no site, nao no app).
   url_launcher: ^6.3.1
+  volume_controller: ^3.6.0
+  screen_brightness: ^2.1.11
 
 dev_dependencies:
   flutter_test:
