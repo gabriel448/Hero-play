@@ -137,7 +137,7 @@ class _TelaLoginState extends State<TelaLogin> {
   /// Criar conta acontece no site (evita ter que reimplementar verificacao de
   /// email/MFA no app). Abre o site ja na aba de cadastro.
   static const _urlCriarConta =
-      'https://hero-play.vercel.app/login.html?modo=criar';
+      'https://heroplaytv.com/login.html?modo=criar';
 
   Future<void> _abrirCriarContaSite() async {
     bool ok = false;

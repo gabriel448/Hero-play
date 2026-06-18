@@ -2,7 +2,7 @@
 
 Player IPTV multiplataforma feito com Flutter. Importe qualquer lista M3U, navegue por canais ao vivo, filmes e séries — com interface adaptada para celular, tablet e desktop.
 
-**Site:** [hero-play.vercel.app](https://hero-play.vercel.app)
+**Site:** [heroplaytv.com](https://heroplaytv.com)
 
 ## Download
 
