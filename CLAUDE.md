@@ -32,6 +32,35 @@ Ao alterar telas (especialmente o player), preserve as opções já existentes
 (ex.: minimizar/fullscreen, CC/legendas, volume, copiar URL) a menos que o
 usuário autorize remover.
 
+## ⛔ REGRA ABSOLUTA — conformidade com as lojas (app = player neutro)
+
+**O app distribuído nas lojas (Google Play, App Store, Samsung, LG, Roku) tem
+que ser um PLAYER NEUTRO "traga sua própria lista". Todo o comércio/revenda fica
+no WEB, nunca no app.** Se qualquer mudança violar isso, **PARE e avise o usuário
+antes de prosseguir** — explique o que fere a conformidade e ofereça a alternativa
+neutra. A loja julga o APP e a ficha da loja, não o backend/painel.
+
+**Regras que o app NÃO pode violar:**
+- **Abre vazio / na tela de login.** Com conta nova (sem lista, sem ativação) o
+  revisor tem que ver um player inócuo — **nada de canais/conteúdo embutido**.
+- **Sem venda no app:** nada de comprar conteúdo, link de pagamento externo, ou
+  "insira o código do revendedor". Ativação é só uma **flag silenciosa** da nuvem.
+- **Conta inativa = estado neutro** ("nenhuma lista configurada — fale com seu
+  provedor"), **sem** botão de pagar / CTA de compra.
+- **Sem palavra "IPTV", "canais/filmes grátis", "lista de canais"** em nome,
+  descrição, screenshots ou strings visíveis. Posicionar como reprodutor de
+  mídia / M3U / playlist.
+- **Nenhuma playlist de exemplo com canais reais** embutida no binário.
+- **Recursos de revendedor (gerar link de convite, ver/gerenciar listas de
+  clientes, créditos, ativação) são WEB-only** — nunca entram no app submetido.
+- Manter o que as lojas **exigem**: política de privacidade, termos e **exclusão
+  de conta** (já implementados).
+
+**Trilho duplo de distribuição:** (1) lojas = app neutro; (2) **APK direto no
+site + painel web** = onde a revenda realmente roda. Apple é a mais rígida (pode
+rejeitar "IPTV player"); Samsung/LG/Roku aceitam players "traga sua lista" sem
+conteúdo/venda embutidos.
+
 ## O que é
 
 **Hero Play** — player IPTV multiplataforma em Flutter (Android, Windows, tablet)
