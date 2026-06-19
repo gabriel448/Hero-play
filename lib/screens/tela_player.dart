@@ -228,21 +228,17 @@ class _TelaPlayerState extends State<TelaPlayer> {
   }
 
   void _boostarVolume() {
-    // Ao vivo: o volume passa a seguir o volume do DISPOSITIVO (volume do
-    // sistema, via volume_controller na barra dos controles). Por isso o player
-    // fica em 100% (sem atenuacao propria) e quem regula e o volume do aparelho.
-    // VOD/mini: mantem o ultimo volume escolhido no app (com boost ate 200).
-    final aoVivo = widget.canal.tipo == TipoCanal.aoVivo;
-    final salvo =
-        aoVivo ? 100.0 : context.read<PreferenciasProvider>().volume;
+    // O volume agora segue o volume do DISPOSITIVO (barra lateral via
+    // volume_controller) tanto ao vivo quanto em VOD. Por isso o player fica em
+    // 100% (sem atenuacao propria) — quem regula e o volume do aparelho.
     final native = _player.platform;
     if (native is NativePlayer) {
       native.setProperty('volume-max', '200').then((_) {
         if (!mounted) return;
-        native.setProperty('volume', salvo.round().toString());
+        native.setProperty('volume', '100');
       });
     } else {
-      _player.setVolume(salvo);
+      _player.setVolume(100);
     }
   }
 
@@ -562,6 +558,16 @@ class _TelaPlayerState extends State<TelaPlayer> {
     }
   }
 
+  /// Mantem as barras (volume/brilho) visiveis enquanto o usuario interage com
+  /// elas — reinicia o timer de auto-hide a cada ajuste.
+  void _manterBarraVod() {
+    _timerBarraVod?.cancel();
+    _barraVodVisivel.value = true;
+    _timerBarraVod = Timer(const Duration(milliseconds: 3500), () {
+      _barraVodVisivel.value = false;
+    });
+  }
+
   /// Aplica o modo de tela atual ao sistema: tela cheia = imersivo + paisagem;
   /// janela = edge-to-edge + orientacoes liberadas. No desktop e no-op de fato.
   void _aplicarModoTela() {
@@ -837,17 +843,6 @@ class _TelaPlayerState extends State<TelaPlayer> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  void _mostrarVolume([BuildContext? ctx]) {
-    showModalBottomSheet(
-      context: ctx ?? context,
-      backgroundColor: AppColors.surface2,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-      ),
-      builder: (_) => _PainelVolume(player: _player),
-    );
-  }
-
   void _mostrarFaixas([BuildContext? ctx]) {
     showModalBottomSheet(
       context: ctx ?? context,
@@ -906,15 +901,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
           onPressed: () => Navigator.of(state.context).maybePop(),
         ),
       const Spacer(),
-      IconButton(
-        icon: const Icon(
-          Icons.volume_up_rounded,
-          color: Colors.white,
-          shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
-        ),
-        tooltip: 'Volume',
-        onPressed: () => _mostrarVolume(state.context),
-      ),
+      // Volume agora e a barra vertical lateral (_BarrasVolumeBrilho), nao mais
+      // um botao aqui.
       // CC: slot SEMPRE presente (ValueListenableBuilder), so a visibilidade
       // interna reage a `_temFaixas`. Assim o botao surge quando as faixas
       // carregam mesmo que o media_kit nao re-invoque este builder (antes ele
@@ -990,13 +978,21 @@ class _TelaPlayerState extends State<TelaPlayer> {
         // tambem no fullscreen nativo do media_kit (que reusa este builder).
         child: Listener(
           behavior: HitTestBehavior.translucent,
-          onPointerDown: widget.episodiosSerie != null
-              ? (_) => _aoTocarVodControles()
-              : null,
+          onPointerDown: (_) => _aoTocarVodControles(),
           child: Stack(
             children: [
               AdaptiveVideoControls(state),
               _DoubleTapSeek(player: _player),
+              // Barras de volume (direita) e brilho (esquerda) — somem junto com
+              // os controles do media_kit (espelhados por _barraVodVisivel).
+              ValueListenableBuilder<bool>(
+                valueListenable: _barraVodVisivel,
+                builder: (_, vis, _) => _BarrasVolumeBrilho(
+                  visivel: vis,
+                  player: _player,
+                  aoInteragir: _manterBarraVod,
+                ),
+              ),
               if (widget.episodiosSerie != null)
                 Positioned.fill(
                   child: AnimatedBuilder(
@@ -1060,13 +1056,11 @@ class _TelaPlayerState extends State<TelaPlayer> {
     } else {
       _player.dispose();
     }
-    // Ao sair de um canal ao vivo, devolve o brilho REAL da tela ao valor do
-    // sistema (no mobile a barra de luminosidade altera o brilho do app). O
-    // reset fica aqui, no dispose da TELA, e nao nos controles — o fullscreen
-    // nativo recria os controles numa rota separada e nao deve resetar o brilho
-    // enquanto o usuario ainda esta assistindo.
-    if (widget.canal.tipo == TipoCanal.aoVivo &&
-        (Platform.isAndroid || Platform.isIOS)) {
+    // Ao sair do player, devolve o brilho REAL da tela ao valor do sistema (no
+    // mobile a barra de luminosidade altera o brilho do app). Vale p/ ao vivo E
+    // VOD. Fica aqui (dispose da TELA) e nao nos controles — o fullscreen nativo
+    // recria os controles numa rota separada e nao deve resetar enquanto assiste.
+    if (Platform.isAndroid || Platform.isIOS) {
       ScreenBrightness().resetApplicationScreenBrightness().catchError(
             (Object _) {},
           );
@@ -1390,67 +1384,6 @@ class _DoubleTapSeekState extends State<_DoubleTapSeek> {
     );
   }
 }
-class _PainelVolume extends StatefulWidget {
-  final Player player;
-  const _PainelVolume({required this.player});
-
-  @override
-  State<_PainelVolume> createState() => _PainelVolumeState();
-}
-
-class _PainelVolumeState extends State<_PainelVolume> {
-  late double _volume;
-  StreamSubscription? _sub;
-
-  @override
-  void initState() {
-    super.initState();
-    _volume = widget.player.state.volume;
-    _sub = widget.player.stream.volume.listen((v) {
-      if (mounted) setState(() => _volume = v);
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = (_volume / 150.0 * 100).round();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.volume_down_rounded),
-              Expanded(
-                child: Slider(
-                  value: _volume.clamp(0, 150),
-                  min: 0,
-                  max: 150,
-                  onChanged: (v) {
-                    widget.player.setVolume(v);
-                    setState(() => _volume = v);
-                  },
-                  // Persiste o nivel escolhido para reabrir nele da proxima vez.
-                  onChangeEnd: (v) =>
-                      context.read<PreferenciasProvider>().definirVolume(v),
-                ),
-              ),
-              const Icon(Icons.volume_up_rounded),
-            ],
-          ),
-          Text('$pct%', style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-    );
-  }
-}
 class _OverlayConectando extends StatelessWidget {
   final String status;
   final _Estrategia estrategia;
@@ -1702,53 +1635,9 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
   bool _visivel = false;
   Timer? _timer;
 
-  // Volume do DISPOSITIVO (volume do sistema, 0.0–1.0) via volume_controller.
-  double _volume = 0.5;
-  StreamSubscription<double>? _subVolume;
-
-  // Luminosidade (0.0–1.0). No mobile altera o brilho REAL do app
-  // (screen_brightness). No desktop (Windows), onde controlar o brilho do
-  // monitor e instavel, a barra escurece o video com uma camada (dimmer).
-  double _brilho = 1.0;
-  StreamSubscription<double>? _subBrilho;
-
-  // Brilho real so faz sentido no mobile; no desktop usamos o dimmer.
-  bool get _brilhoReal => Platform.isAndroid || Platform.isIOS;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // ── Volume do sistema ──────────────────────────────────────────────────
-    // Nao mostra a UI nativa de volume do SO — temos a nossa propria barra.
-    VolumeController.instance.showSystemUI = false;
-    VolumeController.instance.getVolume().then((v) {
-      if (mounted) setState(() => _volume = v);
-    }).catchError((Object _) {});
-    _subVolume = VolumeController.instance.addListener(
-      (v) {
-        if (mounted) setState(() => _volume = v);
-      },
-      fetchInitialVolume: false,
-    );
-
-    // ── Brilho (so no mobile le/observa o brilho real) ─────────────────────
-    if (_brilhoReal) {
-      ScreenBrightness().application.then((v) {
-        if (mounted) setState(() => _brilho = v);
-      }).catchError((Object _) {});
-      _subBrilho =
-          ScreenBrightness().onApplicationScreenBrightnessChanged.listen((v) {
-        if (mounted) setState(() => _brilho = v);
-      });
-    }
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
-    _subVolume?.cancel();
-    _subBrilho?.cancel();
     super.dispose();
   }
 
@@ -1764,14 +1653,172 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
     });
   }
 
+  @override
+  Widget build(BuildContext context) {
+    final emTela = isFullscreen(context);
+    return Stack(
+      children: [
+        // ── Controles (auto-hide ao toque): scrim + badge + barra inferior ──
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _onTap,
+          child: AnimatedOpacity(
+            opacity: _visivel ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: IgnorePointer(
+              ignoring: !_visivel,
+              child: Stack(
+                children: [
+                  Container(color: Colors.black38),
+                  const Positioned(top: 12, left: 12, child: _BadgeAoVivo()),
+                  // ── Barra inferior: EPG / CC / Fullscreen (direita) ───────
+                  Positioned(
+                    bottom: 4,
+                    left: 4,
+                    right: 4,
+                    child: SafeArea(
+                      child: Row(
+                        children: [
+                          const Spacer(),
+                          if (widget.onEpg != null)
+                            IconButton(
+                              icon: const Icon(
+                                Icons.event_note_rounded,
+                                color: Colors.white,
+                              ),
+                              tooltip: 'Programacao',
+                              onPressed: widget.onEpg,
+                            ),
+                          if (widget.iniciado &&
+                              (widget.tracks.audio.isNotEmpty ||
+                                  widget.temQualidades))
+                            IconButton(
+                              icon: const Icon(
+                                Icons.closed_caption_rounded,
+                                color: Colors.white,
+                              ),
+                              tooltip: 'Qualidade, faixas e legendas',
+                              onPressed: widget.onFaixas,
+                            ),
+                          IconButton(
+                            icon: Icon(
+                              emTela
+                                  ? Icons.fullscreen_exit_rounded
+                                  : Icons.fullscreen_rounded,
+                              color: Colors.white,
+                            ),
+                            tooltip:
+                                emTela ? 'Sair da tela cheia' : 'Tela cheia',
+                            onPressed: () => toggleFullscreen(context),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // ── Barras de volume (direita) e brilho (esquerda) ──────────────────
+        // Ficam sobre os controles e somem junto com eles; o dimmer (desktop)
+        // persiste por dentro do proprio widget.
+        _BarrasVolumeBrilho(
+          visivel: _visivel,
+          player: widget.player,
+          aoInteragir: _resetTimer,
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Barras de volume + brilho (reutilizavel: ao vivo E VOD) ─────────────────
+//
+// Volume = volume do DISPOSITIVO (volume_controller). Brilho = brilho REAL do
+// app no mobile (screen_brightness) ou um dimmer (camada escura) no desktop.
+// `visivel` controla o fade junto com os controles; o dimmer persiste sempre.
+class _BarrasVolumeBrilho extends StatefulWidget {
+  final bool visivel;
+  final VoidCallback? aoInteragir;
+  final Player player;
+
+  const _BarrasVolumeBrilho({
+    required this.visivel,
+    required this.player,
+    this.aoInteragir,
+  });
+
+  @override
+  State<_BarrasVolumeBrilho> createState() => _BarrasVolumeBrilhoState();
+}
+
+class _BarrasVolumeBrilhoState extends State<_BarrasVolumeBrilho> {
+  double _volume = 0.5;
+  double _brilho = 1.0;
+  StreamSubscription<double>? _subVolume;
+  StreamSubscription<double>? _subBrilho;
+
+  // Brilho real so faz sentido no mobile; no desktop usamos o dimmer.
+  bool get _brilhoReal => Platform.isAndroid || Platform.isIOS;
+
+  // Mobile: a barra controla o VOLUME DO SISTEMA (volume_controller).
+  // Desktop: controla so o VOLUME DO APP (player) — nao mexe no SO inteiro.
+  bool get _volumeDoSistema => Platform.isAndroid || Platform.isIOS;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_volumeDoSistema) {
+      // Volume do sistema (sem a UI nativa do SO — temos a nossa barra).
+      VolumeController.instance.showSystemUI = false;
+      VolumeController.instance.getVolume().then((v) {
+        if (mounted) setState(() => _volume = v);
+      }).catchError((Object _) {});
+      _subVolume = VolumeController.instance.addListener(
+        (v) {
+          if (mounted) setState(() => _volume = v);
+        },
+        fetchInitialVolume: false,
+      );
+    } else {
+      // Desktop: reflete/controla o volume do proprio player (0–100 → 0–1).
+      _volume = (widget.player.state.volume / 100).clamp(0.0, 1.0);
+      _subVolume = widget.player.stream.volume.listen((v) {
+        if (mounted) setState(() => _volume = (v / 100).clamp(0.0, 1.0));
+      });
+    }
+    // Brilho real (so no mobile le/observa).
+    if (_brilhoReal) {
+      ScreenBrightness().application.then((v) {
+        if (mounted) setState(() => _brilho = v);
+      }).catchError((Object _) {});
+      _subBrilho =
+          ScreenBrightness().onApplicationScreenBrightnessChanged.listen((v) {
+        if (mounted) setState(() => _brilho = v);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _subVolume?.cancel();
+    _subBrilho?.cancel();
+    super.dispose();
+  }
+
   void _definirVolume(double v) {
     setState(() => _volume = v);
-    VolumeController.instance.setVolume(v);
+    if (_volumeDoSistema) {
+      VolumeController.instance.setVolume(v);
+    } else {
+      // Desktop: ajusta so o volume do app (0–1 → 0–100).
+      widget.player.setVolume(v * 100);
+    }
   }
 
   void _definirBrilho(double v) {
     setState(() => _brilho = v);
-    // Mobile: brilho real do app. Desktop: o dimmer reage ao _brilho no build.
     if (_brilhoReal) {
       ScreenBrightness()
           .setApplicationScreenBrightness(v)
@@ -1779,18 +1826,42 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
     }
   }
 
+  Widget _barra({
+    required IconData icone,
+    required double valor,
+    required double altura,
+    required ValueChanged<double> onChanged,
+  }) {
+    return AnimatedOpacity(
+      opacity: widget.visivel ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 200),
+      child: IgnorePointer(
+        ignoring: !widget.visivel,
+        child: _BarraVertical(
+          icone: icone,
+          valor: valor,
+          altura: altura,
+          onChanged: (v) {
+            onChanged(v);
+            widget.aoInteragir?.call();
+          },
+          onChangeStart: (_) => widget.aoInteragir?.call(),
+          onChangeEnd: (_) => widget.aoInteragir?.call(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final emTela = isFullscreen(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         // Barras com altura proporcional a area do video (cobre split + cheio).
-        final alturaBarra = (constraints.maxHeight * 0.55).clamp(110.0, 240.0);
+        final altura = (constraints.maxHeight * 0.55).clamp(110.0, 240.0);
         return Stack(
           children: [
-            // ── Dimmer (desktop): escurece SO o video conforme o brilho ─────
-            // Fica fora do AnimatedOpacity dos controles para persistir mesmo
-            // quando a barra some. So opacidade — 60 fps garantido.
+            // Dimmer (desktop): escurece o video conforme o brilho. Persiste
+            // mesmo com os controles escondidos. So opacidade — 60 fps.
             if (!_brilhoReal)
               Positioned.fill(
                 child: IgnorePointer(
@@ -1800,103 +1871,33 @@ class _ControlesAoVivoState extends State<_ControlesAoVivo> {
                   ),
                 ),
               ),
-            // ── Controles (auto-hide ao toque) ──────────────────────────────
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _onTap,
-              child: AnimatedOpacity(
-                opacity: _visivel ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: IgnorePointer(
-                  ignoring: !_visivel,
-                  child: Stack(
-                    children: [
-                      Container(color: Colors.black38),
-                      const Positioned(
-                        top: 12,
-                        left: 12,
-                        child: _BadgeAoVivo(),
-                      ),
-                      // ── Luminosidade (esquerda, vertical) ─────────────────
-                      Positioned(
-                        left: 10,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: _BarraVertical(
-                            icone: Icons.brightness_6_rounded,
-                            valor: _brilho,
-                            altura: alturaBarra,
-                            onChangeStart: (_) => _timer?.cancel(),
-                            onChanged: _definirBrilho,
-                            onChangeEnd: (_) => _resetTimer(),
-                          ),
-                        ),
-                      ),
-                      // ── Volume do dispositivo (direita, vertical) ─────────
-                      Positioned(
-                        right: 10,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: _BarraVertical(
-                            icone: _volume == 0
-                                ? Icons.volume_off_rounded
-                                : Icons.volume_up_rounded,
-                            valor: _volume,
-                            altura: alturaBarra,
-                            onChangeStart: (_) => _timer?.cancel(),
-                            onChanged: _definirVolume,
-                            onChangeEnd: (_) => _resetTimer(),
-                          ),
-                        ),
-                      ),
-                      // ── Barra inferior: EPG / CC / Fullscreen (direita) ───
-                      Positioned(
-                        bottom: 4,
-                        left: 4,
-                        right: 4,
-                        child: SafeArea(
-                          child: Row(
-                            children: [
-                              const Spacer(),
-                              if (widget.onEpg != null)
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.event_note_rounded,
-                                    color: Colors.white,
-                                  ),
-                                  tooltip: 'Programacao',
-                                  onPressed: widget.onEpg,
-                                ),
-                              if (widget.iniciado &&
-                                  (widget.tracks.audio.isNotEmpty ||
-                                      widget.temQualidades))
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.closed_caption_rounded,
-                                    color: Colors.white,
-                                  ),
-                                  tooltip: 'Qualidade, faixas e legendas',
-                                  onPressed: widget.onFaixas,
-                                ),
-                              IconButton(
-                                icon: Icon(
-                                  emTela
-                                      ? Icons.fullscreen_exit_rounded
-                                      : Icons.fullscreen_rounded,
-                                  color: Colors.white,
-                                ),
-                                tooltip:
-                                    emTela ? 'Sair da tela cheia' : 'Tela cheia',
-                                onPressed: () => toggleFullscreen(context),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+            // Luminosidade (esquerda).
+            Positioned(
+              left: 10,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _barra(
+                  icone: Icons.brightness_6_rounded,
+                  valor: _brilho,
+                  altura: altura,
+                  onChanged: _definirBrilho,
+                ),
+              ),
+            ),
+            // Volume do dispositivo (direita).
+            Positioned(
+              right: 10,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _barra(
+                  icone: _volume == 0
+                      ? Icons.volume_off_rounded
+                      : Icons.volume_up_rounded,
+                  valor: _volume,
+                  altura: altura,
+                  onChanged: _definirVolume,
                 ),
               ),
             ),
@@ -1928,43 +1929,42 @@ class _BarraVertical extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.32),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: altura,
-            // quarterTurns: 3 deixa o minimo embaixo e o maximo em cima.
-            child: RotatedBox(
-              quarterTurns: 3,
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: Colors.white,
-                  inactiveTrackColor: Colors.white30,
-                  thumbColor: Colors.white,
-                  overlayColor: Colors.white24,
-                  trackHeight: 3.0,
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 7),
-                ),
-                child: Slider(
-                  value: valor.clamp(0.0, 1.0),
-                  onChanged: onChanged,
-                  onChangeStart: onChangeStart,
-                  onChangeEnd: onChangeEnd,
-                ),
+    // Sem fundo/"pilula": so a barra e o icone (com sombra p/ legibilidade
+    // sobre video claro).
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: altura,
+          // quarterTurns: 3 deixa o minimo embaixo e o maximo em cima.
+          child: RotatedBox(
+            quarterTurns: 3,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: Colors.white,
+                inactiveTrackColor: Colors.white30,
+                thumbColor: Colors.white,
+                overlayColor: Colors.white24,
+                trackHeight: 3.0,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              ),
+              child: Slider(
+                value: valor.clamp(0.0, 1.0),
+                onChanged: onChanged,
+                onChangeStart: onChangeStart,
+                onChangeEnd: onChangeEnd,
               ),
             ),
           ),
-          const SizedBox(height: 6),
-          Icon(icone, color: Colors.white, size: 20),
-        ],
-      ),
+        ),
+        const SizedBox(height: 6),
+        Icon(
+          icone,
+          color: Colors.white,
+          size: 20,
+          shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
+        ),
+      ],
     );
   }
 }
