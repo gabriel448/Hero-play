@@ -37,7 +37,7 @@ class _TelaCanaisState extends State<TelaCanais> {
   // Quando a categoria ativa é de MINHAS CATEGORIAS (favoritos, qualidade,
   // personalizada), os canais vêm daqui em vez do mapa de categorias.
   List<Canal>? _canaisOverride;
-  Orientation? _orientacaoAnterior;
+  bool? _usava3Colunas;
   late final Map<String, List<Canal>> _categoriasQualidade;
 
   @override
@@ -55,8 +55,6 @@ class _TelaCanaisState extends State<TelaCanais> {
   }
 
   Widget _buildBody(BuildContext context) {
-    final landscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
     final busca = _buscando && _busca.isNotEmpty;
 
     void onSelecionada(String nome, {List<Canal>? canaisOverride}) =>
@@ -65,8 +63,10 @@ class _TelaCanaisState extends State<TelaCanais> {
           _canaisOverride = canaisOverride;
         });
 
-    // Desktop: sempre 3 colunas.
-    if (isDesktop(context)) {
+    // 3 colunas (categorias + canais + player embutido): desktop, ou tablet com
+    // LARGURA suficiente. Telas largas porem quase quadradas (Z Fold aberto)
+    // caem no layout de 2 colunas — ver usaTresColunas em utils/layout.dart.
+    if (usaTresColunas(context)) {
       return _LayoutDesktopCanais(
         categorias: widget.categorias,
         categoriasQualidade: _categoriasQualidade,
@@ -77,19 +77,7 @@ class _TelaCanaisState extends State<TelaCanais> {
       );
     }
 
-    // Tablet landscape: 3 colunas com player embutido.
-    if (isTablet(context) && landscape) {
-      return _LayoutDesktopCanais(
-        categorias: widget.categorias,
-        categoriasQualidade: _categoriasQualidade,
-        categoriaAtiva: _categoriaAtiva,
-        canaisOverride: _canaisOverride,
-        onCategoriaSelecionada: onSelecionada,
-        resultadosBuscaGlobal: busca ? _resultadosBusca : null,
-      );
-    }
-
-    // Tablet portrait: 2 colunas (categorias + canais).
+    // Tablet sem largura para 3 colunas: 2 colunas (categorias + canais).
     if (isTablet(context)) {
       return busca
           ? _ListaResultados(canais: _resultadosBusca)
@@ -123,15 +111,16 @@ class _TelaCanaisState extends State<TelaCanais> {
         .toList();
   }
 
-  /// Chamado num post-frame callback quando o tablet muda de orientação.
-  /// Portrait → Landscape: move o mini player para a 3ª coluna.
-  /// Landscape → Portrait: move o canal da 3ª coluna para o mini player.
-  void _tratarMudancaOrientacao(Orientation novaOrientacao) {
+  /// Chamado num post-frame callback quando o layout passa a usar (ou deixa de
+  /// usar) as 3 colunas — por rotacao OU por desdobrar o aparelho.
+  /// Ganhou a 3ª coluna: move o mini player para ela.
+  /// Perdeu a 3ª coluna: move o canal da 3ª coluna para o mini player.
+  void _tratarTransicao3Colunas(bool usa3Colunas) {
     if (!mounted) return;
     final mini = context.read<MiniPlayerProvider>();
     final provider = context.read<IptvProvider>();
 
-    if (novaOrientacao == Orientation.landscape) {
+    if (usa3Colunas) {
       // Mini player ativo → transfere para a 3ª coluna (layout desktop)
       if (mini.ativo) {
         final canal = mini.canal!;
@@ -152,17 +141,18 @@ class _TelaCanaisState extends State<TelaCanais> {
 
   @override
   Widget build(BuildContext context) {
-    // Detecta rotação no tablet para transferir o canal entre mini player
-    // e layout 3 colunas (landscape usa _LayoutDesktopCanais; portrait usa
-    // _LayoutTabletCanais sem player embutido).
-    if (!isDesktop(context) && isTablet(context)) {
-      final orientation = MediaQuery.orientationOf(context);
-      if (_orientacaoAnterior != null && _orientacaoAnterior != orientation) {
+    // Detecta quando o layout passa a usar (ou deixa de usar) as 3 colunas —
+    // por girar OU por desdobrar o aparelho — para transferir o canal entre o
+    // mini player e a 3ª coluna. Decide por LARGURA (usaTresColunas), nao so
+    // por orientacao: um "landscape" quase quadrado (Z Fold) usa 2 colunas.
+    if (isTablet(context) && !isDesktop(context)) {
+      final usa3 = usaTresColunas(context);
+      if (_usava3Colunas != null && _usava3Colunas != usa3) {
         WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _tratarMudancaOrientacao(orientation),
+          (_) => _tratarTransicao3Colunas(usa3),
         );
       }
-      _orientacaoAnterior = orientation;
+      _usava3Colunas = usa3;
     }
 
     return PopScope(

@@ -70,3 +70,22 @@ int posterColumns(BuildContext context) {
 /// Largura da sidebar de categorias dentro do TelaCanais.
 double channelSidebarWidth(BuildContext context) =>
     isDesktop(context) ? kDesktopChannelSidebarWidth : 260.0;
+
+/// Largura minima para o layout de 3 colunas dos canais ao vivo
+/// (sidebar de categorias + painel de canais + player embutido) caber sem
+/// espremer a coluna do meio.
+///
+/// Decidir por largura — e nao por orientacao — conserta telas largas porem
+/// "quase quadradas" (ex.: Galaxy Z Fold aberto), que contam como landscape mas
+/// nao tem largura para 3 colunas legiveis. Constante exposta para calibrar no
+/// aparelho real.
+const double kLarguraMin3Colunas = 1100.0;
+
+/// Decide se a tela de canais ao vivo deve usar o layout de 3 colunas.
+/// Desktop sempre; tablet apenas quando ha LARGURA suficiente (independe da
+/// orientacao — um "landscape" quase quadrado nao qualifica). Phone nunca.
+bool usaTresColunas(BuildContext context) {
+  if (isDesktop(context)) return true;
+  if (!isTablet(context)) return false;
+  return MediaQuery.sizeOf(context).width >= kLarguraMin3Colunas;
+}
