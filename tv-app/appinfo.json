@@ -1,0 +1,14 @@
+{
+  "id": "com.heroplay.tv",
+  "version": "0.1.0",
+  "vendor": "Hero Play",
+  "type": "web",
+  "main": "index.html",
+  "title": "Hero Play",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "bgColor": "#0F0E0D",
+  "iconColor": "#E53935",
+  "supportTouchMode": "none",
+  "handlesRelaunch": true
+}

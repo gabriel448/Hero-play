@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hero Play TV</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Shell: sidebar (nav por D-pad) + area de conteudo -->
+  <div id="app">
+    <!-- Sidebar lateral (estilo GTV): so icones; expande os rotulos ao focar -->
+    <nav id="sidebar" aria-label="Menu">
+      <div class="logo" aria-hidden="true">
+        <span class="logo-mark">▶</span>
+        <span class="logo-text">Hero<b>Play</b></span>
+      </div>
+      <div id="nav-itens"></div>
+      <div class="nav-rodape" id="nav-config"></div>
+    </nav>
+
+    <!-- Conteudo da secao ativa (renderizado pelo app.js) -->
+    <main id="conteudo"></main>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="spatial-nav.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  <script src="app.js"></script>
+</body>
+</html>
