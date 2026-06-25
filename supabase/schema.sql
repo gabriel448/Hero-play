@@ -228,6 +228,9 @@ alter table public.codigos_ativacao enable row level security;
 -- (usada pela Edge Function) ignora RLS e e a unica via de acesso.
 revoke select, insert, update, delete on public.codigos_ativacao from anon;
 revoke select, insert, update, delete on public.codigos_ativacao from authenticated;
+-- A Edge Function `codigo-beta` roda com a SERVICE ROLE — concede explicitamente
+-- (sem isto, em alguns projetos, faltava ver/atualizar e o codigo nao "queimava").
+grant select, insert, update, delete on public.codigos_ativacao to service_role;
 
 -- Status de ativacao por CONTA. O app le a propria linha (RLS) para decidir o
 -- gate. A escrita (ativar) so acontece via Edge Function (service role).
@@ -250,5 +253,65 @@ revoke insert, update, delete on public.contas_ativacao from anon;
 revoke insert, update, delete on public.contas_ativacao from authenticated;
 revoke select on public.contas_ativacao from anon;
 grant  select on public.contas_ativacao to authenticated;
+-- A Edge Function (service role) precisa gravar a ativacao (upsert).
+grant select, insert, update, delete on public.contas_ativacao to service_role;
+
+-- ============================================================================
+-- APP DE TV — dispositivos por MAC+Key (sem conta/PII). REUSO TEMPORARIO deste
+-- projeto. ⚠️ Ao construir o PAINEL DE REVENDA, migrar tudo isto para um projeto
+-- Supabase SEPARADO (ver PLANO-TV-E-PAINEIS.md §3/§10). O app de TV nunca acessa
+-- estas tabelas direto — apenas via Edge Function `ativacao` (service role).
+-- ============================================================================
+create extension if not exists pgcrypto;
+
+-- Dispositivo = MAC + Key (a Key, mostrada na TV, funciona como segredo do
+-- aparelho: liga o device na 1a gravacao e protege leituras/trocas).
+create table if not exists public.dispositivos (
+  id              uuid primary key default gen_random_uuid(),
+  mac             text unique not null,
+  device_key      text not null,
+  modelo          text,                              -- webos|tizen|roku|...
+  status          text not null default 'trial',     -- sem_lista|trial|ativo|expirado|banido
+  trial_expira_em timestamptz,
+  expira_em       timestamptz,
+  ativado_por     text,                              -- qr|codigo|admin|reseller
+  criado_em       timestamptz not null default now(),
+  atualizado_em   timestamptz not null default now()
+);
+alter table public.dispositivos enable row level security;
+revoke all on public.dispositivos from anon, authenticated;
+grant all on public.dispositivos to service_role;
+
+-- Playlist do device. A URL (e o EPG) sao CIFRADOS pela Edge Function antes de
+-- gravar — nunca em texto puro. Uma lista "selecionada" por device (MVP).
+create table if not exists public.playlists (
+  id             uuid primary key default gen_random_uuid(),
+  dispositivo_id uuid not null references public.dispositivos(id) on delete cascade,
+  nome           text,
+  tipo           text,                               -- xtream|m3u
+  url_cifrada    text not null,
+  epg_cifrada    text,
+  selecionada    boolean not null default true,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+create index if not exists idx_playlists_dispositivo on public.playlists(dispositivo_id);
+alter table public.playlists enable row level security;
+revoke all on public.playlists from anon, authenticated;
+grant all on public.playlists to service_role;
+
+-- Codigos de ativacao do TV (o dev/revendedor gera; o cliente usa em "ativar").
+-- dias = null  -> vitalicio.
+create table if not exists public.codigos_ativacao_tv (
+  codigo        text primary key,
+  dias          int,
+  usado         boolean not null default false,
+  usado_por_mac text,
+  nota          text,
+  criado_em     timestamptz not null default now()
+);
+alter table public.codigos_ativacao_tv enable row level security;
+revoke all on public.codigos_ativacao_tv from anon, authenticated;
+grant all on public.codigos_ativacao_tv to service_role;
 
 notify pgrst, 'reload schema';
