@@ -199,6 +199,53 @@ html, body {
 }
 .poster.is-focused { transform: scale(1.10); box-shadow: 0 22px 48px -16px rgba(0,0,0,.9), 0 0 0 4px rgba(229,57,53,.25); z-index: 2; }
 .poster.is-focused::after { border-color: var(--accent-bright); }
+/* Pôster menor (cabem mais) + imagem (logo de filme / poster TMDB de série) */
+.poster { width: 162px; height: 243px; }
+.poster-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.poster-arte.tem-img span { display: none; }
+
+/* ── Mídia (Início/Filmes/Séries): hero FIXO menor + trilhos ──────────────── */
+.hero2 {
+  position: sticky; top: 0; z-index: 3;
+  height: 44vh; min-height: 300px; max-height: 440px;
+  overflow: hidden; display: flex; align-items: flex-end;
+  padding: 0 var(--safe) 24px;
+}
+.hero2-bg { position: absolute; inset: 0; background: center/cover no-repeat; opacity: 0; transition: opacity .55s ease; z-index: 0; }
+.hero2-bg.on { opacity: 1; }
+.hero2-grad {
+  position: absolute; inset: 0; z-index: 1;
+  background:
+    linear-gradient(90deg, var(--bg) 6%, rgba(15,14,13,.6) 42%, transparent 80%),
+    linear-gradient(0deg, var(--bg) 1%, transparent 62%);
+}
+.hero2-conteudo { position: relative; z-index: 2; display: flex; gap: 26px; align-items: flex-end; max-width: 78%; }
+.hero2-poster { width: 148px; height: 222px; border-radius: 12px; flex-shrink: 0; background: center/cover; box-shadow: 0 18px 40px -16px rgba(0,0,0,.85); }
+.hero2-txt { padding-bottom: 4px; }
+.hero2-titulo { font-size: 44px; font-weight: 800; letter-spacing: -1.2px; line-height: 1.02; margin-bottom: 12px; text-wrap: balance; }
+.hero2-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 16px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; min-height: 22px; }
+.hero2-meta .nota { color: var(--accent-bright); }
+.hero2-meta .selo { padding: 3px 10px; border: 1px solid var(--outline); border-radius: 7px; font-size: 13px; }
+.hero2-sinopse { font-size: 17px; color: var(--text-secondary); line-height: 1.5; max-width: 620px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .hero-anim { animation: heroIn .42s cubic-bezier(.22,.61,.36,1); }
+  @keyframes heroIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+}
+.trilhos { padding-bottom: 80px; }
+.trilhos .trilho:first-child { margin-top: 18px; }
+
+/* ── Detalhe (backdrop + poster + sinopse + elenco) ───────────────────────── */
+#detalhe-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; }
+.det-bg { position: absolute; inset: 0; background: center/cover no-repeat; z-index: 0; }
+.det-grad { position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, var(--bg) 16%, rgba(15,14,13,.72) 52%, rgba(15,14,13,.4)); }
+.det-conteudo { position: relative; z-index: 2; display: flex; gap: 40px; align-items: center; padding: 0 var(--safe); width: 100%; max-width: 1120px; }
+.det-poster { width: 232px; height: 348px; border-radius: 16px; flex-shrink: 0; background: center/cover; box-shadow: 0 24px 60px -20px #000; }
+.det-info { max-width: 620px; }
+.det-titulo { font-size: 54px; font-weight: 800; letter-spacing: -1.4px; line-height: 1; margin-bottom: 12px; text-wrap: balance; }
+.det-sinopse { font-size: 18px; color: var(--text-secondary); line-height: 1.55; margin: 12px 0; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+.det-elenco { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; align-items: center; }
+.det-elenco-tit { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-tertiary); margin-right: 4px; }
+.det-ator { font-size: 14px; color: var(--text-secondary); background: var(--surface2); border: 1px solid var(--outline); border-radius: 999px; padding: 5px 12px; }
 
 /* ── Estado vazio (secoes ainda nao implementadas) ────────────────────────── */
 .placeholder {
@@ -419,6 +466,166 @@ html, body {
 #live-overlay.controles-ocultos .live-topdir,
 #live-overlay.controles-ocultos .player-voltar,
 #live-overlay.controles-ocultos .player-fade { opacity: 0; pointer-events: none; }
+
+/* ── Onboarding / aviso de teste (tela cheia) ─────────────────────────────── */
+.oculto { display: none !important; }
+
+/* ── Tela de loading (logo + barra em movimento) ──────────────────────────── */
+#loading {
+  position: fixed; inset: 0; z-index: 500; display: grid; place-items: center;
+  background: radial-gradient(1100px 640px at 50% 40%, #1a1512 0%, var(--bg) 72%);
+}
+.ld-card { display: flex; flex-direction: column; align-items: center; gap: 28px; }
+.ld-logo { gap: 16px; }
+.ld-logo .logo-mark { width: 64px; height: 64px; border-radius: 16px; font-size: 28px; animation: ldpulse 1.6s ease-in-out infinite; }
+.ld-logo .ob-logo-text { font-size: 40px; }
+@keyframes ldpulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 8px 24px -6px rgba(229,57,53,.55); }
+  50% { transform: scale(1.08); box-shadow: 0 14px 36px -6px rgba(229,57,53,.95); }
+}
+.ld-barra { width: 260px; height: 4px; background: var(--surface3); border-radius: 999px; overflow: hidden; position: relative; }
+.ld-barra span { position: absolute; top: 0; left: 0; height: 100%; width: 40%; border-radius: 999px; background: linear-gradient(90deg, transparent, var(--accent-bright), transparent); animation: ldslide 1.15s ease-in-out infinite; will-change: transform; }
+@keyframes ldslide { 0% { transform: translateX(-120%); } 100% { transform: translateX(360%); } }
+.ld-msg { font-size: 15px; color: var(--text-secondary); letter-spacing: .02em; }
+
+/* ── Menu de opções (qualidade / fonte) ───────────────────────────────────── */
+.menu-opcoes { position: fixed; inset: 0; z-index: 450; display: grid; place-items: center; background: rgba(5,5,6,.55); backdrop-filter: blur(2px); }
+.mo-card { background: var(--surface1); border: 1px solid var(--outline); border-radius: 20px; padding: 20px; min-width: 300px; max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 30px 80px -30px #000; }
+.mo-titulo { font-size: 14px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-tertiary); padding: 4px 8px 10px; }
+.mo-item { text-align: left; background: var(--surface2); border: 1px solid transparent; border-radius: 12px; padding: 15px 18px; font-size: 20px; font-weight: 600; color: var(--text-primary); font-family: inherit; cursor: pointer; transition: background .12s; }
+.mo-item.is-focused { background: var(--accent); border-color: var(--accent-bright); box-shadow: 0 0 0 3px rgba(239,83,80,.4); }
+
+/* ── Player VOD: loading / erro ───────────────────────────────────────────── */
+.pc-spinner { position: absolute; top: 50%; left: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border: 4px solid rgba(255,255,255,.16); border-top-color: var(--accent-bright); border-radius: 50%; animation: pcspin .9s linear infinite; z-index: 6; }
+@keyframes pcspin { to { transform: rotate(360deg); } }
+.pc-erro { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--text-secondary); font-size: 17px; line-height: 1.5; max-width: 70%; z-index: 6; }
+.pc-spinner.oculto, .pc-erro.oculto { display: none; }
+
+#onboarding, #aviso-teste {
+  position: fixed; inset: 0; z-index: 400;
+  display: grid; place-items: center;
+  padding: var(--safe);
+  background: radial-gradient(1200px 700px at 70% 30%, #1a1512 0%, var(--bg) 70%);
+}
+.ob-card {
+  width: 100%; max-width: 1180px;
+  background: var(--surface1);
+  border: 1px solid var(--outline);
+  border-radius: 28px;
+  padding: 48px 64px 40px;
+  box-shadow: 0 40px 120px -40px rgba(0,0,0,.9);
+}
+.ob-logo { justify-content: flex-start; gap: 14px; margin-bottom: 28px; }
+.ob-titulo { font-size: 52px; font-weight: 800; letter-spacing: -.02em; margin-bottom: 14px; }
+.ob-sub { font-size: 24px; line-height: 1.45; color: var(--text-secondary); max-width: 760px; margin-bottom: 40px; }
+
+/* Grade do onboarding (flat, sem card): topo (logo) · esquerda (QR) · direita (login) */
+.ob-wrap { width: 100%; max-width: 1300px; }
+.ob-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "top  top"
+    "left right";
+  column-gap: 90px; row-gap: 30px;
+  align-items: start;
+}
+.ob-top { grid-area: top; display: flex; justify-content: center; }
+.ob-left { grid-area: left; display: flex; flex-direction: column; align-items: center; gap: 14px; width: 380px; justify-self: center; text-align: center; }
+.ob-right { grid-area: right; display: flex; flex-direction: column; gap: 14px; max-width: 560px; width: 100%; justify-self: center; }
+.ob-top .ob-logo { margin-bottom: 0; }
+.ob-logo-text { font-size: 32px; font-weight: 800; color: var(--text-primary); white-space: nowrap; letter-spacing: -.01em; }
+.ob-logo-text b { color: var(--accent-bright); font-weight: 800; }
+.ob-h2 { font-size: 26px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.ob-right-h { text-align: center; font-size: 28px; }
+
+.ob-qr {
+  width: 280px; height: 280px; flex-shrink: 0;
+  background: #fff; border-radius: 18px; padding: 16px;
+  display: grid; place-items: center;
+}
+.ob-qr svg { width: 100%; height: 100%; display: block; }
+.ob-left-txt { font-size: 19px; color: var(--text-secondary); line-height: 1.35; white-space: nowrap; }
+.ob-left-txt b { color: var(--text-primary); }
+.ob-link { font-size: 26px; font-weight: 700; color: var(--accent-bright); }
+.ob-cred { display: flex; gap: 48px; justify-content: center; }
+/* Key acima do Mac, no canto inferior esquerdo (padrao dos apps de IPTV) */
+.ob-cred-fixo {
+  position: absolute; left: var(--safe); bottom: var(--safe);
+  display: flex; flex-direction: column; gap: 6px;
+  color: var(--text-tertiary); font-size: 18px; opacity: .85;
+}
+.ob-cred-fixo b { color: var(--text-secondary); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+.ob-cred > div { display: flex; flex-direction: column; gap: 4px; }
+.ob-cred span { font-size: 16px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .08em; }
+.ob-cred b { font-size: 26px; font-weight: 800; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.ob-ou { display: flex; align-items: center; gap: 12px; width: 100%; margin: 4px 0; color: var(--text-tertiary); font-size: 15px; text-transform: uppercase; letter-spacing: .12em; }
+.ob-ou::before, .ob-ou::after { content: ""; flex: 1; height: 1px; background: var(--divider); }
+.ob-hint { font-size: 16px; color: var(--text-tertiary); line-height: 1.35; }
+
+/* Tabs Xtream / M3U (sublinhado, estilo GTV) */
+.ob-tabs { display: flex; border-bottom: 1px solid var(--divider); margin-bottom: 6px; }
+.ob-tab {
+  flex: 1; padding: 14px 0;
+  background: none; border: none; border-bottom: 3px solid transparent;
+  color: var(--text-secondary); font-size: 21px; font-weight: 700; font-family: inherit;
+  cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+}
+.ob-tab.ativo { color: var(--text-primary); border-bottom-color: var(--accent); }
+.ob-tab.is-focused { color: var(--text-primary); background: rgba(255,255,255,.05); border-radius: 10px 10px 0 0; box-shadow: inset 0 0 0 2px var(--accent-bright); }
+
+/* Campos com icone */
+.ob-form { display: flex; flex-direction: column; gap: 14px; }
+.ob-campo {
+  display: flex; align-items: center; gap: 14px;
+  padding: 2px 18px; border-radius: 12px;
+  background: var(--surface2); border: 1px solid var(--outline);
+  transition: border-color .12s, box-shadow .12s;
+}
+.ob-campo:focus-within { border-color: var(--accent-bright); box-shadow: 0 0 0 3px rgba(239,83,80,.35); }
+.ob-ico { width: 24px; height: 24px; flex-shrink: 0; color: var(--text-tertiary); display: grid; place-items: center; }
+.ob-ico svg { width: 24px; height: 24px; }
+.ob-input {
+  flex: 1; width: 100%; padding: 16px 0;
+  background: none; border: none; outline: none;
+  color: var(--text-primary); font-size: 20px; font-family: inherit;
+}
+.ob-input::placeholder { color: var(--text-tertiary); }
+.ob-erro { min-height: 24px; color: var(--accent-bright); font-size: 18px; font-weight: 600; }
+#ob-add { width: 100%; margin-top: 6px; }
+
+/* Aviso de teste — card centralizado em coluna, espaçamento uniforme */
+.aviso-card {
+  width: 100%; max-width: 620px;
+  background: var(--surface1); border: 1px solid var(--outline); border-radius: 28px;
+  padding: 52px 56px; box-shadow: 0 40px 120px -40px rgba(0,0,0,.9);
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 24px;
+}
+.aviso-badge {
+  background: var(--accent-dim); color: var(--accent-bright);
+  font-size: 15px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  padding: 8px 18px; border-radius: 999px; border: 1px solid var(--accent);
+}
+.aviso-titulo { font-size: 56px; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+.aviso-sub { font-size: 21px; line-height: 1.5; color: var(--text-secondary); max-width: 480px; }
+.aviso-card .ob-qr { width: 240px; height: 240px; }
+.aviso-rotulo { font-size: 14px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .1em; margin-bottom: -12px; }
+.aviso-card .ob-link { font-size: 24px; }
+.aviso-card .btn { margin-top: 6px; min-width: 260px; justify-content: center; text-align: center; }
+
+/* ── Playlists (gerência de lista) ────────────────────────────────────────── */
+.secao-pl { padding: 48px var(--safe); }
+.pl-card {
+  margin-top: 24px; max-width: 980px;
+  background: var(--surface1); border: 1px solid var(--outline);
+  border-radius: 22px; padding: 40px 44px;
+}
+.pl-ok { font-size: 26px; font-weight: 700; color: #7CCB8A; margin-bottom: 10px; }
+.pl-vazio { font-size: 26px; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; }
+.pl-url, .pl-epg { font-size: 18px; color: var(--text-secondary); word-break: break-all; margin-bottom: 6px; }
+.pl-status { font-size: 20px; color: var(--text-primary); margin: 14px 0 4px; }
+.pl-add { font-size: 22px; color: var(--text-secondary); margin: 30px 0 18px; }
+.pl-grid { display: flex; align-items: center; gap: 44px; margin-bottom: 28px; }
 
 /* ── Acessibilidade: reduzir movimento ────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {

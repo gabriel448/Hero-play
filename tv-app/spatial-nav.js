@@ -12,9 +12,11 @@ const SpatialNav = (() => {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
-  // Se houver um modal (.nav-modal) aberto, navega SO dentro dele.
+  // Se houver modal(is) (.nav-modal), navega SO dentro do mais recente (topo da
+  // pilha) — suporta menu de qualidade/fonte sobreposto ao player.
+  const modalTopo = () => { const ms = document.querySelectorAll('.nav-modal'); return ms.length ? ms[ms.length - 1] : null; };
   const focaveis = () => {
-    const escopo = document.querySelector('.nav-modal') || document;
+    const escopo = modalTopo() || document;
     return [...escopo.querySelectorAll('.focusable')].filter(visivel);
   };
   const rect = (el) => el.getBoundingClientRect();
@@ -23,9 +25,12 @@ const SpatialNav = (() => {
   // vertical vazar entre os dois (a sidebar expandida sobrepoe o conteudo).
   const areaDe = (el) => (el.closest && el.closest('#sidebar')) ? 'side' : 'main';
 
+  let aoFocarCb = null; // callback externo (ex.: atualizar hero ao focar poster)
+
   function aoMudarFoco(el) {
     const sb = document.getElementById('sidebar');
     if (sb) sb.classList.toggle('expandida', el.classList.contains('nav-item'));
+    if (aoFocarCb) { try { aoFocarCb(el); } catch (_) {} }
   }
 
   function setFocus(el) {
@@ -34,6 +39,12 @@ const SpatialNav = (() => {
     atual = el;
     el.classList.add('is-focused');
     aoMudarFoco(el);
+    // Campos de texto: foco NATIVO p/ digitar (e abrir o teclado on-screen na TV).
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); }
+    } else if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
   }
 
@@ -77,7 +88,12 @@ const SpatialNav = (() => {
   }
 
   function mover(dir) {
-    const alvo = melhorCandidato(dir);
+    let alvo = melhorCandidato(dir);
+    // Ao voltar do conteudo para o menu lateral (seta esquerda), focar SEMPRE a
+    // seção ativa — nao o item geometricamente mais proximo.
+    if (alvo && dir === 'left' && areaDe(atual) === 'main' && areaDe(alvo) === 'side') {
+      alvo = document.querySelector('.nav-item.ativo') || alvo;
+    }
     if (alvo) setFocus(alvo);
   }
 
@@ -101,7 +117,7 @@ const SpatialNav = (() => {
 
   // "Voltar": se um modal estiver aberto, fecha-o (via _onVoltar); senao, menu.
   function voltar() {
-    const modal = document.querySelector('.nav-modal');
+    const modal = modalTopo();
     if (modal && typeof modal._onVoltar === 'function') { modal._onVoltar(); return; }
     focarMenu();
   }
@@ -118,5 +134,9 @@ const SpatialNav = (() => {
     }
   });
 
-  return { setFocus, focarPrimeiro, focarMenu, refresh: () => atual, get atual() { return atual; } };
+  return {
+    setFocus, focarPrimeiro, focarMenu, refresh: () => atual,
+    aoFocar: (fn) => { aoFocarCb = fn; },
+    get atual() { return atual; },
+  };
 })();
