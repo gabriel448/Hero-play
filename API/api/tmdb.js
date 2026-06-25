@@ -1,4 +1,10 @@
 module.exports = async function handler(req, res) {
+  // CORS — o app de TV (web) chama este proxy direto do navegador.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
   const { p, ...rest } = req.query;
 
   if (!p) return res.status(400).json({ error: 'missing path' });
