@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload de Playlist — Hero Play</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="secao" style="padding-top:140px">
+      <div style="text-align:center">
+        <div class="secao-rotulo" data-i18n="up.rotulo">Upload de Playlist</div>
+        <h2 data-i18n="up.h2">Adicione sua lista</h2>
+        <p class="descr" style="margin:14px auto 0" data-i18n="up.descr">Configure a playlist do seu dispositivo Hero Play. Suporta Xtream ou URL M3U.</p>
+      </div>
+
+      <div class="form-wrap" style="margin-top:36px">
+        <div class="form-card">
+          <div class="barra"></div>
+          <div class="corpo">
+            <div class="chips" id="chips" style="display:none">
+              <div class="chip"><span>MAC</span><b id="c-mac">—</b></div>
+              <div class="chip"><span>Key</span><b id="c-key">—</b></div>
+            </div>
+            <div id="manual" style="display:none">
+              <div class="campo"><label for="in-mac" data-i18n="up.mac">MAC do dispositivo</label>
+                <input class="in" type="text" id="in-mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"></div>
+              <div class="campo"><label for="in-key" data-i18n="up.key">Key</label>
+                <input class="in" type="text" id="in-key" placeholder="123456" inputmode="numeric" autocomplete="off"></div>
+            </div>
+
+            <div class="msg erro" id="erro"></div>
+
+            <div id="step-add">
+              <div class="abas">
+                <button class="aba ativo" id="aba-x" type="button">Xtream</button>
+                <button class="aba" id="aba-m" type="button">M3U / URL</button>
+              </div>
+              <form id="form" autocomplete="off">
+                <div id="campos-x">
+                  <div class="campo"><label for="x-host" data-i18n="up.server">Servidor</label><input class="in" type="text" id="x-host" placeholder="http://host:porta" autocomplete="off" spellcheck="false"></div>
+                  <div class="campo"><label for="x-user" data-i18n="up.user">Usuário</label><input class="in" type="text" id="x-user" autocomplete="off" spellcheck="false"></div>
+                  <div class="campo"><label for="x-pass" data-i18n="up.pass">Senha</label><input class="in" type="password" id="x-pass" autocomplete="off"></div>
+                </div>
+                <div id="campos-m" style="display:none">
+                  <div class="campo"><label for="m-url" data-i18n="up.m3u">URL da lista (M3U)</label><input class="in" type="url" id="m-url" placeholder="https://.../lista.m3u" autocomplete="off" spellcheck="false"></div>
+                </div>
+                <div class="derivado" id="derivado">
+                  <div class="lin"><span data-i18n="up.dvlista">Lista (M3U)</span><b id="dv-m3u"></b></div>
+                  <div class="lin"><span data-i18n="up.dvepg">EPG (XMLTV)</span><b id="dv-epg"></b></div>
+                </div>
+                <button class="btn btn-primary btn-bloco" id="btn-add" type="submit" style="margin-top:6px" data-i18n="up.add">Adicionar lista</button>
+              </form>
+            </div>
+
+            <div id="resultado" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+  <script>
+    const ATIVACAO_API = 'https://mlafyphpntjssmxagyhc.supabase.co/functions/v1/ativacao';
+    const ANON = 'sb_publishable_MlxtdbBT4UJWhBVJ5Krtww_AvZHXa3I';
+    const $ = (id) => document.getElementById(id);
+    const t = (k) => window.HP_t ? window.HP_t(k) : k;
+    const p = new URLSearchParams(location.search);
+    let modo = 'xtream';
+    let dev = { mac: (p.get('mac') || '').trim(), key: (p.get('key') || '').trim() };
+    if (dev.mac && dev.key) { $('chips').style.display = 'flex'; $('c-mac').textContent = dev.mac; $('c-key').textContent = dev.key; }
+    else { $('manual').style.display = 'block'; }
+    const lerDev = () => (dev.mac && dev.key) ? dev : { mac: ($('in-mac').value || '').trim(), key: ($('in-key').value || '').trim() };
+
+    function montarXtream(host, user, pass) {
+      let base = (host || '').trim();
+      if (!/^https?:\/\//i.test(base)) base = 'http://' + base;
+      base = base.replace(/\/+$/, '').replace(/\/(get|player_api|xmltv)\.php.*$/i, '');
+      const q = `username=${encodeURIComponent(user.trim())}&password=${encodeURIComponent(pass.trim())}`;
+      return { lista_url: `${base}/get.php?${q}&type=m3u_plus&output=ts`, epg_url: `${base}/xmltv.php?${q}` };
+    }
+    function derivarEpg(url) {
+      try { const u = new URL(url.trim()); const us = u.searchParams.get('username'), pw = u.searchParams.get('password');
+        if (us && pw) return `${u.protocol}//${u.host}/xmltv.php?username=${encodeURIComponent(us)}&password=${encodeURIComponent(pw)}`; } catch (_) {}
+      return '';
+    }
+    function montarAtual() {
+      if (modo === 'xtream') { const h = $('x-host').value, u = $('x-user').value, s = $('x-pass').value;
+        if (!h.trim() || !u.trim() || !s.trim()) return null; return montarXtream(h, u, s); }
+      const url = ($('m-url').value || '').trim(); if (!/^https?:\/\//i.test(url)) return null;
+      return { lista_url: url, epg_url: derivarEpg(url) };
+    }
+    function atualizarDerivado() {
+      const d = montarAtual(); const box = $('derivado');
+      if (!d) { box.classList.remove('show'); return; }
+      $('dv-m3u').textContent = d.lista_url; $('dv-epg').textContent = d.epg_url || t('up.epgsem'); box.classList.add('show');
+    }
+    function trocarAba(n) {
+      modo = n; $('aba-x').classList.toggle('ativo', n === 'xtream'); $('aba-m').classList.toggle('ativo', n === 'm3u');
+      $('campos-x').style.display = n === 'xtream' ? 'block' : 'none'; $('campos-m').style.display = n === 'm3u' ? 'block' : 'none'; atualizarDerivado();
+    }
+    const erro = (m) => { $('erro').textContent = m; $('erro').classList.add('show'); };
+
+    async function chamarApi(payload) {
+      if (!ATIVACAO_API) return { ok: true, demo: true, status: 'trial', trial_expira_em: new Date(Date.now() + 7 * 864e5).toISOString() };
+      const r = await fetch(ATIVACAO_API, { method: 'POST', headers: { 'content-type': 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON }, body: JSON.stringify(payload) });
+      const j = await r.json().catch(() => ({})); if (!r.ok || j.ok === false) throw new Error(j.erro || 'Falha ao processar.'); return j;
+    }
+    async function adicionar(e) {
+      e.preventDefault(); $('erro').classList.remove('show');
+      const d = lerDev(); if (!d.mac || !d.key) return erro(t('up.errdev'));
+      const lista = montarAtual(); if (!lista) return erro(modo === 'xtream' ? t('up.errx') : t('up.errm'));
+      const b = $('btn-add'); b.disabled = true; b.textContent = t('up.adding');
+      try { const r = await chamarApi({ acao: 'adicionar', mac: d.mac, key: d.key, ...lista }); mostrarResultado(r); }
+      catch (err) { erro(err.message); b.disabled = false; b.textContent = t('up.add'); }
+    }
+    function mostrarResultado(r) {
+      const dias = r.trial_expira_em ? Math.max(0, Math.ceil((new Date(r.trial_expira_em) - new Date()) / 864e5)) : 7;
+      $('step-add').style.display = 'none';
+      const box = $('resultado'); box.style.display = 'block';
+      box.innerHTML = `<div style="text-align:center;border:1px solid var(--accent);background:var(--accent-dim);border-radius:16px;padding:24px">
+        <div class="soon" style="color:var(--accent-bright)">${t('up.rtrial')}</div>
+        <h3 style="font-family:var(--font-head);font-size:28px;margin:6px 0 10px">${t('up.rdias').replace('{n}', dias)}</h3>
+        <p style="color:var(--text-2);font-size:14px;line-height:1.6">${t('up.rok')}</p>
+        <p style="color:var(--text-2);font-size:14px;line-height:1.6;margin-top:6px">${t('up.rafter')}</p>
+        ${r.demo ? `<p style="color:var(--text-3);font-size:12px;margin-top:12px">${t('up.demo')}</p>` : ''}</div>`;
+    }
+
+    $('aba-x').addEventListener('click', () => trocarAba('xtream'));
+    $('aba-m').addEventListener('click', () => trocarAba('m3u'));
+    ['x-host','x-user','x-pass','m-url'].forEach((id) => $(id).addEventListener('input', atualizarDerivado));
+    $('form').addEventListener('submit', adicionar);
+  </script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerenciar — Hero Play</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="secao" style="padding-top:140px;max-width:560px">
+      <div class="secao-rotulo" data-i18n="ger.rotulo">Área do cliente</div>
+      <h2 data-i18n="ger.h2">Gerenciar dispositivo</h2>
+      <p class="descr" data-i18n="ger.descr">Informe o MAC e a Key do seu dispositivo para ver e gerenciar suas playlists.</p>
+
+      <div class="form-card" style="margin-top:30px">
+        <div class="barra"></div>
+        <div class="corpo">
+          <div class="msg erro" id="erro"></div>
+
+          <form id="form-login" autocomplete="off">
+            <div class="campo"><label for="mac" data-i18n="ger.mac">Endereço MAC</label>
+              <div class="inp">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                <input class="in" type="text" id="mac" placeholder="00:00:00:00:00:00" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div class="campo"><label for="key" data-i18n="ger.key">Device Key</label>
+              <div class="inp">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>
+                <input class="in" type="password" id="key" placeholder="••••••" autocomplete="off">
+              </div>
+            </div>
+            <button class="btn btn-primary btn-bloco" id="btn-entrar" type="submit" style="margin-top:6px" data-i18n="ger.entrar">Entrar</button>
+          </form>
+
+          <div id="painel" style="display:none"></div>
+        </div>
+      </div>
+      <p class="descr" style="font-size:13px" data-i18n="ger.help">Não sabe onde encontrar? O MAC e a Key ficam no canto inferior esquerdo da tela inicial do app.</p>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+  <script>
+    const ATIVACAO_API = 'https://mlafyphpntjssmxagyhc.supabase.co/functions/v1/ativacao';
+    const ANON = 'sb_publishable_MlxtdbBT4UJWhBVJ5Krtww_AvZHXa3I';
+    const $ = (id) => document.getElementById(id);
+    const t = (k) => window.HP_t ? window.HP_t(k) : k;
+    const p = new URLSearchParams(location.search);
+    if (p.get('mac')) $('mac').value = p.get('mac');
+    if (p.get('key')) $('key').value = p.get('key');
+
+    async function consultar(mac, key) {
+      const u = `${ATIVACAO_API}?mac=${encodeURIComponent(mac)}&key=${encodeURIComponent(key)}`;
+      const r = await fetch(u, { headers: { accept: 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON } });
+      if (!r.ok) throw new Error(t('ger.errdev'));
+      return r.json();
+    }
+
+    $('form-login').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('erro').classList.remove('show');
+      const mac = ($('mac').value || '').trim(), key = ($('key').value || '').trim();
+      if (!mac || !key) { $('erro').textContent = t('ger.err'); $('erro').classList.add('show'); return; }
+      const b = $('btn-entrar'); b.disabled = true; b.textContent = t('ger.loading');
+      try {
+        const d = await consultar(mac, key);
+        $('form-login').style.display = 'none';
+        const temLista = !!d.lista_url;
+        const enc = (s) => encodeURIComponent(s);
+        $('painel').style.display = 'block';
+        $('painel').innerHTML = `
+          <div class="chips" style="margin-bottom:18px"><div class="chip"><span>MAC</span><b>${mac}</b></div><div class="chip"><span>${t('ger.status')}</span><b>${t('st.' + (d.status || 'sem_lista'))}</b></div></div>
+          ${temLista
+            ? `<div class="derivado show"><div class="lin"><span>${t('ger.dvlista')}</span><b>${d.lista_url}</b></div>${d.epg_url ? `<div class="lin"><span>${t('ger.dvepg')}</span><b>${d.epg_url}</b></div>` : ''}</div>`
+            : `<p class="descr">${t('ger.nolist')}</p>`}
+          <a class="btn btn-primary btn-bloco" href="upload.html?mac=${enc(mac)}&key=${enc(key)}" style="margin-top:14px">${temLista ? t('ger.trocar') : t('ger.adicionar')}</a>
+          <a class="btn btn-ghost btn-bloco" href="ativacao.html?mac=${enc(mac)}&key=${enc(key)}" style="margin-top:10px">${t('ger.ativar')}</a>
+          ${d.demo ? `<p style="color:var(--text-3);font-size:12px;margin-top:14px;text-align:center">${t('ger.demo')}</p>` : ''}`;
+      } catch (err) {
+        $('erro').textContent = err.message || t('ger.errdev'); $('erro').classList.add('show');
+        b.disabled = false; b.textContent = t('ger.entrar');
+      }
+    });
+  </script>
+</body>
+</html>

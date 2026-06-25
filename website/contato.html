@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contato — Hero Play</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="secao" style="padding-top:140px;max-width:680px">
+      <div class="secao-rotulo" data-i18n="ct.rotulo">Fale conosco</div>
+      <h2 data-i18n="ct.h2">Entre em contato</h2>
+      <p class="descr" data-i18n="ct.descr">Dúvidas ou problemas? Nossa equipe está pronta para ajudar.</p>
+
+      <a href="mailto:contato@heroplaytv.com" class="card" style="display:flex;align-items:center;gap:14px;margin:24px 0;max-width:360px">
+        <div class="ico" style="margin:0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>
+        <div><div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)">Email</div><div style="font-weight:600;color:var(--text-2)">contato@heroplaytv.com</div></div>
+      </a>
+
+      <div class="form-card">
+        <div class="barra"></div>
+        <div class="corpo">
+          <div class="msg ok" id="ok" data-i18n="ct.ok">Mensagem pronta para envio. Abrindo seu app de email…</div>
+          <form id="form" autocomplete="on">
+            <div class="grid grid-2" style="gap:14px">
+              <div class="campo"><label for="nome" data-i18n="ct.nome">Nome completo</label><input class="in" type="text" id="nome" required placeholder="Ex: João Silva"></div>
+              <div class="campo"><label for="email" data-i18n="ct.email">E-mail</label><input class="in" type="email" id="email" required placeholder="joao@exemplo.com"></div>
+            </div>
+            <div class="campo"><label for="assunto" data-i18n="ct.assunto">Assunto</label>
+              <select class="in" id="assunto">
+                <option data-i18n="ct.opt1">Ativação / pagamento</option>
+                <option data-i18n="ct.opt2">Adicionar / gerenciar playlist</option>
+                <option data-i18n="ct.opt3">Problema técnico</option>
+                <option data-i18n="ct.opt4">Outro</option>
+              </select>
+            </div>
+            <div class="campo"><label for="msg" data-i18n="ct.msg">Mensagem</label><textarea class="in" id="msg" required placeholder="..."></textarea></div>
+            <button class="btn btn-primary btn-bloco" type="submit" data-i18n="ct.enviar">Enviar mensagem</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    $('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const nome = $('nome').value.trim(), email = $('email').value.trim(), assunto = $('assunto').value, msg = $('msg').value.trim();
+      if (!nome || !email || !msg) return;
+      const corpo = encodeURIComponent(`Nome: ${nome}\nEmail: ${email}\n\n${msg}`);
+      $('ok').classList.add('show');
+      window.location.href = `mailto:contato@heroplaytv.com?subject=${encodeURIComponent('[' + assunto + '] ' + nome)}&body=${corpo}`;
+    });
+  </script>
+</body>
+</html>

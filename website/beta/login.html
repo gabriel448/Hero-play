@@ -8,18 +8,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
-  <link rel="stylesheet" href="assets/auth.css">
+  <link rel="icon" type="image/png" sizes="192x192" href="../assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="../assets/auth.css">
   <script>document.documentElement.classList.add('js-anim');</script>
   <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="index.html">
-      <img src="assets/heroplay-icon-192.png" alt="Hero Play">
+    <a class="brand" href="../index.html">
+      <img src="../assets/heroplay-icon-192.png" alt="Hero Play">
       <span>Hero Play</span>
     </a>
-    <a class="btn btn-ghost" href="index.html">← Voltar ao site</a>
+    <a class="btn btn-ghost" href="../index.html">← Voltar ao site</a>
   </header>
 
   <main class="center-wrap">
@@ -69,7 +69,7 @@
               <span class="lembrar-box">
                 <svg class="lembrar-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>
               </span>
-              <span class="lembrar-text">Li e concordo com os <a href="termos.html" target="_blank" rel="noopener">Termos de Serviço</a> e a <a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span>
+              <span class="lembrar-text">Li e concordo com os <a href="../termos.html" target="_blank" rel="noopener">Termos de Serviço</a> e a <a href="../privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span>
             </label>
           </div>
           <button class="btn btn-primary" id="btn-enviar" type="submit">Entrar</button>
@@ -111,7 +111,7 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-config.js"></script>
+  <script src="../supabase-config.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const erro = $('msg-erro'), ok = $('msg-ok');
@@ -258,7 +258,7 @@
     // Deep-link do app: ?modo=criar abre direto na aba de cadastro.
     if (new URLSearchParams(location.search).get('modo') === 'criar') setModo('criar');
 
-    document.querySelectorAll('a[href="index.html"]').forEach(a =>
+    document.querySelectorAll('a[href="../index.html"]').forEach(a =>
       a.addEventListener('click', e => { e.preventDefault(); navegar('index.html'); }));
 
     entrada();

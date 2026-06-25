@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ativação — Hero Play</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="secao" style="padding-top:140px">
+      <div class="secao-rotulo" data-i18n="ativ.rotulo">Ative seu dispositivo</div>
+      <h2 data-i18n="ativ.h2">Escolha sua licença</h2>
+      <p class="descr" data-i18n="ativ.descr">Escolha o plano que melhor se adapta a você. Ao selecionar, você informa o dispositivo e segue para o pagamento via PIX.</p>
+
+      <div class="planos">
+        <div class="plano">
+          <div class="num">01</div>
+          <h3 data-i18n="ativ.p6">6 Meses</h3>
+          <ul>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.finst">Ativação instantânea</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.fseg">Seguro e criptografado</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.fsup">Suporte incluso</span></li>
+          </ul>
+          <div class="preco"><span class="cifrao">R$</span><span class="valor">16</span><span class="cents">,90</span></div>
+          <button class="btn btn-ghost btn-bloco" data-preco="R$ 16,90" data-i18n="ativ.sel">Selecionar</button>
+        </div>
+        <div class="plano destaque">
+          <div class="selo-pop" data-i18n="ativ.popular">Mais popular</div>
+          <div class="num">02</div>
+          <h3 data-i18n="ativ.p1">1 Ano</h3>
+          <ul>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.finst">Ativação instantânea</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.fseg">Seguro e criptografado</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.fsupp">Suporte prioritário</span></li>
+          </ul>
+          <div class="preco"><span class="cifrao">R$</span><span class="valor">29</span><span class="cents">,90</span></div>
+          <button class="btn btn-primary btn-bloco" data-preco="R$ 29,90" data-i18n="ativ.sel">Selecionar</button>
+        </div>
+        <div class="plano">
+          <div class="num">03</div>
+          <h3 data-i18n="ativ.pv">Vitalício</h3>
+          <ul>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.finst">Ativação instantânea</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.fseg">Seguro e criptografado</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> <span data-i18n="ativ.fnr">Sem renovação</span></li>
+          </ul>
+          <div class="preco"><span class="cifrao">R$</span><span class="valor">99</span><span class="cents">,90</span></div>
+          <button class="btn btn-ghost btn-bloco" data-preco="R$ 99,90" data-i18n="ativ.sel">Selecionar</button>
+        </div>
+      </div>
+
+      <div class="aviso">
+        <div class="traco"></div>
+        <div>
+          <h4 data-i18n="ativ.avt">Sobre a licença</h4>
+          <p data-i18n="ativ.avp">Você está contratando o uso do aplicativo Hero Play para organizar e reproduzir as suas próprias playlists M3U/M3U8. O app não inclui, distribui nem vende canais, filmes ou séries.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal: passo 1 (MAC) → passo 2 (PIX) -->
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <div id="passo-dados">
+        <h3 id="modal-plano">Plano</h3>
+        <p class="sub" id="modal-preco">R$ —</p>
+        <div class="campo" style="text-align:left"><label for="m-mac" data-i18n="ativ.mac">MAC do dispositivo</label>
+          <input class="in" type="text" id="m-mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"></div>
+        <div class="msg erro" id="m-erro"></div>
+        <button class="btn btn-primary btn-bloco" id="ir-pagamento" data-i18n="ativ.ir">Ir para o pagamento</button>
+        <button class="btn btn-ghost btn-bloco" id="cancelar" style="margin-top:8px" data-i18n="ativ.cancelar">Cancelar</button>
+      </div>
+      <div id="passo-pix" style="display:none">
+        <div class="soon" data-i18n="ativ.soon">Em breve</div>
+        <h3 data-i18n="ativ.pix">Pagamento via PIX</h3>
+        <p class="sub" id="pix-plano"></p>
+        <div class="qr" id="qr"></div>
+        <p class="sub" id="pix-dev">—</p>
+        <button class="btn btn-ghost btn-bloco" id="fechar" data-i18n="ativ.fechar">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <footer id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const p = new URLSearchParams(location.search);
+    let plano = null;
+    if (p.get('mac')) $('m-mac').value = p.get('mac').trim();
+    const fecharModal = () => $('modal').classList.remove('show');
+
+    document.querySelectorAll('[data-preco]').forEach((b) => b.addEventListener('click', () => {
+      plano = { nome: b.closest('.plano').querySelector('h3').textContent, preco: b.dataset.preco };
+      $('modal-plano').textContent = plano.nome;
+      $('modal-preco').textContent = plano.preco;
+      $('m-erro').classList.remove('show');
+      $('passo-dados').style.display = 'block';
+      $('passo-pix').style.display = 'none';
+      $('modal').classList.add('show');
+      setTimeout(() => { if (!$('m-mac').value) $('m-mac').focus(); }, 60);
+    }));
+
+    $('ir-pagamento').addEventListener('click', () => {
+      const mac = ($('m-mac').value || '').trim();
+      if (!mac) { $('m-erro').textContent = window.HP_t('ativ.errmac'); $('m-erro').classList.add('show'); return; }
+      $('m-erro').classList.remove('show');
+      $('pix-plano').textContent = `${plano.nome} · ${plano.preco}`;
+      $('pix-dev').textContent = `MAC: ${mac}`;
+      const alvo = `https://heroplaytv.com/pagar.html?mac=${encodeURIComponent(mac)}&plano=${encodeURIComponent(plano.nome)}`;
+      try { const qr = qrcode(0, 'M'); qr.addData(alvo); qr.make(); $('qr').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 0 }); } catch (_) {}
+      $('passo-dados').style.display = 'none';
+      $('passo-pix').style.display = 'block';
+    });
+
+    $('cancelar').addEventListener('click', fecharModal);
+    $('fechar').addEventListener('click', fecharModal);
+    $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) fecharModal(); });
+  </script>
+</body>
+</html>

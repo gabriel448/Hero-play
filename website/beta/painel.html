@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
-  <link rel="stylesheet" href="assets/auth.css">
+  <link rel="icon" type="image/png" sizes="192x192" href="../assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="../assets/auth.css">
   <script>document.documentElement.classList.add('js-anim');</script>
   <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
 </head>
@@ -25,8 +25,8 @@
           <line x1="3" y1="15" x2="17" y2="15"/>
         </svg>
       </button>
-      <a class="brand" href="index.html">
-        <img src="assets/heroplay-icon-192.png" alt="Hero Play">
+      <a class="brand" href="../index.html">
+        <img src="../assets/heroplay-icon-192.png" alt="Hero Play">
         <span>Hero Play</span>
       </a>
     </div>
@@ -438,7 +438,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-config.js"></script>
+  <script src="../supabase-config.js"></script>
   <script>
     const sb  = window.criarClienteSupabase();
     const $   = (id) => document.getElementById(id);
@@ -542,7 +542,7 @@
               duration:300, easing:'easeInQuad', complete: () => location.replace('login.html') });
     };
 
-    document.querySelectorAll('a[href="index.html"]').forEach(a =>
+    document.querySelectorAll('a[href="../index.html"]').forEach(a =>
       a.addEventListener('click', e => {
         e.preventDefault();
         if (!motion) { location.replace('index.html'); return; }
