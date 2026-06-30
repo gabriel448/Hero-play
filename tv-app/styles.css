@@ -64,9 +64,11 @@ html, body {
   width: 50px; height: 50px; flex-shrink: 0;
   display: grid; place-items: center;
   background: var(--accent); color: #fff;
-  border-radius: 13px; font-size: 22px;
+  border-radius: 8px; font-size: 22px;
   box-shadow: 0 6px 18px -6px rgba(229,57,53,.7);
 }
+/* Logo oficial (H) na sidebar: o SVG já traz o quadrado vermelho. */
+img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 .logo-text {
   font-size: 23px; font-weight: 700;
   max-width: 0; opacity: 0; overflow: hidden;
@@ -83,7 +85,7 @@ html, body {
   position: relative;
   display: flex; align-items: center; justify-content: center; gap: 0;
   padding: 17px 0; margin: 0 12px;
-  border-radius: 14px; white-space: nowrap; cursor: pointer;
+  border-radius: 9px; white-space: nowrap; cursor: pointer;
   color: var(--text-secondary);
   transition: transform .15s, background .15s, color .15s;
 }
@@ -150,7 +152,7 @@ html, body {
 
 .btn {
   display: inline-flex; align-items: center; gap: 10px;
-  padding: 15px 32px; border-radius: 13px;
+  padding: 15px 32px; border-radius: 8px;
   font-size: 18px; font-weight: 700; cursor: pointer; white-space: nowrap;
   border: 1px solid transparent; color: #fff;
   transition: transform .15s, background .15s, box-shadow .15s;
@@ -167,24 +169,23 @@ html, body {
 .btn-secundario.is-focused { background: rgba(255,255,255,.20); }
 
 /* ── Trilhos (rails) horizontais ──────────────────────────────────────────── */
-.trilho { margin-top: 40px; }
+.trilho { margin-top: 24px; }
 .trilho-titulo {
-  font-size: 27px; font-weight: 700; margin-bottom: 6px; padding: 0 var(--safe);
+  font-size: 25px; font-weight: 700; margin-bottom: 4px; padding: 0 var(--safe);
   display: flex; align-items: center; gap: 12px;
 }
-.trilho-titulo::before { content: ''; width: 5px; height: 27px; border-radius: 3px; background: var(--accent); }
-/* Padding vertical generoso: dá espaço para o item CRESCER no foco sem cortar.
-   (overflow-x:auto força overflow-y:auto, entao o padding e que evita o corte.) */
+.trilho-titulo::before { content: ''; width: 5px; height: 25px; border-radius: 2px; background: var(--accent); }
+/* Padding vertical p/ o item crescer no foco sem cortar (overflow-x força y). */
 .trilho-fila {
-  display: flex; gap: 22px; overflow-x: auto;
-  padding: 30px var(--safe); scrollbar-width: none;
+  display: flex; gap: 18px; overflow-x: auto;
+  padding: 20px var(--safe); scrollbar-width: none;
 }
 .trilho-fila::-webkit-scrollbar { height: 0; }
 
 /* ── Poster ───────────────────────────────────────────────────────────────── */
 .poster {
   position: relative; flex-shrink: 0;
-  width: 196px; height: 294px; border-radius: 14px; overflow: hidden;
+  width: 196px; height: 294px; border-radius: 9px; overflow: hidden;
   cursor: pointer;
   background: var(--surface2);
   transition: transform .16s cubic-bezier(.22,.61,.36,1), box-shadow .16s;
@@ -194,35 +195,49 @@ html, body {
 .poster-arte span { font-size: 19px; font-weight: 800; letter-spacing: .3px; line-height: 1.15; color: rgba(255,255,255,.94); text-shadow: 0 2px 8px rgba(0,0,0,.6); text-wrap: balance; }
 .poster::after {
   content: ''; position: absolute; inset: 0;
-  border: 4px solid transparent; border-radius: 14px;
+  border: 3px solid transparent; border-radius: 8px;
   transition: border-color .16s;
 }
 .poster.is-focused { transform: scale(1.10); box-shadow: 0 22px 48px -16px rgba(0,0,0,.9), 0 0 0 4px rgba(229,57,53,.25); z-index: 2; }
 .poster.is-focused::after { border-color: var(--accent-bright); }
-/* Pôster menor (cabem mais) + imagem (logo de filme / poster TMDB de série) */
-.poster { width: 162px; height: 243px; }
+/* Pôster vertical (maior) + radius menor (mais profissional) */
+.poster { width: 184px; height: 276px; border-radius: 8px; }
 .poster-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .poster-arte.tem-img span { display: none; }
 
 /* ── Mídia (Início/Filmes/Séries): hero FIXO menor + trilhos ──────────────── */
 .hero2 {
   position: sticky; top: 0; z-index: 3;
-  height: 44vh; min-height: 300px; max-height: 440px;
-  overflow: hidden; display: flex; align-items: flex-end;
-  padding: 0 var(--safe) 24px;
+  height: 42vh; min-height: 300px; max-height: 420px;
+  overflow: visible; display: flex; align-items: center;   /* texto centralizado */
+  padding: 0 var(--safe);
+  /* Base OPACA: os trilhos rolam sob o hero (z-index menor). Sem este fundo, no
+     meio da troca de backdrop dava p/ ver os pôsteres atrás. Agora nunca vaza. */
+  background: var(--bg);
 }
-.hero2-bg { position: absolute; inset: 0; background: center/cover no-repeat; opacity: 0; transition: opacity .55s ease; z-index: 0; }
+/* Transição suave: os trilhos somem num gradiente ao passar sob o painel,
+   em vez de cortarem numa linha dura. */
+.hero2::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 56px;
+  background: linear-gradient(var(--bg), transparent);
+  z-index: 4; pointer-events: none;
+}
+/* Backdrop ocupa ~62% à DIREITA (ancorado no topo-direita, mantém as cabeças).
+   Os ~38% à esquerda são o fundo + gradiente onde entra o texto. */
+.hero2-bg { position: absolute; top: 0; bottom: 0; right: 0; width: 62%; background-size: cover; background-position: right top; background-repeat: no-repeat; opacity: 0; transition: opacity .55s ease; z-index: 0; }
 .hero2-bg.on { opacity: 1; }
+/* Sem backdrop: blur do pôster vertical (cores do filme/série). */
+.hero2-bg.blur { filter: blur(34px) saturate(1.35) brightness(.5); transform: scale(1.3); }
 .hero2-grad {
   position: absolute; inset: 0; z-index: 1;
   background:
-    linear-gradient(90deg, var(--bg) 6%, rgba(15,14,13,.6) 42%, transparent 80%),
-    linear-gradient(0deg, var(--bg) 1%, transparent 62%);
+    linear-gradient(90deg, var(--bg) 38%, rgba(15,14,13,.75) 52%, transparent 82%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 24%, transparent 78%, var(--bg) 100%);
 }
-.hero2-conteudo { position: relative; z-index: 2; display: flex; gap: 26px; align-items: flex-end; max-width: 78%; }
-.hero2-poster { width: 148px; height: 222px; border-radius: 12px; flex-shrink: 0; background: center/cover; box-shadow: 0 18px 40px -16px rgba(0,0,0,.85); }
-.hero2-txt { padding-bottom: 4px; }
-.hero2-titulo { font-size: 44px; font-weight: 800; letter-spacing: -1.2px; line-height: 1.02; margin-bottom: 12px; text-wrap: balance; }
+.hero2-conteudo { position: relative; z-index: 2; max-width: 46%; }
+/* Logo-título PNG do TMDB (estilo Netflix). Escondido até carregar; some no fundo. */
+.hero2-logo { display: none; max-height: 132px; max-width: 460px; object-fit: contain; object-position: left bottom; margin-bottom: 14px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
+.hero2-titulo { font-size: 52px; font-weight: 800; letter-spacing: -1.4px; line-height: 1.02; margin-bottom: 12px; text-wrap: balance; }
 .hero2-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 16px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; min-height: 22px; }
 .hero2-meta .nota { color: var(--accent-bright); }
 .hero2-meta .selo { padding: 3px 10px; border: 1px solid var(--outline); border-radius: 7px; font-size: 13px; }
@@ -232,20 +247,171 @@ html, body {
   @keyframes heroIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 }
 .trilhos { padding-bottom: 80px; }
-.trilhos .trilho:first-child { margin-top: 18px; }
+.trilhos .trilho:first-child { margin-top: 10px; }
 
-/* ── Detalhe (backdrop + poster + sinopse + elenco) ───────────────────────── */
-#detalhe-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; }
-.det-bg { position: absolute; inset: 0; background: center/cover no-repeat; z-index: 0; }
-.det-grad { position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, var(--bg) 16%, rgba(15,14,13,.72) 52%, rgba(15,14,13,.4)); }
-.det-conteudo { position: relative; z-index: 2; display: flex; gap: 40px; align-items: center; padding: 0 var(--safe); width: 100%; max-width: 1120px; }
-.det-poster { width: 232px; height: 348px; border-radius: 16px; flex-shrink: 0; background: center/cover; box-shadow: 0 24px 60px -20px #000; }
-.det-info { max-width: 620px; }
-.det-titulo { font-size: 54px; font-weight: 800; letter-spacing: -1.4px; line-height: 1; margin-bottom: 12px; text-wrap: balance; }
-.det-sinopse { font-size: 18px; color: var(--text-secondary); line-height: 1.55; margin: 12px 0; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
-.det-elenco { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; align-items: center; }
-.det-elenco-tit { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-tertiary); margin-right: 4px; }
-.det-ator { font-size: 14px; color: var(--text-secondary); background: var(--surface2); border: 1px solid var(--outline); border-radius: 999px; padding: 5px 12px; }
+/* ── Detalhe (pós-seleção) — tela cheia: backdrop + info + elenco + semelhantes ── */
+#detalhe-overlay.det2 { position: fixed; inset: 0; z-index: 300; display: block; background: var(--bg); }
+.det2-bg { position: absolute; top: 0; right: 0; bottom: 0; width: 64%; background-size: cover; background-position: right top; background-repeat: no-repeat; z-index: 0; }
+.det2-grad {
+  position: absolute; inset: 0; z-index: 1;
+  background:
+    linear-gradient(90deg, var(--bg) 36%, rgba(15,14,13,.72) 52%, transparent 82%),
+    linear-gradient(0deg, var(--bg) 6%, transparent 42%);
+}
+.det2-scroll { position: absolute; inset: 0; z-index: 2; overflow-y: auto; scrollbar-width: none; }
+.det2-scroll::-webkit-scrollbar { width: 0; }
+.det2-topo { min-height: 64vh; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--safe); max-width: 52%; }
+.det2-logo { max-height: 220px; max-width: 640px; object-fit: contain; object-position: left; margin-bottom: 20px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
+.det2-titulo { font-size: 56px; font-weight: 800; letter-spacing: -1.4px; line-height: 1.02; margin-bottom: 14px; text-wrap: balance; }
+.det2-meta { color: var(--text-secondary); margin-bottom: 12px; }
+.det2-meta1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; flex-wrap: wrap; }
+.det2-meta1 .pt { color: var(--text-tertiary); font-style: normal; }
+.det2-meta1 .imdb { color: #F5C518; font-weight: 800; margin-right: 6px; }
+.det2-meta1 .estrelas { color: var(--accent-bright); letter-spacing: 2px; }
+.det2-meta2 { font-size: 15px; color: var(--text-tertiary); margin-top: 4px; }
+.det2-tag { align-self: flex-start; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-secondary); border: 1px solid var(--outline); border-radius: 6px; padding: 4px 10px; margin: 4px 0 14px; }
+.det2-sinopse { font-size: 18px; color: var(--text-secondary); line-height: 1.55; max-width: 600px; margin-bottom: 24px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.det2-acoes { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.btn-icone { padding: 14px; border-radius: 999px; background: rgba(255,255,255,.10); border-color: var(--outline); }
+.btn-icone svg { width: 22px; height: 22px; }
+.btn-icone.is-focused { background: rgba(255,255,255,.22); box-shadow: 0 0 0 3px #fff; }
+.det2-secao { padding: 8px 0 10px; }
+.det2-h2 { font-size: 22px; font-weight: 700; padding: 0 var(--safe); margin-bottom: 4px; }
+.det2-fila { display: flex; gap: 16px; overflow-x: auto; padding: 16px var(--safe); scrollbar-width: none; }
+.det2-fila::-webkit-scrollbar { height: 0; }
+/* Elenco */
+.ator { flex-shrink: 0; width: 120px; text-align: center; cursor: default; }
+.ator-foto { width: 110px; height: 110px; border-radius: 999px; margin: 0 auto 8px; background: var(--surface2); display: grid; place-items: center; font-weight: 800; font-size: 26px; color: var(--text-secondary); border: 2px solid transparent; }
+.ator.is-focused .ator-foto { border-color: var(--accent-bright); transform: scale(1.06); }
+.ator-nome { font-size: 13px; font-weight: 700; line-height: 1.2; }
+.ator-pers { font-size: 12px; color: var(--text-tertiary); line-height: 1.2; margin-top: 2px; }
+/* Títulos semelhantes */
+.rec-poster { position: relative; flex-shrink: 0; width: 150px; height: 225px; border-radius: 8px; overflow: hidden; background: var(--surface2); cursor: pointer; transition: transform .16s, box-shadow .16s; }
+.rec-arte { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; text-align: center; }
+.rec-arte span { font-size: 16px; font-weight: 800; color: rgba(255,255,255,.94); text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+.rec-arte.tem-img span { display: none; }
+.rec-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.rec-poster.is-focused { transform: scale(1.08); box-shadow: 0 18px 40px -16px rgba(0,0,0,.9), 0 0 0 3px var(--accent-bright); z-index: 2; }
+
+/* ── Créditos e mais informações (menu + painel) ──────────────────────────── */
+.cr { position: fixed; inset: 0; z-index: 320; display: grid; place-items: center; background: rgba(5,5,6,.78); backdrop-filter: blur(4px); }
+.cr-card { width: min(1000px, 88vw); height: min(560px, 80vh); display: grid; grid-template-columns: 300px 1fr; background: var(--surface1); border: 1px solid var(--outline); border-radius: 14px; overflow: hidden; box-shadow: 0 40px 120px -40px #000; }
+.cr-menu { background: var(--bg-2, #131211); border-right: 1px solid var(--divider); padding: 22px 16px; display: flex; flex-direction: column; gap: 6px; }
+.cr-titulo { font-size: 18px; font-weight: 800; padding: 4px 12px 14px; }
+.cr-item { text-align: left; background: none; border: none; border-radius: 9px; padding: 14px 16px; font-size: 18px; font-weight: 600; color: var(--text-secondary); font-family: inherit; cursor: pointer; transition: background .12s, color .12s; }
+.cr-item.ativo { color: var(--text-primary); }
+.cr-item.is-focused { background: var(--accent); color: #fff; }
+.cr-painel { padding: 32px 36px; overflow-y: auto; }
+.cr-h { font-size: 22px; font-weight: 800; margin-bottom: 14px; }
+.cr-c { font-size: 16px; line-height: 1.6; color: var(--text-secondary); white-space: pre-line; }
+
+/* ── Episódios (capas + menu de temporada) ────────────────────────────────── */
+.ep { position: fixed; inset: 0; z-index: 310; background: var(--bg); }
+/* Backdrop full-screen, borrado e esmaecido — ambiente p/ o conteúdo central. */
+.ep-bg { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: .22; filter: blur(2px); z-index: 0; }
+.ep-grad {
+  position: absolute; inset: 0; z-index: 1;
+  background:
+    radial-gradient(120% 82% at 50% 0%, transparent 30%, var(--bg) 78%),
+    linear-gradient(0deg, var(--bg), transparent 56%);
+}
+.ep-conteudo { position: absolute; inset: 0; z-index: 2; }
+/* Nome/logo da série no topo, centralizado. */
+.ep-cabecalho { position: absolute; top: 40px; left: 0; right: 0; z-index: 4; text-align: center; padding: 0 var(--safe); }
+.ep-logo { display: block; max-height: 104px; max-width: 460px; object-fit: contain; margin: 0 auto; filter: drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
+.ep-titulo { font-size: 38px; font-weight: 800; letter-spacing: -1px; }
+/* Seletor de temporadas: coluna vertical à esquerda, centralizada na altura.
+   Inativa = bolinha vermelha; ativa = "pílula" com "Temporada X" (anima entrada
+   com opacity + translateX → compositor, 60 fps). */
+.ep-temps { position: absolute; left: var(--safe); top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 26px; z-index: 5; }
+/* Botões grandes (regra dos 10 pés — legível e focável de longe na TV). */
+.ep-temp-item { position: relative; height: 50px; padding-left: 46px; cursor: pointer; }
+.ep-temp-dot { position: absolute; left: 8px; top: 50%; width: 20px; height: 20px; margin-top: -10px; border-radius: 50%; background: var(--accent); z-index: 2; transition: transform .25s ease; }
+.ep-temp-item.ativa .ep-temp-dot { transform: scale(1.15); }
+.ep-temp-lbl {
+  position: absolute; left: 0; top: 0; height: 100%; display: flex; align-items: center;
+  padding: 0 30px 0 48px; white-space: nowrap; font-size: 22px; font-weight: 700; color: #fff;
+  background: var(--accent); border-radius: 999px; box-shadow: 0 8px 22px -10px rgba(229,57,53,.9);
+  opacity: 0; transform: translateX(-8px); pointer-events: none; z-index: 1;
+  transition: opacity .25s ease, transform .25s ease;
+}
+.ep-temp-item.ativa .ep-temp-lbl { opacity: 1; transform: translateX(0); }
+.ep-temp-item.is-focused .ep-temp-lbl { box-shadow: 0 0 0 3px #fff, 0 8px 22px -10px rgba(229,57,53,.9); }
+/* Episódios centralizados (coluna central, rolável). */
+.ep-centro { position: absolute; top: 168px; left: 0; right: 0; bottom: 0; overflow-y: auto; scrollbar-width: none; }
+.ep-centro::-webkit-scrollbar { width: 0; }
+.ep-lista { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; padding: 0 var(--safe) 60px; }
+.ep-item { display: flex; gap: 20px; align-items: center; padding: 12px; border-radius: 10px; background: var(--surface1); border: 1px solid var(--divider); cursor: pointer; transition: background .12s, box-shadow .12s; }
+.ep-item.is-focused { background: var(--surface2); box-shadow: inset 0 0 0 2px var(--accent-bright); }
+.ep-capa { width: 232px; height: 131px; border-radius: 7px; flex-shrink: 0; background-size: cover; background-position: center; display: grid; place-items: center; }
+.ep-capa span { font-size: 24px; font-weight: 800; color: rgba(255,255,255,.8); }
+.ep-info { flex: 1; min-width: 0; }
+.ep-n { font-size: 21px; font-weight: 700; margin-bottom: 7px; }
+.ep-sinopse { font-size: 16px; color: var(--text-secondary); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Skeleton (pulso de opacidade — compositor, 60 fps) enquanto a sinopse carrega. */
+.ep-sk { display: block; height: 13px; border-radius: 5px; background: var(--surface2); animation: epskel 1.1s ease-in-out infinite; }
+.ep-sk.l2 { width: 64%; margin-top: 8px; }
+@keyframes epskel { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+
+/* ── Busca (teclado on-screen à esquerda + resultados em grade de 5) ───────── */
+.bsc { display: flex; gap: 44px; padding: 36px var(--safe) 0; height: 100vh; box-sizing: border-box; overflow: hidden; }
+/* Coluna esquerda em flex-column: título/input/teclado FIXOS no topo; as categorias
+   ficam num bloco rolável que preenche o resto (focar tecla NÃO rola — só rola ao
+   ir nas categorias). SEM overflow hidden aqui: ele cortava o anel de foco das
+   teclas das bordas; só as categorias rolam (têm seu próprio overflow). */
+.bsc-esq { width: 440px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.bsc-titulo, .bsc-input, .bsc-teclado { flex: 0 0 auto; }
+.bsc-titulo { font-size: 34px; font-weight: 800; letter-spacing: -.5px; margin-bottom: 18px; }
+.bsc-input { display: flex; align-items: center; gap: 12px; background: var(--surface1); border: 1px solid var(--outline); border-radius: 12px; padding: 16px 20px; margin-bottom: 22px; min-height: 34px; }
+.bsc-input-ico { display: grid; place-items: center; color: var(--text-tertiary); }
+.bsc-input-ico svg { width: 24px; height: 24px; }
+/* texto + caret + placeholder colados (sem gap do flex pai → caret junto ao texto) */
+.bsc-campo { display: flex; align-items: center; min-width: 0; flex: 1; overflow: hidden; }
+.bsc-q { font-size: 23px; font-weight: 600; white-space: pre; }   /* pre: espaços aparecem */
+.bsc-ph { font-size: 23px; color: var(--text-tertiary); white-space: nowrap; }
+.bsc-caret { width: 2px; height: 26px; margin: 0 1px; flex-shrink: 0; background: var(--accent-bright); animation: bscCaret 1s steps(1) infinite; }
+@keyframes bscCaret { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+.bsc-teclado { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.bsc-key { min-height: 58px; display: grid; place-items: center; background: var(--surface2); border: 1px solid var(--divider); border-radius: 10px; color: #fff; font-size: 23px; font-weight: 700; cursor: pointer; transition: transform .12s ease, background .12s ease; }
+.bsc-key svg { width: 26px; height: 26px; }
+.bsc-key.is-focused { background: var(--accent); transform: scale(1.08); box-shadow: 0 0 0 3px #fff; z-index: 1; }
+.bsc-key-acao { grid-column: span 2; font-size: 17px; font-weight: 700; }
+/* Resultados: rola só esta coluna (o teclado fica fixo à esquerda). */
+.bsc-dir { flex: 1; min-width: 0; height: 100%; overflow-y: auto; scrollbar-width: none; }
+.bsc-dir::-webkit-scrollbar { width: 0; }
+/* padding generoso: o pôster em foco escala 1.10 e a coluna corta (overflow) —
+   sem essa folga, a fila de cima ficava cortada. scroll-margin dá respiro ao rolar. */
+.bsc-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; padding: 30px 24px 70px; }
+.bsc-grid .poster { width: 100%; height: auto; aspect-ratio: 184 / 276; scroll-margin: 30px 0; }
+.bsc-vazio { height: 76vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--text-tertiary); padding: 0 40px; }
+.bsc-vazio-ico { opacity: .45; }
+.bsc-vazio-ico svg { width: 92px; height: 92px; }
+.bsc-vazio-titulo { font-size: 26px; font-weight: 700; color: var(--text-secondary); text-wrap: balance; }
+.bsc-vazio-sub { font-size: 18px; }
+
+/* Botão de busca da seção (Filmes/Séries) — fixo no canto superior direito. */
+.midia-busca { position: fixed; top: 26px; right: var(--safe); z-index: 50; width: 58px; height: 58px; display: grid; place-items: center; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid var(--outline); color: #fff; cursor: pointer; transition: transform .15s, background .15s, box-shadow .15s; }
+.midia-busca svg { width: 27px; height: 27px; }
+.midia-busca.is-focused { background: var(--accent); transform: scale(1.08); box-shadow: 0 0 0 3px #fff; }
+
+/* Busca de seção: overlay + animação de "lupa tomando a tela" (círculo que
+   expande do botão). transform/opacity → compositor, 60 fps. */
+/* Ocupa só a ÁREA DE CONTEÚDO (à direita da sidebar) → a barra lateral continua
+   visível, como na busca normal. z-index abaixo da sidebar(100) e dos modais
+   detalhe(300)/episódios(310), que abrem por cima. */
+.busca-secao { position: fixed; left: var(--sidebar-col); top: 0; right: 0; bottom: 0; z-index: 90; overflow: hidden; }
+.bs-reveal { position: absolute; width: 120px; height: 120px; border-radius: 50%; background: var(--bg); transform: scale(0); transform-origin: center; transition: transform .4s cubic-bezier(.4, 0, .2, 1); will-change: transform; }
+.busca-secao.aberto .bs-reveal { transform: scale(var(--bs-esc, 30)); }
+.bs-conteudo { position: absolute; inset: 0; z-index: 1; opacity: 0; transition: opacity .18s ease; }
+.busca-secao.aberto .bs-conteudo { opacity: 1; transition: opacity .26s ease .12s; }
+/* Categorias da seção, abaixo do teclado (navegáveis por D-pad). Bloco rolável
+   que preenche o resto da coluna. */
+.bsc-cats { margin-top: 18px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; scrollbar-width: none; padding: 2px 4px; }
+.bsc-cats::-webkit-scrollbar { width: 0; }
+.bsc-cat { flex-shrink: 0; text-align: left; background: var(--surface2); border: 1px solid var(--divider); border-radius: 10px; padding: 15px 18px; font-size: 18px; font-weight: 600; color: var(--text-secondary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background .12s, color .12s; }
+.bsc-cat.ativa { color: #fff; border-color: var(--accent); }
+/* anel INSET (não corta no overflow do bloco) + sem scale → fim do "hover bugado". */
+.bsc-cat.is-focused { background: var(--accent); color: #fff; box-shadow: inset 0 0 0 2px #fff; }
 
 /* ── Estado vazio (secoes ainda nao implementadas) ────────────────────────── */
 .placeholder {
@@ -266,7 +432,7 @@ html, body {
 .player-voltar {
   position: absolute; top: 34px; left: 40px; z-index: 2;
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 12px 22px; border-radius: 12px; cursor: pointer;
+  padding: 12px 22px; border-radius: 8px; cursor: pointer;
   background: rgba(0,0,0,.4); border: 1px solid var(--outline); color: #fff;
   font-size: 17px; font-weight: 700;
   transition: transform .15s, background .15s, box-shadow .15s, opacity .3s;
@@ -323,7 +489,7 @@ html, body {
   position: fixed; bottom: 140px; left: 50%; transform: translateX(-50%);
   z-index: 500; pointer-events: none;
   background: rgba(0,0,0,.88); border: 1px solid var(--outline); color: #fff;
-  padding: 13px 24px; border-radius: 12px; font-size: 16px; font-weight: 600;
+  padding: 13px 24px; border-radius: 8px; font-size: 16px; font-weight: 600;
   opacity: 0; transition: opacity .2s;
 }
 #toast.ativo { opacity: 1; }
@@ -366,7 +532,7 @@ html, body {
 .tv-lista-cab .tv-chev { width: 22px; height: 22px; color: var(--accent-bright); }
 .tv-cat-item, .tv-canal-item {
   display: flex; align-items: center; gap: 14px; padding: 16px;
-  border-radius: 14px; cursor: pointer; color: var(--text-secondary);
+  border-radius: 9px; cursor: pointer; color: var(--text-secondary);
   transition: transform .15s, background .15s, color .15s, box-shadow .15s;
 }
 .tv-cat-item { justify-content: space-between; }
@@ -384,11 +550,11 @@ html, body {
 /* Coluna direita: preview + programacao */
 .tv-preview { display: flex; flex-direction: column; gap: 18px; max-width: 1000px; }
 .tv-preview-vazio { height: 100%; align-items: center; justify-content: center; text-align: center; gap: 14px; }
-.tv-vazio-logo { width: 96px; height: 96px; border-radius: 22px; background: var(--accent); display: grid; place-items: center; font-size: 40px; color: #fff; box-shadow: 0 10px 30px -10px rgba(229,57,53,.7); }
+.tv-vazio-logo { width: 96px; height: 96px; border-radius: 14px; background: var(--accent); display: grid; place-items: center; font-size: 40px; color: #fff; box-shadow: 0 10px 30px -10px rgba(229,57,53,.7); }
 .tv-vazio-titulo { font-size: 30px; font-weight: 800; }
 .tv-vazio-sub { font-size: 17px; color: var(--text-secondary); }
 
-.tv-tela { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 16px; overflow: hidden; cursor: pointer; border: 1px solid var(--outline); transition: box-shadow .15s, transform .15s; }
+.tv-tela { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; cursor: pointer; border: 1px solid var(--outline); transition: box-shadow .15s, transform .15s; }
 .tv-tela video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .tv-tela-hint { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 10px; background: rgba(0,0,0,.65); font-size: 14px; font-weight: 700; opacity: 0; transition: opacity .15s; }
 .tv-tela-hint svg { width: 18px; height: 18px; }
@@ -396,7 +562,7 @@ html, body {
 .tv-tela.is-focused .tv-tela-hint { opacity: 1; }
 
 .tv-prev-cab { display: flex; align-items: center; gap: 16px; }
-.tv-prev-logo { width: 60px; height: 60px; border-radius: 12px; flex-shrink: 0; display: grid; place-items: center; }
+.tv-prev-logo { width: 60px; height: 60px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; }
 .tv-prev-logo span { font-size: 20px; font-weight: 800; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
 .tv-prev-titulos { flex: 1; min-width: 0; }
 .tv-prev-canal { font-size: 22px; font-weight: 800; }
@@ -427,7 +593,7 @@ html, body {
 
 .live-topdir { position: absolute; top: 34px; right: 40px; z-index: 2; display: flex; gap: 12px; transition: opacity .3s; }
 .live-top-btn {
-  display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 12px;
+  display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 8px;
   background: rgba(0,0,0,.45); border: 1px solid var(--outline); color: #fff;
   font-size: 16px; font-weight: 700; cursor: pointer;
   transition: transform .15s, background .15s, box-shadow .15s;
@@ -451,10 +617,10 @@ html, body {
 .live-prog-prox b { color: #fff; font-weight: 700; }
 .live-bar-dir { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
 .live-relogio { font-size: 24px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
-.live-logo { width: 66px; height: 66px; border-radius: 13px; flex-shrink: 0; display: grid; place-items: center; }
+.live-logo { width: 66px; height: 66px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; }
 .live-logo span { font-size: 21px; font-weight: 800; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
 .live-epg-btn {
-  display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 12px;
+  display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 8px;
   background: rgba(255,255,255,.12); border: 1px solid var(--outline); color: #fff;
   font-size: 16px; font-weight: 700; cursor: pointer;
   transition: transform .15s, background .15s, box-shadow .15s;
@@ -477,7 +643,7 @@ html, body {
 }
 .ld-card { display: flex; flex-direction: column; align-items: center; gap: 28px; }
 .ld-logo { gap: 16px; }
-.ld-logo .logo-mark { width: 64px; height: 64px; border-radius: 16px; font-size: 28px; animation: ldpulse 1.6s ease-in-out infinite; }
+.ld-logo .logo-mark { width: 64px; height: 64px; border-radius: 10px; font-size: 28px; animation: ldpulse 1.6s ease-in-out infinite; }
 .ld-logo .ob-logo-text { font-size: 40px; }
 @keyframes ldpulse {
   0%, 100% { transform: scale(1); box-shadow: 0 8px 24px -6px rgba(229,57,53,.55); }
@@ -490,9 +656,9 @@ html, body {
 
 /* ── Menu de opções (qualidade / fonte) ───────────────────────────────────── */
 .menu-opcoes { position: fixed; inset: 0; z-index: 450; display: grid; place-items: center; background: rgba(5,5,6,.55); backdrop-filter: blur(2px); }
-.mo-card { background: var(--surface1); border: 1px solid var(--outline); border-radius: 20px; padding: 20px; min-width: 300px; max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 30px 80px -30px #000; }
+.mo-card { background: var(--surface1); border: 1px solid var(--outline); border-radius: 12px; padding: 20px; min-width: 300px; max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 30px 80px -30px #000; }
 .mo-titulo { font-size: 14px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-tertiary); padding: 4px 8px 10px; }
-.mo-item { text-align: left; background: var(--surface2); border: 1px solid transparent; border-radius: 12px; padding: 15px 18px; font-size: 20px; font-weight: 600; color: var(--text-primary); font-family: inherit; cursor: pointer; transition: background .12s; }
+.mo-item { text-align: left; background: var(--surface2); border: 1px solid transparent; border-radius: 8px; padding: 15px 18px; font-size: 20px; font-weight: 600; color: var(--text-primary); font-family: inherit; cursor: pointer; transition: background .12s; }
 .mo-item.is-focused { background: var(--accent); border-color: var(--accent-bright); box-shadow: 0 0 0 3px rgba(239,83,80,.4); }
 
 /* ── Player VOD: loading / erro ───────────────────────────────────────────── */
@@ -511,7 +677,7 @@ html, body {
   width: 100%; max-width: 1180px;
   background: var(--surface1);
   border: 1px solid var(--outline);
-  border-radius: 28px;
+  border-radius: 16px;
   padding: 48px 64px 40px;
   box-shadow: 0 40px 120px -40px rgba(0,0,0,.9);
 }
@@ -541,7 +707,7 @@ html, body {
 
 .ob-qr {
   width: 280px; height: 280px; flex-shrink: 0;
-  background: #fff; border-radius: 18px; padding: 16px;
+  background: #fff; border-radius: 12px; padding: 16px;
   display: grid; place-items: center;
 }
 .ob-qr svg { width: 100%; height: 100%; display: block; }
@@ -578,7 +744,7 @@ html, body {
 .ob-form { display: flex; flex-direction: column; gap: 14px; }
 .ob-campo {
   display: flex; align-items: center; gap: 14px;
-  padding: 2px 18px; border-radius: 12px;
+  padding: 2px 18px; border-radius: 8px;
   background: var(--surface2); border: 1px solid var(--outline);
   transition: border-color .12s, box-shadow .12s;
 }
@@ -597,7 +763,7 @@ html, body {
 /* Aviso de teste — card centralizado em coluna, espaçamento uniforme */
 .aviso-card {
   width: 100%; max-width: 620px;
-  background: var(--surface1); border: 1px solid var(--outline); border-radius: 28px;
+  background: var(--surface1); border: 1px solid var(--outline); border-radius: 16px;
   padding: 52px 56px; box-shadow: 0 40px 120px -40px rgba(0,0,0,.9);
   display: flex; flex-direction: column; align-items: center; text-align: center; gap: 24px;
 }
@@ -618,7 +784,7 @@ html, body {
 .pl-card {
   margin-top: 24px; max-width: 980px;
   background: var(--surface1); border: 1px solid var(--outline);
-  border-radius: 22px; padding: 40px 44px;
+  border-radius: 14px; padding: 40px 44px;
 }
 .pl-ok { font-size: 26px; font-weight: 700; color: #7CCB8A; margin-bottom: 10px; }
 .pl-vazio { font-size: 26px; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; }

@@ -64,7 +64,15 @@ const Lista = (() => {
     return 'live';
   }
   function parseExtinf(ln) {
-    const i = ln.indexOf(',');
+    // Vírgula separadora = a 1ª FORA de aspas. Valores de atributo (ex.:
+    // tvg-name="MEU FILHO, NOSSO MUNDO") podem ter vírgula — um indexOf(',')
+    // simples quebrava no meio do atributo e jogava o resto da linha no nome.
+    let i = -1, dentro = false;
+    for (let k = 0; k < ln.length; k++) {
+      const ch = ln[k];
+      if (ch === '"') dentro = !dentro;
+      else if (ch === ',' && !dentro) { i = k; break; }
+    }
     let nome = 'Sem nome', antes = ln;
     if (i !== -1) { nome = ln.slice(i + 1).trim(); antes = ln.slice(0, i); }
     const attrs = {};

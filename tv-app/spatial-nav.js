@@ -16,14 +16,32 @@ const SpatialNav = (() => {
   // pilha) — suporta menu de qualidade/fonte sobreposto ao player.
   const modalTopo = () => { const ms = document.querySelectorAll('.nav-modal'); return ms.length ? ms[ms.length - 1] : null; };
   const focaveis = () => {
-    const escopo = modalTopo() || document;
-    return [...escopo.querySelectorAll('.focusable')].filter(visivel);
+    const top = modalTopo();
+    let els = [...(top || document).querySelectorAll('.focusable')];
+    // Busca de seção: a sidebar continua navegável (como na busca normal), mesmo
+    // sendo um modal — inclui os itens do menu no escopo.
+    if (top && top.classList.contains('busca-secao')) {
+      const sb = document.getElementById('sidebar');
+      if (sb) els = els.concat([...sb.querySelectorAll('.focusable')]);
+    }
+    return els.filter(visivel);
   };
   const rect = (el) => el.getBoundingClientRect();
   const centro = (r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-  // "Area" do elemento: menu lateral x conteudo. Usado para NAO deixar o foco
-  // vertical vazar entre os dois (a sidebar expandida sobrepoe o conteudo).
-  const areaDe = (el) => (el.closest && el.closest('#sidebar')) ? 'side' : 'main';
+  // "Area" do elemento. O ↑/↓ so navega DENTRO da mesma area — isola as regioes
+  // em COLUNA (sidebar, coluna de temporadas, colunas da TV ao vivo) p/ o foco
+  // vertical nao vazar de uma coluna para outra. O conteudo em LINHAS (detalhe,
+  // home) fica todo em 'main', onde ↑/↓ anda entre as secoes livremente.
+  const areaDe = (el) => {
+    if (!el.closest) return 'main';
+    if (el.closest('#sidebar')) return 'side';
+    if (el.closest('.ep-temps')) return 'temps';      // seletor de temporadas (esq.)
+    if (el.closest('.tv-col-esq')) return 'tv-esq';   // TV ao vivo: categorias/canais
+    if (el.closest('.tv-col-dir')) return 'tv-dir';   // TV ao vivo: preview/EPG
+    if (el.closest('.bsc-esq')) return 'bsc-kb';      // Busca: teclado on-screen
+    if (el.closest('.bsc-dir')) return 'bsc-res';     // Busca: grade de resultados
+    return 'main';
+  };
 
   let aoFocarCb = null; // callback externo (ex.: atualizar hero ao focar poster)
 
@@ -45,7 +63,13 @@ const SpatialNav = (() => {
     } else if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
     }
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+    // Pôster tem scroll próprio (focarPoster: fila + título sob o hero fixo).
+    // 'nearest' (não 'center'): só rola se o item NÃO estiver visível, e o mínimo
+    // — assim focar uma tecla já visível não "desce a tela"; só rola onde há
+    // overflow real (ex.: menu de categorias).
+    if (!el.classList.contains('poster')) {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    }
   }
 
   function melhorCandidato(dir) {
@@ -62,26 +86,35 @@ const SpatialNav = (() => {
       const c = centro(rr);
       const dx = c.x - a.x;
       const dy = c.y - a.y;
-      let avanco, desvio;
+      let avanco, desvio, overlap;
       switch (dir) {
-        case 'right': if (dx <= 1) continue; avanco = dx; desvio = Math.abs(dy); break;
-        case 'left':  if (dx >= -1) continue; avanco = -dx; desvio = Math.abs(dy); break;
-        case 'down':  if (dy <= 1) continue; avanco = dy; desvio = Math.abs(dx); break;
-        case 'up':    if (dy >= -1) continue; avanco = -dy; desvio = Math.abs(dx); break;
+        // overlap = sobreposicao no eixo CRUZADO (vertical p/ ←/→, horizontal p/ ↑/↓).
+        case 'right': if (dx <= 1) continue; avanco = dx; desvio = Math.abs(dy);
+          overlap = Math.min(ar.bottom, rr.bottom) - Math.max(ar.top, rr.top); break;
+        case 'left':  if (dx >= -1) continue; avanco = -dx; desvio = Math.abs(dy);
+          overlap = Math.min(ar.bottom, rr.bottom) - Math.max(ar.top, rr.top); break;
+        case 'down':  if (dy <= 1) continue; avanco = dy; desvio = Math.abs(dx);
+          overlap = Math.min(ar.right, rr.right) - Math.max(ar.left, rr.left); break;
+        case 'up':    if (dy >= -1) continue; avanco = -dy; desvio = Math.abs(dx);
+          overlap = Math.min(ar.right, rr.right) - Math.max(ar.left, rr.left); break;
       }
-      // Movimentos VERTICAIS (cima/baixo) exigem SOBREPOSICAO HORIZONTAL: assim
-      // o foco so vai para itens na MESMA coluna. Sem item alinhado abaixo/acima,
-      // melhorCandidato retorna null e o foco FICA PRESO (nao pula de coluna nem
-      // volta ao menu lateral).
+      const mesmaArea = areaDe(el) === areaDe(atual);
+      let score;
       if (vertical) {
-        // Vertical so navega DENTRO da mesma area (sidebar OU conteudo) e em
-        // colunas alinhadas (overlap horizontal). Sem isso, o ↓/↑ vazava da
-        // sidebar (expandida, sobreposta) para o conteudo, fechando o menu.
-        if (areaDe(el) !== areaDe(atual)) continue;
-        const overlap = Math.min(ar.right, rr.right) - Math.max(ar.left, rr.left);
-        if (overlap <= 0) continue;
+        // Vertical so navega DENTRO da mesma area (sidebar OU conteudo) — sem isso
+        // o ↓/↑ vazava da sidebar (expandida, sobreposta) para o conteudo.
+        if (!mesmaArea) continue;
+        // PREFERE a mesma coluna (overlap horizontal). Mas sem nenhuma coluna
+        // alinhada (ex.: trilho/elenco rolado p/ a direita) NAO trava: cai p/ o
+        // item mais proximo acima/abaixo — assim ↑ SEMPRE sobe p/ a secao de cima.
+        score = avanco + desvio * 0.3 + (overlap > 0 ? 0 : 1e6);
+      } else {
+        // Horizontal: na MESMA area so anda na MESMA LINHA (overlap vertical) — ao
+        // chegar no limite da linha o foco FICA (nao pula p/ outra secao/linha de
+        // baixo). Entre areas (conteudo↔sidebar) e livre (entrar/sair do menu).
+        if (mesmaArea && overlap <= 0) continue;
+        score = avanco + desvio * 3;
       }
-      const score = avanco + desvio * (vertical ? 0.3 : 3);
       if (score < melhorScore) { melhorScore = score; melhor = el; }
     }
     return melhor;
@@ -91,7 +124,7 @@ const SpatialNav = (() => {
     let alvo = melhorCandidato(dir);
     // Ao voltar do conteudo para o menu lateral (seta esquerda), focar SEMPRE a
     // seção ativa — nao o item geometricamente mais proximo.
-    if (alvo && dir === 'left' && areaDe(atual) === 'main' && areaDe(alvo) === 'side') {
+    if (alvo && dir === 'left' && areaDe(atual) !== 'side' && areaDe(alvo) === 'side') {
       alvo = document.querySelector('.nav-item.ativo') || alvo;
     }
     if (alvo) setFocus(alvo);

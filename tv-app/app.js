@@ -58,11 +58,14 @@ const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMi
 
 // ── Render: poster ──────────────────────────────────────────────────────────
 function posterHTML(item) {
-  // Filme: usa o logo/poster da própria lista. Série (sem logo): busca no TMDB
-  // de forma lazy (data-serie), ao entrar na viewport.
-  const temLogo = !!item.logo;
-  const lazy = (item.tipo === 'serie' && !temLogo) ? ` data-serie="${escapar(item.titulo)}"` : '';
-  const img = temLogo
+  // Filme: usa o logo/poster da própria lista. Série: o "logo" é o thumbnail do
+  // 1º episódio (feio/pixelado) — então busca o PÔSTER no TMDB (lazy). Se o TMDB
+  // não tiver pôster, fica SÓ o nome (gradiente) — NÃO usa o thumb do episódio.
+  // Filme sem logo também cai no TMDB.
+  const ehSerie = item.tipo === 'serie';
+  const usarLogo = !!item.logo && !ehSerie;
+  const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}"` : '';
+  const img = usarLogo
     ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" loading="lazy"
          onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="this.remove()">`
     : '';
@@ -115,27 +118,32 @@ function heroFixoHTML() {
     <div class="hero2-bg" id="hero2-bgB"></div>
     <div class="hero2-grad"></div>
     <div class="hero2-conteudo" id="hero2-info">
-      <div class="hero2-poster" id="hero2-poster"></div>
-      <div class="hero2-txt">
-        <h1 class="hero2-titulo" id="hero2-titulo"></h1>
-        <div class="hero2-meta" id="hero2-meta"></div>
-        <p class="hero2-sinopse" id="hero2-sinopse"></p>
-      </div>
+      <img class="hero2-logo" id="hero2-logo" alt="">
+      <h1 class="hero2-titulo" id="hero2-titulo"></h1>
+      <div class="hero2-meta" id="hero2-meta"></div>
+      <p class="hero2-sinopse" id="hero2-sinopse"></p>
     </div>
   </div>`;
 }
-function renderMidia(cfg) {
+function renderMidia(cfg, secaoId) {
   if (!cfg.trilhos.length) {
     return `<div class="secao">${renderPlaceholder('Nada por aqui', 'Sua lista não tem itens nesta seção.')}</div>`;
   }
+  // Botão de busca da seção (só Filmes/Séries) — canto superior direito.
+  const btnBusca = (secaoId === 'filmes' || secaoId === 'series')
+    ? `<button class="midia-busca focusable" data-acao="busca-secao" data-escopo="${secaoId}" aria-label="Buscar nesta seção">${IC_BUSCA_LUPA}</button>`
+    : '';
   return `<div class="midia">
     ${heroFixoHTML()}
     <div class="trilhos">${cfg.trilhos.map(trilhoHTML).join('')}</div>
+    ${btnBusca}
   </div>`;
 }
 
 // ── Hero dinâmico (reflete o item em foco; metadados via TMDB) ───────────────
 let _heroItem = null, _heroToken = 0, _heroTimer = null, _heroBgAtivo = 'A';
+let _heroPendente = null, _heroDebounce = null;
+const HERO_DELAY = 320; // só troca o hero após o foco ficar parado > ~0,3s
 
 function notaHero(item, inf) {
   const nota = (inf && inf.nota) || (item.nota > 0 ? item.nota : null);
@@ -146,74 +154,258 @@ function notaHero(item, inf) {
   for (const g of (item.generos || [])) partes.push(`<span class="selo">${escapar(g)}</span>`);
   return partes.join('');
 }
-function setHeroPoster(url, titulo) {
-  const el = document.getElementById('hero2-poster');
-  if (!el) return;
-  if (url) { el.style.background = `#000 center/cover url("${url}")`; el.classList.add('tem'); }
-  else { el.style.background = gradiente(titulo, true); el.classList.remove('tem'); }
+let _bgToken = 0;
+function setHeroBg(val, blur) {
+  if (!val) return;
+  const ativoEhA = _heroBgAtivo === 'A';
+  const ativo = document.getElementById(ativoEhA ? 'hero2-bgA' : 'hero2-bgB'); // visível agora
+  const novo = document.getElementById(ativoEhA ? 'hero2-bgB' : 'hero2-bgA');  // entra agora
+  if (!ativo || !novo) return;
+  novo.style.backgroundImage = /^(linear|radial)-gradient/.test(val) ? val : `url("${val}")`;
+  novo.classList.toggle('blur', !!blur);
+  // O NOVO entra POR CIMA e faz fade-in; o ATIVO continua opaco por baixo até ser
+  // coberto. Antes era um crossfade simultâneo (ambos cruzavam ~0.5 de opacidade)
+  // → abria um "buraco" transparente deixando ver os trilhos atrás. Agora não.
+  novo.style.zIndex = '1';
+  ativo.style.zIndex = '0';
+  novo.classList.add('on');
+  const meu = ++_bgToken;
+  // Depois do fade, apaga o antigo (já coberto → invisível) p/ ele voltar a 0 e
+  // poder ser o próximo a entrar. Token cancela se houver outra troca antes.
+  setTimeout(() => { if (meu === _bgToken) ativo.classList.remove('on'); }, 580);
+  _heroBgAtivo = ativoEhA ? 'B' : 'A';
 }
-function setHeroBg(url) {
-  if (!url) return;
-  const aId = _heroBgAtivo === 'A' ? 'hero2-bgA' : 'hero2-bgB';
-  const bId = _heroBgAtivo === 'A' ? 'hero2-bgB' : 'hero2-bgA';
-  const a = document.getElementById(aId), b = document.getElementById(bId);
-  if (!a || !b) return;
-  b.style.backgroundImage = `url("${url}")`;
-  b.classList.add('on'); a.classList.remove('on');
-  _heroBgAtivo = _heroBgAtivo === 'A' ? 'B' : 'A';
+// Fundo padrão (cores do Hero Play) quando o TMDB não tem backdrop horizontal.
+const FUNDO_PADRAO =
+  'radial-gradient(1100px 560px at 22% 12%, rgba(229,57,53,.28), transparent 60%), ' +
+  'linear-gradient(125deg, #241312 0%, #0F0E0D 62%)';
+
+// Define o fundo do hero: backdrop horizontal do TMDB se houver; senão o fundo
+// padrão Hero Play. Sempre troca (nunca herda o fundo do item anterior).
+function definirFundoHero(item, inf) {
+  setHeroBg((inf && inf.backdrop) ? inf.backdrop : FUNDO_PADRAO, false);
 }
+// Aplica backdrop + sinopse + meta + logo-título ao hero (token evita corrida).
+function aplicarHeroInfo(item, inf, tok) {
+  if (!inf || inf.vazio || tok !== _heroToken) return;
+  definirFundoHero(item, inf);
+  const sin = document.getElementById('hero2-sinopse'); if (sin) sin.textContent = inf.sinopse || item.sinopse || '';
+  const meta = document.getElementById('hero2-meta'); if (meta) meta.innerHTML = notaHero(item, inf);
+  if (!inf.id) return;
+  const logoEl = document.getElementById('hero2-logo');
+  const titulo = document.getElementById('hero2-titulo');
+  const aplicaLogo = (lg) => {
+    if (tok !== _heroToken || !lg || !logoEl) return;
+    const mostrar = () => { if (tok === _heroToken) { logoEl.style.display = 'block'; if (titulo) titulo.style.display = 'none'; } };
+    logoEl.onload = mostrar;
+    logoEl.src = lg;
+    // Pré-carregado (imagem já no cache do browser) → aparece NA HORA, sem o
+    // flash de "título em texto" antes do logo (onload pode nem disparar se já
+    // estiver completa).
+    if (logoEl.complete && logoEl.naturalWidth > 0) mostrar();
+  };
+  const cached = TMDB.logoCache(inf.id, inf.ehTv);
+  if (cached !== null) aplicaLogo(cached);
+  else TMDB.tituloLogo(inf.id, inf.ehTv).then(aplicaLogo);
+}
+// Agenda a troca do hero com DEBOUNCE: o painel fica no item atual até o usuário
+// parar num NOVO item por > HERO_DELAY; só então anima a troca. Em foco rápido
+// (rolando os trilhos) nada muda — evita o "corte seco" a cada item.
 function atualizarHero(item) {
+  if (!item) return;
+  // Já é o item exibido e não há troca pendente → nada a fazer.
+  if (_heroItem === item.id && _heroPendente === null) {
+    clearTimeout(_heroDebounce); _heroDebounce = null; _heroPendente = null;
+    return;
+  }
+  // 1ª vez na seção (hero ainda vazio) → preenche já, sem esperar.
+  if (_heroItem === null) {
+    clearTimeout(_heroDebounce); _heroDebounce = null; _heroPendente = null;
+    aplicarHero(item);
+    return;
+  }
+  _heroPendente = item;
+  clearTimeout(_heroDebounce);
+  _heroDebounce = setTimeout(() => {
+    _heroDebounce = null;
+    const alvo = _heroPendente; _heroPendente = null;
+    if (alvo) aplicarHero(alvo); // aplicarHero ignora se já for o item exibido
+  }, HERO_DELAY);
+}
+
+// Aplica de fato o hero do item (texto/meta + backdrop/logo via TMDB), com a
+// animação de troca. Chamado só quando o foco assenta (ver atualizarHero).
+function aplicarHero(item) {
   const titulo = document.getElementById('hero2-titulo');
   if (!titulo || !item || _heroItem === item.id) return;
   _heroItem = item.id;
   const tok = ++_heroToken;
+  const ehSerie = item.tipo === 'serie';
 
+  // Texto/meta imediatos.
+  const logoEl = document.getElementById('hero2-logo');
+  if (logoEl) { logoEl.style.display = 'none'; logoEl.removeAttribute('src'); }
+  titulo.style.display = '';
   titulo.textContent = item.titulo;
   document.getElementById('hero2-meta').innerHTML = notaHero(item, null);
   document.getElementById('hero2-sinopse').textContent = item.sinopse || '';
-  setHeroPoster(item.logo || '', item.titulo);
-
   const info = document.getElementById('hero2-info');
   if (info) { info.classList.remove('hero-anim'); void info.offsetWidth; info.classList.add('hero-anim'); }
 
+  // Se já está em cache (pré-carregado), aplica NA HORA (sem o flash de texto→foto).
+  const infC = TMDB.infoCache(item.titulo, ehSerie);
+  if (infC && !infC.vazio) { aplicarHeroInfo(item, infC, tok); return; }
+
+  // Não cacheado: fundo neutro DO ITEM enquanto busca (nunca o do anterior).
+  definirFundoHero(item, null);
+
   clearTimeout(_heroTimer);
   _heroTimer = setTimeout(async () => {
-    const ehSerie = item.tipo === 'serie';
     const inf = await TMDB.info(item.titulo, ehSerie);
-    if (tok !== _heroToken) return;
-    if (inf && !inf.vazio) {
-      if (inf.backdrop) setHeroBg(inf.backdrop);
-      document.getElementById('hero2-sinopse').textContent = inf.sinopse || item.sinopse || '';
-      document.getElementById('hero2-meta').innerHTML = notaHero(item, inf);
-    }
-    // Série sem logo: pôster pela busca dedicada (en-US), igual ao mobile.
-    if (!item.logo) {
-      const pUrl = ehSerie ? await TMDB.poster(item.titulo) : (inf && inf.poster);
-      if (tok === _heroToken && pUrl) setHeroPoster(pUrl, item.titulo);
-    }
-  }, 220);
+    aplicarHeroInfo(item, inf, tok);
+  }, 180);
 }
 
-// Lazy: pôster TMDB das séries (que não têm logo na lista) ao entrar na viewport.
+// Foco num pôster: scroll horizontal (fila) + vertical (título do trilho sob o
+// hero fixo) — sem isso o primeiro trilho não subia e o título sumia.
+function focarPoster(el) {
+  const fila = el.closest('.trilho-fila');
+  if (fila) {
+    const r = el.getBoundingClientRect(), fr = fila.getBoundingClientRect();
+    fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: 'smooth' });
+  }
+  const cont = document.getElementById('conteudo');
+  const trilho = el.closest('.trilho');
+  const hero = document.getElementById('hero2');
+  if (cont && trilho) {
+    const heroH = hero ? hero.offsetHeight : 0;
+    // +60: deixa o título ABAIXO do gradiente de transição (não escurecido).
+    const delta = trilho.getBoundingClientRect().top - cont.getBoundingClientRect().top - heroH - 60;
+    cont.scrollBy({ top: delta, behavior: 'smooth' });
+  }
+}
+
+const _aquece = (u) => { if (u) { const im = new Image(); im.src = u; } };
+
+// Itens INICIAIS (primeiros de cada trilho) de TODAS as seções com hero
+// (Início/Filmes/Séries), em ordem de exibição e sem repetir. São os que o
+// usuário tende a focar primeiro — pré-carregamos o hero (backdrop + logo-título)
+// deles ANTES de abrir, p/ o foco já mostrar a imagem de título (sem flash).
+function _itensIniciaisDeExibicao(porTrilho) {
+  const cat = LISTA.catalogo || {}, visto = new Set(), out = [];
+  const coletar = (sec) => {
+    for (const t of (sec && sec.trilhos || [])) {
+      const itens = t.itens || [];
+      for (let i = 0; i < itens.length && i < porTrilho; i++) {
+        const it = itens[i];
+        if (it && !visto.has(it.id)) { visto.add(it.id); out.push(it); }
+      }
+    }
+  };
+  coletar(cat.inicio); coletar(cat.filmes); coletar(cat.series);
+  return out;
+}
+
+// Pré-carrega o HERO de um item: info (backdrop/nota/sinopse) + logo-título PNG,
+// e AQUECE as imagens (backdrop + logo) no cache do browser. Assim o hero aparece
+// instantâneo ao focar — sem o "título em texto" piscando antes da imagem.
+async function _precarregarHero(item) {
+  const inf = await TMDB.info(item.titulo, item.tipo === 'serie');
+  if (!inf || inf.vazio) return;
+  _aquece(inf.backdrop);
+  if (inf.id) { const lg = await TMDB.tituloLogo(inf.id, inf.ehTv); _aquece(lg); }
+}
+
+// Executa uma fila de tarefas (funções que retornam Promise) com CONCORRÊNCIA
+// LIMITADA (evita o rate-limit do TMDB que deixava itens sem banner). Resolve
+// quando tudo termina; cancela se `valido()` passar a ser falso.
+function _executarFila(tarefas, conc, valido) {
+  return new Promise((resolve) => {
+    let i = 0, ativos = 0, fechado = false;
+    const fim = () => { if (!fechado && ativos === 0 && i >= tarefas.length) { fechado = true; resolve(); } };
+    (function pump() {
+      if (valido && !valido()) { if (!fechado) { fechado = true; resolve(); } return; }
+      while (ativos < conc && i < tarefas.length) {
+        ativos++;
+        Promise.resolve(tarefas[i++]()).catch(() => {}).finally(() => { ativos--; fim(); setTimeout(pump, 30); });
+      }
+      fim();
+    })();
+  });
+}
+
+// Pré-carrega o PÔSTER de um item (o que aparece nos trilhos), aquecendo o cache
+// do browser. Filme com logo próprio → aquece a URL da lista; série/filme sem
+// logo → pôster do TMDB. Cobre TUDO (filmes E séries), não só séries.
+function _precarregarPoster(it) {
+  if (it.tipo !== 'serie' && it.logo) { _aquece(it.logo); return Promise.resolve(); }
+  return TMDB.poster(it.titulo).then(_aquece);
+}
+
+// Concorrência das filas de preload (equilíbrio: rápido sem estourar o rate-limit
+// do TMDB, que deixava itens sem banner).
+const PRELOAD_CONC = 5;
+
+// 1) Pré-carrega (AGUARDANDO, com teto) o HERO dos itens iniciais + os PÔSTERES
+//    do topo de TODAS as seções (filmes E séries) — p/ rolar um pouco já achar
+//    carregado. 2) Quando termina, dispara o RESTO (tudo) em background. O teto
+//    só libera a tela de loading; o preload continua rodando.
+async function precarregarBanners() {
+  const iniciais = _itensIniciaisDeExibicao(10);     // hero dos 1ºs de cada trilho
+  const feitosHero = new Set(iniciais.map((it) => it.id));
+  const postersTopo = _itensIniciaisDeExibicao(18);  // pôster dos 1ºs de cada trilho
+  const prioridade = [
+    ...iniciais.map((it) => () => _precarregarHero(it)),
+    ...postersTopo.map((it) => () => _precarregarPoster(it)),
+  ];
+  // O fundo só começa DEPOIS da prioridade (não soma concorrência em cima dela).
+  const tudo = _executarFila(prioridade, PRELOAD_CONC).then(() => precarregarFundo(feitosHero));
+  await Promise.race([tudo, new Promise((r) => setTimeout(r, 9000))]); // teto do loading
+}
+
+// Background: PÔSTER de TUDO (filmes + séries) + hero (backdrop/logo) dos demais,
+// com concorrência limitada. Garante que o catálogo inteiro fique pré-carregado.
+let _fundoToken = 0;
+function precarregarFundo(idsHeroFeitos) {
+  const meu = ++_fundoToken;
+  const feitos = idsHeroFeitos || new Set();
+  const todos = [...(LISTA.filmes || []), ...(LISTA.series || [])];
+  const tarefas = [
+    ...todos.map((it) => () => _precarregarPoster(it)),                       // pôster de tudo
+    ...todos.filter((it) => !feitos.has(it.id)).map((it) => () => _precarregarHero(it)), // hero dos demais
+  ];
+  return _executarFila(tarefas, PRELOAD_CONC, () => meu === _fundoToken);
+}
+
+// Lazy: pôster TMDB ao entrar na viewport (com margem grande p/ carregar bem
+// ANTES de aparecer). Usa o cache NA HORA (pré-carregado); senão busca. Sem
+// imagem do TMDB → fica só o nome (gradiente), NUNCA o thumb do episódio.
 let _obsPoster = null;
 function ligarPostersSerie(raiz) {
   if (!('IntersectionObserver' in window)) return;
   if (_obsPoster) _obsPoster.disconnect();
+  const aplicar = (el, url) => {
+    const arte = el.querySelector('.poster-arte');
+    // já tem imagem OU já está carregando (re-observado num diff) → não duplica.
+    if (!arte || arte.classList.contains('tem-img') || arte.dataset.carregando) return;
+    if (!url) return;   // sem pôster no TMDB → mantém o nome no gradiente
+    arte.dataset.carregando = '1';
+    const img = new Image();
+    img.className = 'poster-img';
+    img.onload = () => { arte.classList.add('tem-img'); arte.appendChild(img); };
+    img.onerror = () => { delete arte.dataset.carregando; };
+    img.src = url;
+  };
   _obsPoster = new IntersectionObserver((ents) => {
     for (const e of ents) {
       if (!e.isIntersecting) continue;
       const el = e.target; _obsPoster.unobserve(el);
-      TMDB.poster(el.dataset.serie).then((url) => {
-        const arte = el.querySelector('.poster-arte');
-        if (!url || !arte) return;
-        const img = new Image();
-        img.className = 'poster-img';
-        img.onload = () => { arte.classList.add('tem-img'); arte.appendChild(img); };
-        img.src = url;
-      });
+      const cache = TMDB.posterCache(el.dataset.tmdb);   // pré-carregado → instantâneo
+      if (cache !== null) aplicar(el, cache);
+      else TMDB.poster(el.dataset.tmdb).then((u) => aplicar(el, u));
     }
-  }, { rootMargin: '300px' });
-  (raiz || document).querySelectorAll('.poster[data-serie]').forEach((p) => _obsPoster.observe(p));
+  }, { rootMargin: '1600px' });   // carrega ~1,5 tela à frente (rolar um pouco já está pronto)
+  (raiz || document).querySelectorAll('.poster[data-tmdb]').forEach((p) => _obsPoster.observe(p));
 }
 
 // ── TV ao vivo: 2 colunas (categorias↔canais | preview + EPG) ───────────────
@@ -417,17 +609,253 @@ function renderPlaceholder(titulo, msg) {
   </div>`;
 }
 
+// ── Busca (teclado on-screen + resultados em grade de 5) ────────────────────
+let _buscaQuery = '';
+const IC_BUSCA_LUPA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
+const IC_BUSCA_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 6H8l-5 6 5 6h13a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1z"/><path d="m15 9-4 6M11 9l4 6"/></svg>';
+
+// Normaliza p/ comparação: sem acento, minúsculo (case-insensitive), sem
+// pontuação (':', '-', etc. viram espaço), espaço simples.
+function normBusca(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Alvos de busca de um item: título da LISTA + nome TRADUZIDO e nome ORIGINAL do
+// TMDB (quando já em cache do preload) → acha por referência/tradução (ex.: anime
+// que na lista vem em inglês/japonês, mas o usuário busca o nome em PT, ou vice).
+function alvosBusca(it) {
+  const alvos = [it.titulo];
+  const inf = TMDB.infoCache(it.titulo, it.tipo === 'serie');
+  if (inf && !inf.vazio) { if (inf.nome) alvos.push(inf.nome); if (inf.original) alvos.push(inf.original); }
+  return alvos;
+}
+// Casa se a query for substring de qualquer alvo — comparando normal E sem espaços
+// (assim ":" / "-" não atrapalham: "spiderman" acha "Spider-Man", "round6" acha
+// "Round 6"). Case-insensitive via normBusca.
+function casaBusca(it, nq, nqSemEsp) {
+  for (const alvo of alvosBusca(it)) {
+    const a = normBusca(alvo);
+    if (a.includes(nq)) return true;
+    if (nqSemEsp && a.replace(/\s+/g, '').includes(nqSemEsp)) return true;
+  }
+  return false;
+}
+
+// Teclado: a-z + 1-9 0 (6 por linha, igual à referência) + Apagar/Espaço/Limpar.
+const BUSCA_TECLAS = 'abcdefghijklmnopqrstuvwxyz1234567890';
+function renderBuscar() {
+  _buscaQuery = '';
+  const teclas = [...BUSCA_TECLAS].map((c) =>
+    `<button class="bsc-key focusable" data-k="${c}">${c}</button>`).join('');
+  return `<div class="bsc">
+    <div class="bsc-esq">
+      <h2 class="bsc-titulo">Buscar</h2>
+      <div class="bsc-input">
+        <span class="bsc-input-ico">${IC_BUSCA_LUPA}</span>
+        <span class="bsc-campo"><span class="bsc-q" id="bsc-q"></span><span class="bsc-caret"></span><span class="bsc-ph" id="bsc-ph">Buscar…</span></span>
+      </div>
+      <div class="bsc-teclado">
+        ${teclas}
+        <button class="bsc-key bsc-key-acao focusable" data-acao="apagar">${IC_BUSCA_DEL}</button>
+        <button class="bsc-key bsc-key-acao focusable" data-acao="espaco">Espaço</button>
+        <button class="bsc-key bsc-key-acao focusable" data-acao="limpar">Limpar</button>
+      </div>
+    </div>
+    <div class="bsc-dir" id="bsc-dir">${htmlBuscaVazia()}</div>
+  </div>`;
+}
+
+function htmlBuscaVazia() {
+  return `<div class="bsc-vazio">
+    <div class="bsc-vazio-ico">${IC_BUSCA_LUPA}</div>
+    <div class="bsc-vazio-titulo">Encontre seus filmes e séries</div>
+    <div class="bsc-vazio-sub">Digite o nome no teclado ao lado para começar</div>
+  </div>`;
+}
+function htmlBuscaSemResultado(q) {
+  return `<div class="bsc-vazio">
+    <div class="bsc-vazio-ico">${IC_BUSCA_LUPA}</div>
+    <div class="bsc-vazio-titulo">Nada encontrado para “${escapar(q)}”</div>
+    <div class="bsc-vazio-sub">Confira a digitação ou tente outro título</div>
+  </div>`;
+}
+
+// Filtra filmes + séries da lista pelo título (sem acento) e desenha em grade.
+function atualizarBusca() {
+  const q = _buscaQuery;
+  const span = document.getElementById('bsc-q'); if (span) span.textContent = q;
+  const ph = document.getElementById('bsc-ph'); if (ph) ph.style.display = q ? 'none' : '';
+  const dir = document.getElementById('bsc-dir'); if (!dir) return;
+  const nq = normBusca(q);
+  if (!nq) { dir.innerHTML = htmlBuscaVazia(); return; }
+  const nqSemEsp = nq.replace(/\s+/g, '');
+  const itens = [...(LISTA.filmes || []), ...(LISTA.series || [])]
+    .filter((it) => casaBusca(it, nq, nqSemEsp))
+    .slice(0, 60);
+  aplicarResultados(dir, itens, q);
+}
+
+// Atualiza a GRADE por DIFF (sem reconstruir tudo → sem "piscar"): mantém os
+// pôsteres já mostrados, remove os que não casam mais, e adiciona/reordena o resto.
+function aplicarResultados(dir, itens, q) {
+  if (!itens.length) { dir.innerHTML = htmlBuscaSemResultado(q); return; }
+  let grid = dir.querySelector('.bsc-grid');
+  if (!grid) { dir.innerHTML = '<div class="bsc-grid"></div>'; grid = dir.querySelector('.bsc-grid'); }
+  const querSet = new Set(itens.map((it) => it.id));
+  for (const p of [...grid.querySelectorAll('.poster')]) if (!querSet.has(p.dataset.id)) p.remove();
+  const existentes = {};
+  for (const p of grid.querySelectorAll('.poster')) existentes[p.dataset.id] = p;
+  let anterior = null;
+  for (const it of itens) {
+    let el = existentes[it.id];
+    if (!el) { const tmp = document.createElement('div'); tmp.innerHTML = posterHTML(it); el = tmp.firstElementChild; }
+    const ref = anterior ? anterior.nextElementSibling : grid.firstElementChild;
+    if (el !== ref) grid.insertBefore(el, ref);   // só move se preciso (não recria → não pisca)
+    anterior = el;
+  }
+  ligarPostersSerie(dir);   // observa os NOVOS (os já com imagem são ignorados)
+}
+
+// Indexa os APELIDOS p/ a busca por referência: carrega do TMDB o nome traduzido/
+// original dos `itens` ainda sem cache e, conforme chegam, chama reRender (throttle)
+// — assim "bunny girl senpai" acha "Seishun Buta Yarou..." pelo nome "Rascal Does
+// Not Dream of Bunny Girl Senpai". A digitação continua 100% local; isto só
+// preenche os apelidos em background. Para quando `ativo()` vira falso.
+let _buscaIdxTok = 0;
+function indexar(itens, reRender, ativo) {
+  const meu = ++_buscaIdxTok;
+  const pend = itens.filter((it) => TMDB.infoCache(it.titulo, it.tipo === 'serie') === null);
+  if (!pend.length) return;
+  let agendado = false;
+  const vivo = () => meu === _buscaIdxTok && (!ativo || ativo());
+  const aviso = () => {
+    if (agendado || !vivo()) return;
+    agendado = true;
+    setTimeout(() => { agendado = false; if (vivo()) reRender(); }, 350);
+  };
+  const tarefas = pend.map((it) => () => TMDB.info(it.titulo, it.tipo === 'serie').then(aviso, () => {}));
+  _executarFila(tarefas, 3, vivo);
+}
+
+// Liga os cliques do teclado on-screen, zera a busca e inicia a indexação.
+function ligarBuscar(raiz) {
+  _buscaQuery = '';
+  raiz.querySelectorAll('.bsc-key').forEach((k) => k.addEventListener('click', () => {
+    const a = k.dataset.acao;
+    if (a === 'apagar') _buscaQuery = _buscaQuery.slice(0, -1);
+    // Espaço: nunca no início nem dois seguidos (evita espaços "fantasma" que não
+    // aparecem mas precisam de backspace depois).
+    else if (a === 'espaco') { if (_buscaQuery && !_buscaQuery.endsWith(' ')) _buscaQuery += ' '; }
+    else if (a === 'limpar') _buscaQuery = '';
+    else _buscaQuery += k.dataset.k;
+    atualizarBusca();
+  }));
+  indexar([...(LISTA.series || []), ...(LISTA.filmes || [])], atualizarBusca, () => !!document.getElementById('bsc-dir'));
+}
+
+// Busca DENTRO de uma seção (Filmes ou Séries): mesma tela da busca, mas só com os
+// itens daquela seção + as CATEGORIAS dela abaixo do teclado (navegáveis). Abre com
+// animação de "lupa tomando a tela" (círculo expandindo do botão) e fecha ao contrário.
+function abrirBuscaSecao(escopo, btn) {
+  const itensEscopo = (escopo === 'series') ? (LISTA.series || []) : (LISTA.filmes || []);
+  const cats = (((LISTA.catalogo || {})[escopo] || {}).trilhos || []).map((t) => t.titulo);
+  const titulo = escopo === 'series' ? 'Buscar em Séries' : 'Buscar em Filmes';
+  let query = '', catSel = null;
+
+  const teclas = [...BUSCA_TECLAS].map((c) => `<button class="bsc-key focusable" data-k="${c}">${c}</button>`).join('')
+    + `<button class="bsc-key bsc-key-acao focusable" data-acao="apagar">${IC_BUSCA_DEL}</button>`
+    + `<button class="bsc-key bsc-key-acao focusable" data-acao="espaco">Espaço</button>`
+    + `<button class="bsc-key bsc-key-acao focusable" data-acao="limpar">Limpar</button>`;
+  const catsHTML = [`<button class="bsc-cat focusable ativa" data-cat="">Todos</button>`,
+    ...cats.map((c) => `<button class="bsc-cat focusable" data-cat="${escapar(c)}">${escapar(c)}</button>`)].join('');
+
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal busca-secao';
+  ov.innerHTML = `
+    <div class="bs-reveal"></div>
+    <div class="bs-conteudo">
+      <div class="bsc">
+        <div class="bsc-esq">
+          <h2 class="bsc-titulo">${titulo}</h2>
+          <div class="bsc-input">
+            <span class="bsc-input-ico">${IC_BUSCA_LUPA}</span>
+            <span class="bsc-campo"><span class="bsc-q" id="bs-q"></span><span class="bsc-caret"></span><span class="bsc-ph" id="bs-ph">Buscar…</span></span>
+          </div>
+          <div class="bsc-teclado">${teclas}</div>
+          <div class="bsc-cats">${catsHTML}</div>
+        </div>
+        <div class="bsc-dir" id="bs-dir"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov._onVoltar = fechar;
+
+  // Geometria do reveal (lupa que abre) — origem no botão, RELATIVA ao overlay (que
+  // começa após a sidebar). O círculo cresce até cobrir a área de conteúdo.
+  const ovR = ov.getBoundingClientRect();
+  const br = btn.getBoundingClientRect();
+  const rx = (br.left + br.width / 2) - ovR.left, ry = (br.top + br.height / 2) - ovR.top;
+  const maxDist = Math.max(Math.hypot(rx, ry), Math.hypot(ovR.width - rx, ry), Math.hypot(rx, ovR.height - ry), Math.hypot(ovR.width - rx, ovR.height - ry));
+  const base = 120;
+  ov.style.setProperty('--bs-esc', (2 * maxDist) / base + 0.4);
+  const rev = ov.querySelector('.bs-reveal');
+  rev.style.left = (rx - base / 2) + 'px';
+  rev.style.top = (ry - base / 2) + 'px';
+
+  function fechar() {
+    ++_buscaIdxTok;                  // para a indexação desta seção
+    ov.classList.remove('aberto');   // anima ao contrário (lupa encolhe)
+    setTimeout(() => {
+      ov.remove();
+      const cont = document.getElementById('conteudo');
+      if (cont) ligarPostersSerie(cont);   // re-observa os pôsteres da seção por baixo
+      if (btn && document.contains(btn)) SpatialNav.setFocus(btn);
+    }, 430);
+  }
+  function render() {
+    const dir = document.getElementById('bs-dir'); if (!dir) return;
+    const nq = normBusca(query), nqSemEsp = nq.replace(/\s+/g, '');
+    let itens = itensEscopo;
+    if (catSel) itens = itens.filter((it) => (it.generos && it.generos[0]) === catSel);
+    if (nq) itens = itens.filter((it) => casaBusca(it, nq, nqSemEsp));
+    aplicarResultados(dir, itens.slice(0, 60), query);
+  }
+  ov.querySelectorAll('.bsc-key').forEach((k) => k.addEventListener('click', () => {
+    const a = k.dataset.acao;
+    if (a === 'apagar') query = query.slice(0, -1);
+    else if (a === 'espaco') { if (query && !query.endsWith(' ')) query += ' '; }
+    else if (a === 'limpar') query = '';
+    else query += k.dataset.k;
+    document.getElementById('bs-q').textContent = query;
+    document.getElementById('bs-ph').style.display = query ? 'none' : '';
+    render();
+  }));
+  ov.querySelectorAll('.bsc-cat').forEach((c) => c.addEventListener('click', () => {
+    catSel = c.dataset.cat || null;
+    ov.querySelectorAll('.bsc-cat').forEach((x) => x.classList.toggle('ativa', x === c));
+    render();
+  }));
+
+  requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('aberto'))); // anima a entrada
+  render();
+  indexar(itensEscopo, render, () => document.body.contains(ov)); // apelidos da seção (re-filtra ao chegar)
+  SpatialNav.setFocus(ov.querySelector('.bsc-key'));
+}
+
 // ── Roteamento entre secoes ─────────────────────────────────────────────────
 function navegar(secaoId) {
   pararPreview(); // para o preview da TV ao vivo ao sair da secao
+  const bsAberta = document.querySelector('.busca-secao'); if (bsAberta) bsAberta.remove(); // fecha a busca de seção ao trocar de seção
+  clearTimeout(_heroDebounce); _heroDebounce = null; _heroPendente = null; // cancela troca de hero pendente
   document.querySelectorAll('.nav-item').forEach((n) =>
     n.classList.toggle('ativo', n.dataset.secao === secaoId));
 
   const main = document.getElementById('conteudo');
   if (secaoId === 'inicio' || secaoId === 'filmes' || secaoId === 'series') {
-    main.innerHTML = renderMidia(LISTA.catalogo[secaoId]);
-    _heroItem = null;           // força o hero a atualizar no 1º foco
-    ligarPostersSerie(main);    // pôster TMDB das séries (lazy)
+    main.innerHTML = renderMidia(LISTA.catalogo[secaoId], secaoId);
+    _heroItem = null;                              // força o hero a atualizar no 1º foco
+    ligarPostersSerie(main);                       // pôster TMDB (cache-first; lazy ao rolar)
   } else if (secaoId === 'tvaovivo') {
     main.innerHTML = renderTvAoVivo();
   } else if (secaoId === 'playlists') {
@@ -440,7 +868,8 @@ function navegar(secaoId) {
       navegar('playlists');
     });
   } else if (secaoId === 'buscar') {
-    main.innerHTML = renderPlaceholder('Buscar', 'Busca de filmes, séries e canais (próxima fase).');
+    main.innerHTML = renderBuscar();
+    ligarBuscar(main);
   } else if (secaoId === 'jogos') {
     main.innerHTML = renderPlaceholder('Jogos do dia', 'Agenda de jogos + onde assistir (próxima fase).');
   } else if (secaoId === 'config') {
@@ -454,61 +883,309 @@ function navegar(secaoId) {
 }
 
 // ── Detalhe (overlay simples ao abrir um poster) ────────────────────────────
+// ── Detalhe (pós-seleção) — estilo GTV melhorado ────────────────────────────
+const _reEpA = /\bS(\d{1,2})\s?E(\d{1,3})\b/i;
+const _reEpB = /\b(\d{1,2})x(\d{2,3})\b/;
+function epInfo(nome) { const m = nome.match(_reEpA) || nome.match(_reEpB); return { s: m ? +m[1] : 1, e: m ? +m[2] : 0 }; }
+function epsOrdenados(item) { return [...(item.episodios || [])].sort((a, b) => { const A = epInfo(a.nome), B = epInfo(b.nome); return A.s - B.s || A.e - B.e; }); }
+function primeiroEp(item) { return epsOrdenados(item)[0]; }
+function primeiroEpLabel(item) { const ep = primeiroEp(item); if (!ep) return ''; const { s, e } = epInfo(ep.nome); return `T${s}:E${e}`; }
+function rotuloEp(item, ep) { const { s, e } = epInfo(ep.nome); return `${item.titulo} — T${s} E${String(e).padStart(2, '0')}`; }
+function estrelas(n10) { const n = Math.max(0, Math.min(5, Math.round((n10 || 0) / 2))); return '★'.repeat(n) + '☆'.repeat(5 - n); }
+function metaDetalhe(item, inf) {
+  const ano = (inf && inf.ano) || item.ano || '';
+  const nota = (inf && inf.nota) || (item.nota > 0 ? item.nota : 0);
+  const gen = (item.generos || []).join(' / ');
+  const l1 = [];
+  if (ano) l1.push(`<span>${ano}</span>`);
+  if (nota) l1.push(`<span class="imdb">IMDb ${nota.toFixed(1)}</span><span class="estrelas">${estrelas(nota)}</span>`);
+  return `<div class="det2-meta1">${l1.join('<i class="pt">·</i>')}</div>${gen ? `<div class="det2-meta2">${escapar(gen)}</div>` : ''}`;
+}
+function recomendadosLocais(item) {
+  const lista = item.tipo === 'serie' ? LISTA.series : LISTA.filmes;
+  const g = (item.generos || [])[0];
+  return lista.filter((x) => x.id !== item.id && (x.generos || [])[0] === g).slice(0, 18);
+}
+function montarRec(cont, itens) {
+  cont.innerHTML = '';
+  for (const it of itens) {
+    const el = document.createElement('div');
+    el.className = 'rec-poster focusable';
+    el.innerHTML = `<div class="rec-arte" style="background:${gradiente(it.titulo)}"><span>${escapar(it.titulo)}</span></div>`;
+    el.addEventListener('click', () => { fecharDetalhe(); abrirDetalhe(it); });
+    cont.appendChild(el);
+    const setImg = (u) => { if (!u) return; const im = new Image(); im.className = 'rec-img'; im.onload = () => { const a = el.querySelector('.rec-arte'); if (a) { a.classList.add('tem-img'); a.appendChild(im); } }; im.src = u; };
+    if (it.tipo !== 'serie' && it.logo) setImg(it.logo); else TMDB.poster(it.titulo).then(setImg);
+  }
+}
+function montarElenco(cont, elenco) {
+  cont.innerHTML = '';
+  for (const a of elenco) {
+    const el = document.createElement('div');
+    el.className = 'ator focusable';
+    el.innerHTML = `<div class="ator-foto"${a.foto ? ` style="background:#000 center/cover url('${a.foto}')"` : ''}>${a.foto ? '' : escapar(iniciais(a.nome))}</div>
+      <div class="ator-nome">${escapar(a.nome)}</div>${a.personagem ? `<div class="ator-pers">${escapar(a.personagem)}</div>` : ''}`;
+    cont.appendChild(el);
+  }
+}
+
 function abrirDetalhe(item) {
+  const ehSerie = item.tipo === 'serie';
+  let inf = null, cred = { elenco: [], direcao: [] };
   const ov = document.createElement('div');
   ov.id = 'detalhe-overlay';
-  ov.className = 'nav-modal';
+  ov.className = 'nav-modal det2';
+  const acoes = ehSerie
+    ? `<button class="btn btn-primario focusable" data-acao="assistir"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Assistir ${escapar(primeiroEpLabel(item))}</button>
+       <button class="btn btn-secundario focusable" data-acao="episodios"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h13M3 12h13M3 18h9"/><path d="m18 11 4 3-4 3z" fill="currentColor" stroke="none"/></svg> Episódios e mais</button>`
+    : `<button class="btn btn-primario focusable" data-acao="assistir"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Assistir</button>`;
   ov.innerHTML = `
-    <div class="det-bg" id="det-bg" style="background:${gradiente(item.titulo, true)}"></div>
-    <div class="det-grad"></div>
-    <div class="det-conteudo">
-      <div class="det-poster" id="det-poster" style="background:${gradiente(item.titulo, true)}"></div>
-      <div class="det-info">
-        <h1 class="det-titulo">${escapar(item.titulo)}</h1>
-        <div class="hero-meta" id="det-meta"></div>
-        <p class="det-sinopse" id="det-sinopse">Carregando…</p>
-        <div class="det-elenco" id="det-elenco"></div>
-        <div class="hero-acoes">
-          <button class="btn btn-primario focusable" data-acao="play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Assistir</button>
-          <button class="btn btn-secundario focusable" data-acao="fechar">Voltar</button>
+    <div class="det2-bg" id="det2-bg" style="background:${FUNDO_PADRAO}"></div>
+    <div class="det2-grad"></div>
+    <div class="det2-scroll" id="det2-scroll">
+      <section class="det2-topo">
+        <img class="det2-logo" id="det2-logo" alt="" style="display:none">
+        <h1 class="det2-titulo" id="det2-titulo">${escapar(item.titulo)}</h1>
+        <div class="det2-meta" id="det2-meta"></div>
+        <span class="det2-tag">${ehSerie ? 'Série' : 'Filme'}</span>
+        <p class="det2-sinopse" id="det2-sinopse">${escapar(item.sinopse || '')}</p>
+        <div class="det2-acoes">
+          ${acoes}
+          <button class="btn btn-icone focusable" data-acao="lista" title="Minha Lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button class="btn btn-icone focusable" data-acao="creditos" title="Créditos e mais informações"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5" stroke-linecap="round"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg></button>
         </div>
-      </div>
+      </section>
+      <section class="det2-secao oculto" id="det2-elenco">
+        <h2 class="det2-h2">Elenco</h2>
+        <div class="det2-fila" id="det2-elenco-fila"></div>
+      </section>
+      <section class="det2-secao oculto" id="det2-rec">
+        <h2 class="det2-h2">Títulos semelhantes</h2>
+        <div class="det2-fila" id="det2-rec-fila"></div>
+      </section>
     </div>`;
   document.body.appendChild(ov);
   ov._onVoltar = fecharDetalhe;
-  ov.querySelector('[data-acao="fechar"]').addEventListener('click', fecharDetalhe);
-  ov.querySelector('[data-acao="play"]').addEventListener('click', () => { ov.remove(); abrirPlayer(item); });
-  SpatialNav.setFocus(ov.querySelector('.btn-primario'));
+  ov._voltarFoco = SpatialNav.atual;   // p/ voltar ao item que abriu (ex.: resultado da busca de seção)
+  const q = (a) => ov.querySelector(`[data-acao="${a}"]`);
+  q('assistir').addEventListener('click', () => {
+    if (ehSerie) { const ep = primeiroEp(item); if (ep) { fecharDetalhe(); abrirPlayer({ titulo: rotuloEp(item, ep), url: ep.url }); } }
+    else { fecharDetalhe(); abrirPlayer(item); }
+  });
+  if (q('episodios')) q('episodios').addEventListener('click', () => abrirEpisodios(item, inf));
+  q('lista').addEventListener('click', () => toast('Minha Lista — em breve'));
+  q('creditos').addEventListener('click', () => abrirCreditos(item, inf, cred));
+  SpatialNav.setFocus(q('assistir'));
 
-  document.getElementById('det-meta').innerHTML = notaHero(item, null);
-  if (item.logo) document.getElementById('det-poster').style.background = `#000 center/cover url("${item.logo}")`;
+  document.getElementById('det2-meta').innerHTML = metaDetalhe(item, null);
+  const recs = recomendadosLocais(item);
+  if (recs.length) { document.getElementById('det2-rec').classList.remove('oculto'); montarRec(document.getElementById('det2-rec-fila'), recs); }
 
-  TMDB.info(item.titulo, item.tipo === 'serie').then(async (inf) => {
+  TMDB.info(item.titulo, ehSerie).then(async (i) => {
     if (!document.getElementById('detalhe-overlay')) return;
-    const sin = document.getElementById('det-sinopse');
-    if (!inf || inf.vazio) { if (sin) sin.textContent = item.sinopse || 'Sem descrição disponível.'; return; }
-    const bg = document.getElementById('det-bg');
-    if (inf.backdrop && bg) bg.style.background = `#000 center/cover url("${inf.backdrop}")`;
-    if (!item.logo) {
-      const pUrl = item.tipo === 'serie' ? await TMDB.poster(item.titulo) : inf.poster;
-      const p = document.getElementById('det-poster');
-      if (p && pUrl) p.style.background = `#000 center/cover url("${pUrl}")`;
+    inf = i;
+    if (!i || i.vazio) { const s = document.getElementById('det2-sinopse'); if (s && !s.textContent) s.textContent = 'Sem descrição disponível.'; return; }
+    const bg = document.getElementById('det2-bg');
+    if (i.backdrop && bg) bg.style.background = `#000 right top / cover no-repeat url("${i.backdrop}")`;
+    const sin = document.getElementById('det2-sinopse'); if (sin) sin.textContent = i.sinopse || item.sinopse || 'Sem descrição disponível.';
+    document.getElementById('det2-meta').innerHTML = metaDetalhe(item, i);
+    if (i.id) {
+      const lg = await TMDB.tituloLogo(i.id, i.ehTv);
+      const logoEl = document.getElementById('det2-logo'), tit = document.getElementById('det2-titulo');
+      if (lg && logoEl) { logoEl.onload = () => { logoEl.style.display = 'block'; if (tit) tit.style.display = 'none'; }; logoEl.src = lg; }
+      TMDB.creditos(i.id, i.ehTv).then((c) => {
+        cred = c;
+        if (c.elenco.length && document.getElementById('detalhe-overlay')) {
+          document.getElementById('det2-elenco').classList.remove('oculto');
+          montarElenco(document.getElementById('det2-elenco-fila'), c.elenco);
+        }
+      });
     }
-    if (sin) sin.textContent = inf.sinopse || 'Sem descrição disponível.';
-    document.getElementById('det-meta').innerHTML = notaHero(item, inf);
-    if (inf.id) TMDB.elenco(inf.id, inf.ehTv).then((cast) => {
-      const e = document.getElementById('det-elenco');
-      if (!e || !cast.length) return;
-      e.innerHTML = '<span class="det-elenco-tit">Elenco</span>' +
-        cast.slice(0, 6).map((a) => `<span class="det-ator">${escapar(a.nome)}</span>`).join('');
-    });
   });
 }
 function fecharDetalhe() {
   const ov = document.getElementById('detalhe-overlay');
+  const volta = ov && ov._voltarFoco;
   if (ov) ov.remove();
+  // Volta ao item que abriu (ex.: resultado dentro da busca de seção); senão, conteúdo.
+  if (volta && document.contains(volta)) { SpatialNav.setFocus(volta); return; }
   const f = document.querySelector('#conteudo .focusable');
   if (f) SpatialNav.setFocus(f);
+}
+
+// Créditos e mais informações — menu à esquerda + painel à direita (estilo GTV).
+function abrirCreditos(item, inf, cred) {
+  const sec = [];
+  if (cred && cred.direcao && cred.direcao.length) sec.push(['Direção', cred.direcao.join(', ')]);
+  if (cred && cred.elenco && cred.elenco.length) sec.push(['Elenco', cred.elenco.map((a) => a.personagem ? `${a.nome} — ${a.personagem}` : a.nome).join('\n')]);
+  const gen = (item.generos || []).join(', '); if (gen) sec.push(['Gêneros', gen]);
+  const sin = (inf && inf.sinopse) || item.sinopse || ''; if (sin) sec.push(['Sinopse', sin]);
+  if (!sec.length) sec.push(['Informações', 'Sem informações adicionais.']);
+
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal cr';
+  ov.innerHTML = `
+    <div class="cr-card">
+      <div class="cr-menu">
+        <div class="cr-titulo">${escapar(item.titulo)}</div>
+        ${sec.map((s, i) => `<button class="cr-item focusable${i === 0 ? ' ativo' : ''}" data-h="${escapar(s[0])}" data-cont="${escapar(s[1])}">${escapar(s[0])}</button>`).join('')}
+      </div>
+      <div class="cr-painel"><h3 class="cr-h" id="cr-h"></h3><div class="cr-c" id="cr-c"></div></div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov._onVoltar = () => { ov.remove(); const f = document.querySelector('#detalhe-overlay [data-acao="creditos"]'); if (f) SpatialNav.setFocus(f); };
+  ov.querySelectorAll('.cr-item').forEach((b) => b.addEventListener('click', () => mostrarCredito(b)));
+  SpatialNav.setFocus(ov.querySelector('.cr-item')); // aoFocar atualiza o painel
+}
+// Atualiza o painel de créditos a partir do item de menu focado.
+function mostrarCredito(el) {
+  if (!el) return;
+  el.parentElement.querySelectorAll('.cr-item').forEach((b) => b.classList.toggle('ativo', b === el));
+  const h = document.getElementById('cr-h'), c = document.getElementById('cr-c');
+  if (h) h.textContent = el.dataset.h || '';
+  if (c) c.textContent = el.dataset.cont || '';
+}
+
+// Episódios da série: seletor de TEMPORADA vertical à esquerda (bolinhas — a
+// ativa vira uma "pílula" com "Temporada X") + lista de episódios CENTRALIZADA
+// com o nome/logo da série no topo. Capas/sinopses vêm do TMDB ao abrir.
+let _epCtrl = null; // controlador da tela aberta (usado pelo aoFocar ao focar temporada)
+
+function abrirEpisodios(item, inf) {
+  const eps = epsOrdenados(item);
+  const porTemp = {};
+  for (const ep of eps) { const { s } = epInfo(ep.nome); (porTemp[s] || (porTemp[s] = [])).push(ep); }
+  let temps = Object.keys(porTemp).map(Number).sort((a, b) => a - b);
+  if (!temps.length) { temps = [1]; porTemp[1] = eps; }
+  let tAtual = temps[0];   // temporada selecionada (1ª por padrão)
+  let tokTemp = 0;         // evita corrida do TMDB ao trocar de temporada
+
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal ep';
+  ov.innerHTML = `
+    <div class="ep-bg" id="ep-bg" style="background:${FUNDO_PADRAO}"></div>
+    <div class="ep-grad"></div>
+    <div class="ep-conteudo">
+      <div class="ep-cabecalho">
+        <img class="ep-logo" id="ep-logo" alt="" style="display:none">
+        <h1 class="ep-titulo" id="ep-titulo">${escapar(item.titulo)}</h1>
+      </div>
+      <div class="ep-temps" id="ep-temps">
+        ${temps.map((t) => `<div class="ep-temp-item focusable${t === tAtual ? ' ativa' : ''}" data-s="${t}"><span class="ep-temp-dot"></span><span class="ep-temp-lbl">Temporada ${t}</span></div>`).join('')}
+      </div>
+      <div class="ep-centro"><div class="ep-lista" id="ep-lista"></div></div>
+    </div>`;
+  document.body.appendChild(ov);
+  _epCtrl = { selecionarTemporada };
+  ov._onVoltar = () => { _epCtrl = null; ov.remove(); const f = document.querySelector('#detalhe-overlay [data-acao="episodios"]'); if (f) SpatialNav.setFocus(f); };
+
+  // Fundo: backdrop centralizado e esmaecido (ambiente p/ o conteúdo central).
+  if (inf && inf.backdrop) document.getElementById('ep-bg').style.background = `#000 center/cover no-repeat url("${inf.backdrop}")`;
+
+  // Logo-título da série no topo (se houver).
+  if (inf && inf.id) {
+    const aplicaLogo = (lg) => {
+      if (!lg) return;
+      const logoEl = document.getElementById('ep-logo'), tit = document.getElementById('ep-titulo');
+      if (!logoEl) return;
+      const mostrar = () => { logoEl.style.display = 'block'; if (tit) tit.style.display = 'none'; };
+      logoEl.onload = mostrar; logoEl.src = lg;
+      if (logoEl.complete && logoEl.naturalWidth > 0) mostrar();
+    };
+    const cache = TMDB.logoCache(inf.id, inf.ehTv);
+    if (cache !== null) aplicaLogo(cache); else TMDB.tituloLogo(inf.id, inf.ehTv).then(aplicaLogo);
+
+    // Pré-carrega as capas de TODAS as temporadas ao abrir — assim trocar de
+    // temporada fica INSTANTÂNEO (sem a foto dos episódios "trocando" na hora).
+    // TMDB.temporada cacheia por (id|temporada); aqui também aquecemos os stills.
+    _executarFila(temps.map((t) => () => TMDB.temporada(inf.id, t).then((capas) => {
+      for (const k in (capas || {})) _aquece(capas[k] && capas[k].still);
+    })), 4);
+  }
+
+  // Clique numa temporada: seleciona e entra na lista de episódios (OK = entrar).
+  ov.querySelectorAll('.ep-temp-item').forEach((it) => it.addEventListener('click', () => {
+    selecionarTemporada(+it.dataset.s);
+    const ep = ov.querySelector('.ep-item'); if (ep) SpatialNav.setFocus(ep);
+  }));
+
+  // Troca a temporada ativa (anima as bolinhas) e re-renderiza os episódios.
+  // SEM roubar o foco — quem chama (foco/clique) decide onde o foco fica.
+  function selecionarTemporada(s) {
+    if (!(s in porTemp)) return;
+    if (s === tAtual && ov.querySelector('.ep-item')) return; // já é a atual
+    tAtual = s;
+    ov.querySelectorAll('.ep-temp-item').forEach((it) => it.classList.toggle('ativa', +it.dataset.s === s));
+    render(false);
+  }
+
+  // HTML de um episódio. `d` = dados do TMDB (still/nome/sinopse) se já houver;
+  // `skel`=true mostra o skeleton da sinopse (enquanto o TMDB não respondeu).
+  function epItemHTML(ep, e, d, skel) {
+    const cap = (d && d.still) || (inf && inf.backdrop) || '';
+    const nomeEp = (d && d.nome) || ep.nome;
+    const sin = d && d.sinopse;
+    const sinHTML = sin
+      ? `<div class="ep-sinopse">${escapar(sin)}</div>`
+      : (skel ? '<div class="ep-sinopse"><span class="ep-sk"></span><span class="ep-sk l2"></span></div>' : '');
+    return `
+      <div class="ep-capa"${cap ? ` style="background:#000 center/cover url('${cap}')"` : ` style="background:${gradiente(item.titulo)}"`}>${cap ? '' : `<span>E${e || ''}</span>`}</div>
+      <div class="ep-info">
+        <div class="ep-n">${e ? ('E' + String(e).padStart(2, '0') + ' · ') : ''}${escapar(nomeEp)}</div>
+        ${sinHTML}
+      </div>`;
+  }
+
+  // Renderiza os episódios da temporada atual. `focar`=true foca o 1º episódio.
+  // Se a temporada JÁ está pré-carregada (cache), desenha as capas/sinopse DIRETO
+  // — sem skeleton nem o "swap" backdrop→still (troca de temporada instantânea).
+  function render(focar) {
+    const tNum = tAtual;
+    const meu = ++tokTemp;
+    const lista = document.getElementById('ep-lista');
+    const arr = porTemp[tNum] || [];
+    const temTmdb = !!(inf && inf.id);
+    const cache = temTmdb ? TMDB.temporadaCache(inf.id, tNum) : null;
+
+    lista.innerHTML = '';
+    const refs = [];
+    for (const ep of arr) {
+      const { e } = epInfo(ep.nome);
+      const el = document.createElement('div');
+      el.className = 'ep-item focusable';
+      el.innerHTML = epItemHTML(ep, e, cache ? cache[e] : null, temTmdb && !cache);
+      el.addEventListener('click', () => { _epCtrl = null; ov.remove(); const d = document.getElementById('detalhe-overlay'); if (d) d.remove(); abrirPlayer({ titulo: rotuloEp(item, ep), url: ep.url }); });
+      lista.appendChild(el);
+      refs.push({ el, e });
+    }
+    if (focar) { const first = lista.querySelector('.ep-item'); if (first) SpatialNav.setFocus(first); }
+    if (!temTmdb || cache) return; // sem TMDB, ou já desenhado do cache → pronto
+
+    // Não cacheado ainda: busca e preenche (skeleton → capa/nome/sinopse).
+    TMDB.temporada(inf.id, tNum).then((capas) => {
+      capas = capas || {};
+      if (meu !== tokTemp || !document.body.contains(ov)) return; // trocou de temporada / fechou
+      for (const r of refs) {
+        const d = capas[r.e];
+        if (d && d.still) {
+          const c = r.el.querySelector('.ep-capa');
+          if (c) { c.style.background = `#000 center/cover url('${d.still}')`; const sp = c.querySelector('span'); if (sp) sp.remove(); }
+        }
+        if (d && d.nome) {
+          const n = r.el.querySelector('.ep-n');
+          if (n) n.textContent = (r.e ? ('E' + String(r.e).padStart(2, '0') + ' · ') : '') + d.nome;
+        }
+        const sinEl = r.el.querySelector('.ep-sinopse');
+        if (sinEl) {
+          const sin = (d && d.sinopse) || '';
+          if (sin) sinEl.textContent = sin;   // troca o skeleton pela sinopse
+          else sinEl.remove();                 // sem sinopse → remove
+        }
+      }
+    });
+  }
+
+  render(true); // abre focando o 1º episódio da temporada selecionada
 }
 
 // ── Player (HLS) ────────────────────────────────────────────────────────────
@@ -712,6 +1389,46 @@ window.addEventListener('keydown', (e) => {
       SpatialNav.setFocus(alvoCanal);
     }
   }
+}, true);
+
+// Tela de episódios: "esquerda" num episódio → vai p/ a temporada ATIVA (aberta);
+// "direita" numa temporada → entra na lista de episódios.
+window.addEventListener('keydown', (e) => {
+  const ov = document.querySelector('.nav-modal.ep');
+  if (!ov) return;
+  const at = SpatialNav.atual;
+  if (!at || !at.closest || !at.closest('.nav-modal.ep')) return;
+  if (e.key === 'ArrowLeft' && at.classList.contains('ep-item')) {
+    const ativa = ov.querySelector('.ep-temp-item.ativa') || ov.querySelector('.ep-temp-item');
+    if (ativa) { e.preventDefault(); e.stopPropagation(); SpatialNav.setFocus(ativa); }
+  } else if (e.key === 'ArrowRight' && at.classList.contains('ep-temp-item')) {
+    const ep = ov.querySelector('.ep-item');
+    if (ep) { e.preventDefault(); e.stopPropagation(); SpatialNav.setFocus(ep); }
+  }
+}, true);
+
+// Carrosséis (Início/Filmes/Séries): ↑/↓ entre trilhos vai p/ a posição LEMBRADA
+// do trilho-alvo (ou o 1º item, se nunca visitado) — NÃO o item geometricamente
+// alinhado (que caía no meio). Cada trilho guarda seu último foco em data-ultimo.
+function _posterLembrado(fila) {
+  const id = fila.dataset.ultimo;
+  if (!id) return null;
+  return [...fila.querySelectorAll('.poster')].find((p) => p.dataset.id === id) || null;
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const at = SpatialNav.atual;
+  if (!at || !at.classList || !at.classList.contains('poster')) return;
+  const filaAtual = at.closest('.trilho-fila');
+  if (!filaAtual) return;
+  const filas = [...document.querySelectorAll('#conteudo .trilho-fila')];
+  const i = filas.indexOf(filaAtual);
+  const alvoFila = filas[e.key === 'ArrowDown' ? i + 1 : i - 1];
+  if (!alvoFila) return;                       // sem trilho na direção → foco fica
+  const alvo = _posterLembrado(alvoFila) || alvoFila.querySelector('.poster');
+  if (!alvo) return;                           // trilho-alvo vazio → deixa o engine
+  e.preventDefault(); e.stopPropagation();
+  SpatialNav.setFocus(alvo);
 }, true);
 
 function revelarControles() {
@@ -1048,6 +1765,8 @@ function montarSidebar() {
 
 // Clicks de conteudo (delegado): poster abre detalhe; "Assistir" do hero idem.
 document.addEventListener('click', (e) => {
+  const btnBuscaSec = e.target.closest('[data-acao="busca-secao"]');
+  if (btnBuscaSec) { abrirBuscaSecao(btnBuscaSec.dataset.escopo, btnBuscaSec); return; }
   const cat = e.target.closest('.tv-cat-item');
   if (cat) { mostrarCanais(cat.dataset.cat); return; }
   const canalItem = e.target.closest('.tv-canal-item');
@@ -1116,6 +1835,7 @@ async function iniciarApp() {
   if (reg && reg.lista_url) {
     mostrarLoading('Baixando sua lista…');
     const ok = await carregarLista(reg.lista_url);
+    if (ok) { loadingMsg('Preparando seus banners…'); await precarregarBanners(); }
     esconderLoading();
     if (!ok) toast('Não foi possível carregar sua lista. Verifique a URL/conexão.');
   }
@@ -1127,9 +1847,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   montarSidebar();
   // Hero reage ao item em foco (Início/Filmes/Séries).
   SpatialNav.aoFocar((el) => {
-    if (el && el.classList && el.classList.contains('poster')) {
-      const it = LISTA.indice[el.dataset.id];
-      if (it) atualizarHero(it);
+    if (!el || !el.classList) return;
+    if (el.classList.contains('poster')) {
+      if (el.closest('.bsc-grid')) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // grade da busca rola sozinha
+      } else {
+        focarPoster(el);                       // scroll (fila + título sob o hero)
+        const fila = el.closest('.trilho-fila'); // lembra a posição neste carrossel
+        if (fila) fila.dataset.ultimo = el.dataset.id;
+        const it = LISTA.indice[el.dataset.id];
+        if (it) atualizarHero(it);
+      }
+    } else if (el.classList.contains('cr-item')) {
+      mostrarCredito(el);                    // créditos: painel reage ao foco
+    } else if (el.classList.contains('ep-temp-item')) {
+      if (_epCtrl) _epCtrl.selecionarTemporada(+el.dataset.s); // temporada abre ao focar
     }
   });
   await Dispositivo.consultar(); // best-effort (offline-first)
