@@ -681,11 +681,8 @@ function ligarLogosCanais(raiz) {
   alvos.forEach((im) => _obsCanalLogo.observe(im));
 }
 
-function htmlCanais(cat) {
-  const lista = canaisDaCategoria(cat);
-  const nome = cat === '__fav' ? t('Favoritos') : cat;
-  const itens = lista.map((c) =>
-    `<div class="tv-canal-item" data-canal="${c.id}">
+function _itemCanalHTML(c) {
+  return `<div class="tv-canal-item" data-canal="${c.id}">
        <div class="tv-canal-main focusable" data-canal="${c.id}">
          <div class="tv-canal-logo" style="background:${gradiente(c.nome, true)}">${logoCanalInner(c.nome, c.logo, true)}</div>
          <div class="tv-canal-txt">
@@ -694,11 +691,41 @@ function htmlCanais(cat) {
          </div>
        </div>
        <button class="tv-canal-fav focusable${_favoritos.has(c.id) ? ' ativo' : ''}" data-canal="${c.id}" data-acao="fav-lista" aria-label="${escapar(t('Favoritar'))}">${IC_STAR(_favoritos.has(c.id))}</button>
-     </div>`).join('');
+     </div>`;
+}
+
+// Categorias grandes (ex.: "SPORTS WORLD", "DESENHOS 24 HORAS") têm MILHARES de
+// canais. Montar tudo de uma vez congelava a TV — a string, o parse de HTML e o
+// registro dos focáveis num só frame. Renderizamos o primeiro lote (que já enche
+// a tela) e o resto em fatias, sem bloquear o D-pad.
+const CANAIS_LOTE = EH_TV ? 40 : 200;
+function htmlCanais(cat, lista) {
+  const nome = cat === '__fav' ? t('Favoritos') : cat;
+  const itens = lista.slice(0, CANAIS_LOTE).map(_itemCanalHTML).join('');
   return `<div class="tv-lista tv-anim-dir">
     <div class="tv-lista-cab">${CHEV_L} ${escapar(nome)}</div>
     ${itens}
   </div>`;
+}
+
+// Token: se o usuário trocar de categoria (ou voltar) no meio, a fatia pendente
+// é descartada em vez de despejar canais da categoria antiga na tela.
+let _canaisToken = 0;
+function anexarCanaisRestantes(pane, lista, cat) {
+  const meu = ++_canaisToken;
+  let i = CANAIS_LOTE;
+  const passo = () => {
+    if (meu !== _canaisToken || _tvCategoriaAtiva !== cat) return;
+    const alvo = pane.querySelector('.tv-lista');
+    if (!alvo || !alvo.isConnected) return;
+    const frag = document.createElement('div');
+    frag.innerHTML = lista.slice(i, i + CANAIS_LOTE).map(_itemCanalHTML).join('');
+    while (frag.firstChild) alvo.appendChild(frag.firstChild);
+    ligarLogosCanais(alvo);
+    i += CANAIS_LOTE;
+    if (i < lista.length) requestAnimationFrame(passo);
+  };
+  requestAnimationFrame(passo);
 }
 
 function htmlPreviewVazio() {
@@ -807,8 +834,9 @@ function mostrarCanais(cat, _okPin) {
   }
   _tvCategoriaAtiva = cat;
   const pane = document.getElementById('tv-pane-canais');
-  pane.innerHTML = htmlCanais(cat);
+  pane.innerHTML = htmlCanais(cat, lista);
   ligarLogosCanais(pane);          // logos lazy (não carrega centenas de uma vez)
+  if (lista.length > CANAIS_LOTE) anexarCanaisRestantes(pane, lista, cat);
   // As categorias continuam visiveis a esquerda (recuadas + fade); ver CSS.
   document.getElementById('tv-panes').classList.add('com-canais');
   const primeiro = pane.querySelector('.focusable');
@@ -829,8 +857,22 @@ function mostrarCategorias() {
   if (alvo) SpatialNav.setFocus(alvo);
 }
 
+// Encerra a reprodução e LIBERA a conexão do <video>. Sem o removeAttribute+load()
+// o socket do stream continua aberto (o servidor IPTV segue contando a sessão),
+// e depois de alguns vídeos estoura o limite de telas simultâneas.
+function liberarVideo(v) {
+  if (!v) return;
+  try {
+    v.pause();
+    v.removeAttribute('src');
+    while (v.firstChild) v.removeChild(v.firstChild);   // <source> se houver
+    v.load();                                            // aborta o carregamento em curso
+  } catch (_) { /* best-effort */ }
+}
+
 function pararPreview() {
   if (_hlsPrev) { _hlsPrev.destroy(); _hlsPrev = null; }
+  liberarVideo(document.getElementById('tv-prev-video'));
 }
 
 // (Re)carrega o video do preview (coluna direita). Reusado ao voltar da tela cheia.
@@ -1010,9 +1052,43 @@ function selecionarAudio(v, i) {
   if (at) for (let k = 0; k < at.length; k++) at[k].enabled = (k === i);
 }
 const _marca = (txt, on) => txt + (on ? '  ✓' : '');
-function abrirMenuLegendas(v) {
+
+// As faixas de legenda/áudio NÃO existem no instante em que o vídeo começa a
+// tocar: no player nativo da TV elas só aparecem depois que o demuxer lê o
+// stream (evento `addtrack`, às vezes segundos depois), e no hls.js só depois do
+// MANIFEST_PARSED. Ler na hora do clique retornava lista vazia — era por isso que
+// o menu sempre dizia "não oferece legendas". Aqui esperamos até `ms` por elas.
+// (No app mobile o media_kit/libmpv já entrega as faixas prontas; no web precisamos
+// escutar os eventos.)
+function _esperarFaixas(v, contar, ms) {
+  return new Promise((resolve) => {
+    if (contar()) return resolve(true);
+    const t0 = Date.now();
+    const tt = v.textTracks, at = v.audioTracks;
+    let iv = 0;
+    const limpar = () => {
+      clearInterval(iv);
+      if (tt && tt.removeEventListener) tt.removeEventListener('addtrack', checar);
+      if (at && at.removeEventListener) at.removeEventListener('addtrack', checar);
+    };
+    function checar() {
+      if (contar()) { limpar(); resolve(true); }
+      else if (Date.now() - t0 >= ms) { limpar(); resolve(false); }
+    }
+    iv = setInterval(checar, 250);
+    if (tt && tt.addEventListener) tt.addEventListener('addtrack', checar);
+    if (at && at.addEventListener) at.addEventListener('addtrack', checar);
+  });
+}
+
+async function abrirMenuLegendas(v) {
   if (!v) return;
-  const fx = faixasLegenda(v);
+  let fx = faixasLegenda(v);
+  if (!fx.length) {
+    toast(t('Procurando legendas…'));
+    await _esperarFaixas(v, () => faixasLegenda(v).length, 6000);
+    fx = faixasLegenda(v);
+  }
   if (!fx.length) { toast(t('Este conteúdo não oferece legendas')); return; }
   const at = legendaAtual(v);
   const rotulos = [_marca(t('Desativadas'), at < 0)].concat(fx.map((f) => _marca(f.rotulo, f.i === at)));
@@ -1022,9 +1098,14 @@ function abrirMenuLegendas(v) {
     toast(t('Legenda') + ': ' + fx[k - 1].rotulo);
   });
 }
-function abrirMenuAudio(v) {
+async function abrirMenuAudio(v) {
   if (!v) return;
-  const fx = faixasAudio(v);
+  let fx = faixasAudio(v);
+  if (fx.length < 2) {
+    toast(t('Procurando faixas de áudio…'));
+    await _esperarFaixas(v, () => faixasAudio(v).length > 1, 6000);
+    fx = faixasAudio(v);
+  }
   if (fx.length < 2) { toast(t('Este conteúdo tem apenas uma faixa de áudio')); return; }
   const at = audioAtual(v);
   abrirMenu(t('Áudio'), fx.map((f) => _marca(f.rotulo, f.i === at)), (k) => {
@@ -1358,9 +1439,28 @@ function abrirBuscaSecao(escopo, btn) {
 // TV: cache DESLIGADO (guardar 3 catálogos em DOM+imagens estoura a RAM). No
 // desktop, cacheia p/ troca instantânea. `_secCache` centraliza o acesso.
 let _secoesCache = {};
-function limparCacheSecoes() { _secoesCache = {}; }
-const _secCacheGet = (id) => (EH_TV ? null : _secoesCache[id]);
-const _secCacheSet = (id, node) => { if (!EH_TV) _secoesCache[id] = node; };
+// LRU de seções já montadas. Na TV isto estava DESLIGADO (economia de RAM), o que
+// fazia Filmes↔Séries remontarem do zero a cada troca — caro e visível. Com o heap
+// medido em 19% do orçamento, dá pra cachear; só limitamos a quantidade.
+const _secOrdem = [];                         // fim = usada mais recentemente
+const MAX_SEC_CACHE = EH_TV ? 3 : 12;         // TV: início + filmes + séries
+function limparCacheSecoes() { _secoesCache = {}; _secOrdem.length = 0; }
+function _secToque(id) {
+  const i = _secOrdem.indexOf(id);
+  if (i >= 0) _secOrdem.splice(i, 1);
+  _secOrdem.push(id);
+}
+function _secCacheDel(id) {
+  delete _secoesCache[id];
+  const i = _secOrdem.indexOf(id);
+  if (i >= 0) _secOrdem.splice(i, 1);
+}
+const _secCacheGet = (id) => { const n = _secoesCache[id]; if (n) _secToque(id); return n || null; };
+const _secCacheSet = (id, node) => {
+  _secoesCache[id] = node;
+  _secToque(id);
+  while (_secOrdem.length > MAX_SEC_CACHE) _secCacheDel(_secOrdem[0]);
+};
 
 function navegar(secaoId) {
   pararPreview(); // para o preview da TV ao vivo ao sair da secao
@@ -2067,6 +2167,11 @@ function fecharPlayer() {
   if (_playerCtx && vf && vf.duration) Biblioteca.salvarProgresso(_playerCtx, vf.currentTime, vf.duration);
   _playerCtx = null;
   if (_hls) { _hls.destroy(); _hls = null; }
+  // Encerra de fato a conexão. Só destruir o hls.js / remover o overlay NÃO basta:
+  // um <video> com `src` mantém o socket aberto mesmo fora do DOM, e o servidor
+  // IPTV continua contando aquela sessão. Depois de abrir alguns filmes isso
+  // estoura o limite de telas simultâneas e tudo passa a dar erro.
+  liberarVideo(vf);
   // "Continuar assistindo" mudou: se o Início está visível, atualiza-o na hora;
   // senão descarta o cache pra rebuildar na volta.
   const ativo = document.querySelector('.nav-item.ativo');
@@ -2074,7 +2179,7 @@ function fecharPlayer() {
   if (ativo && ativo.dataset.secao === 'inicio' && main && main.querySelector('.trilhos')) {
     atualizarTrilhosPerfil(main); _secCacheSet('inicio', main.firstElementChild);
   } else {
-    delete _secoesCache['inicio'];
+    _secCacheDel('inicio');
   }
   const ov = document.getElementById('player-overlay');
   if (ov) ov.remove();
@@ -2089,7 +2194,6 @@ function abrirLive(canal) {
   ov.id = 'live-overlay';
   ov.className = 'nav-modal player-modal';
   ov.innerHTML = `
-    <div class="live-video-slot" id="live-video-slot"></div>
     <div class="player-fade"></div>
     <button class="player-voltar focusable" data-acao="fechar">
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Voltar
@@ -2129,12 +2233,15 @@ function abrirLive(canal) {
   document.body.appendChild(ov);
   ov._onVoltar = fecharLive;
 
-  // Reaproveita o MESMO <video> do preview (ja tocando): move-o para a tela
-  // cheia e desmuta. Evita 2 instancias HLS (causa da tela preta).
-  const slot = document.getElementById('live-video-slot');
+  // Maximiza SEM tocar no DOM: só marcamos a moldura do preview como `.cheia` e o
+  // CSS a leva a tela inteira. Antes movíamos o <video> para dentro do overlay —
+  // reparentar um media element faz o pipeline nativo da TV recriar o player, o
+  // que dava tela preta até trocar de fonte/qualidade. Agora é o MESMO player,
+  // tocando ininterruptamente; só muda o tamanho.
   const pv = document.getElementById('tv-prev-video');
-  if (pv && slot) {
-    slot.appendChild(pv);
+  const tela = document.querySelector('.tv-tela');
+  if (tela) tela.classList.add('cheia');
+  if (pv) {
     pv.muted = false;
     pv.play().catch(() => { pv.muted = true; pv.play().catch(() => {}); });
   }
@@ -2173,10 +2280,11 @@ function abrirLive(canal) {
 function fecharLive() {
   clearTimeout(_hideTimer);
   clearInterval(_relogioInt); _relogioInt = null;
-  // Devolve o <video> (ainda tocando) para a tela do preview e remuda.
+  // Volta ao tamanho de preview (o vídeo nunca saiu do lugar) e remuda.
   const v = document.getElementById('tv-prev-video');
   const tela = document.querySelector('.tv-tela');
-  if (v && tela) { v.muted = true; tela.insertBefore(v, tela.firstChild); }
+  if (tela) tela.classList.remove('cheia');
+  if (v) v.muted = true;
   const ov = document.getElementById('live-overlay');
   if (ov) ov.remove();
   const alvo = document.querySelector('.tv-tela') || document.querySelector('#conteudo .focusable');

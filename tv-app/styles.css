@@ -621,9 +621,15 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 .live-fav-btn.ativo svg { fill: var(--accent-bright); }
 
 /* ── Player de TV AO VIVO (full-screen estilo cabo) ───────────────────────── */
-#live-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; background: #000; }
-.live-video-slot { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
-.live-video-slot video { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* O overlay do live e TRANSPARENTE: quem cobre a tela e o proprio <video>, que
+   nunca sai da moldura do preview (ver .tv-tela.cheia). Reparentar um media
+   element recria o player nativo da TV -> tela preta. */
+#live-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; background: transparent; }
+/* Preview maximizado: a MESMA moldura vai a tela cheia por CSS, sem mover o DOM.
+   z-index abaixo do overlay (400) para os controles ficarem por cima do video. */
+.tv-tela.cheia { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 399; width: auto; height: auto; aspect-ratio: auto; border: none; border-radius: 0; background: #000; }
+.tv-tela.cheia.is-focused { box-shadow: none; }
+.tv-tela.cheia .tv-tela-hint { display: none; }
 
 .live-topdir { position: absolute; top: 34px; right: 40px; z-index: 2; display: flex; gap: 12px; transition: opacity .3s; }
 .live-top-btn {
