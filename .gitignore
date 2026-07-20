@@ -138,3 +138,12 @@ PRODUCT.md
 CLAUDE.md
 DESIGN.md
 HeroPlay/
+
+# ─── App de TV (webOS/Tizen) ─────────────────────────────────────────────────
+
+# Artefatos do build-ipk.sh (stage transpilado + .ipk/.zip publicados) — nunca versionar
+/dist-build/
+/dist-webos/
+
+# Config local do Claude Code
+/.claude/

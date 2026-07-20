@@ -27,19 +27,76 @@ const Dispositivo = (() => {
   };
   const geraKey = () => String(Math.floor(100000 + Math.random() * 900000));
 
+  // localStorage protegido: em alguns contextos de app de TV o acesso LANÇA
+  // (SecurityError) — sem o try/catch o módulo inteiro morre e o app nem inicia.
   function persistente(chave, gerar) {
-    let v = localStorage.getItem(chave);
-    if (!v) { v = gerar(); localStorage.setItem(chave, v); }
+    let v = null;
+    try { v = localStorage.getItem(chave); } catch (_) {}
+    if (!v) { v = gerar(); try { localStorage.setItem(chave, v); } catch (_) {} }
     return v;
   }
-  const mac = () => persistente(LS.mac, geraMac);
-  const key = () => persistente(LS.key, geraKey);
+  // ── Identidade ESTÁVEL (sobrevive a reinstalar / limpar dados) ─────────────
+  // Antes o MAC/Key eram aleatórios em localStorage → mudavam ao reinstalar (o
+  // `--remove` apaga os dados). Agora, no webOS, derivamos de um ID de HARDWARE
+  // (LGUDID): o MESMO aparelho gera SEMPRE o mesmo mac/key. Navegador/dev cai no
+  // aleatório persistido (como antes).
+  function _luna(uri, params, ms) {
+    return new Promise((resolve) => {
+      try {
+        if (typeof PalmServiceBridge === 'undefined') return resolve(null);
+        const b = new PalmServiceBridge();
+        let feito = false;
+        const fim = (v) => { if (!feito) { feito = true; resolve(v); } };
+        b.onservicecallback = (msg) => { try { fim(JSON.parse(msg)); } catch (_) { fim(null); } };
+        b.call(uri, JSON.stringify(params || {}));
+        setTimeout(() => fim(null), ms || 3000);
+      } catch (_) { resolve(null); }
+    });
+  }
+  const _hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h; };
+  function _macDe(id) {
+    const a = _hash(id), b = _hash('mac|' + id);
+    const oct = [(a & 0xFC) | 0x02, (a >>> 8) & 0xFF, (a >>> 16) & 0xFF, b & 0xFF, (b >>> 8) & 0xFF, (b >>> 16) & 0xFF];
+    return oct.map((x) => x.toString(16).padStart(2, '0').toUpperCase()).join(':');
+  }
+  const _keyDe = (id) => String(100000 + (_hash('key|' + id) % 900000));
+
+  async function _idPlataforma() {
+    // LGUDID: UUID único e estável por aparelho (recomendado da LG).
+    const r = await _luna('luna://com.webos.service.sm/deviceid/getIDs', { idType: ['LGUDID'] });
+    if (r && r.idList) { const u = r.idList.filter((x) => x && x.idValue)[0]; if (u) return 'udid:' + u.idValue; }
+    // fallback: MAC real da placa de rede.
+    const c = await _luna('luna://com.webos.service.connectionmanager/getStatus', {});
+    if (c) {
+      const m = (c.wired && c.wired.info && c.wired.info.macAddress) || (c.wifi && c.wifi.info && c.wifi.info.macAddress);
+      if (m) return 'mac:' + m;
+    }
+    return null;
+  }
+
+  let _macFixo = null, _keyFixo = null;
+  // Resolve a identidade UMA vez, no boot (antes de mostrar o QR / consultar).
+  async function init() {
+    if (_macFixo) return;
+    try {
+      const id = await _idPlataforma();
+      if (id) {
+        _macFixo = _macDe(id); _keyFixo = _keyDe(id);
+        try { localStorage.setItem(LS.mac, _macFixo); localStorage.setItem(LS.key, _keyFixo); } catch (_) {}
+        return;
+      }
+    } catch (_) {}
+    _macFixo = persistente(LS.mac, geraMac);   // navegador/dev: aleatório persistido
+    _keyFixo = persistente(LS.key, geraKey);
+  }
+  const mac = () => _macFixo || persistente(LS.mac, geraMac);
+  const key = () => _keyFixo || persistente(LS.key, geraKey);
 
   // Snapshot local do que a nuvem retornou (lista + status).
   function registro() {
     try { return JSON.parse(localStorage.getItem(LS.reg) || 'null'); } catch (_) { return null; }
   }
-  function salvar(reg) { localStorage.setItem(LS.reg, JSON.stringify(reg || {})); }
+  function salvar(reg) { try { localStorage.setItem(LS.reg, JSON.stringify(reg || {})); } catch (_) {} }
 
   const temLista = () => { const r = registro(); return !!(r && r.lista_url); };
   const status = () => { const r = registro(); return (r && r.status) || 'sem_lista'; };
@@ -59,44 +116,76 @@ const Dispositivo = (() => {
   // configurada ou a rede falhar, mantem o cache atual (offline-first).
   async function consultar() {
     if (!ATIVACAO_API) return registro();
+    let to = null;
     try {
       const u = `${ATIVACAO_API}?mac=${encodeURIComponent(mac())}&key=${encodeURIComponent(key())}`;
-      const r = await fetch(u, { headers: { accept: 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON } });
+      // TIMEOUT (8s): o boot ESPERA por isso. Na TV a rede pode pendurar e, sem
+      // cortar, o app trava antes de renderizar (tela vazia). Offline-first: no
+      // estouro, seguimos com o cache local.
+      const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      if (ctrl) to = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(u, {
+        headers: { accept: 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON },
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (to) { clearTimeout(to); to = null; }
       if (!r.ok) return registro();
       const j = await r.json();
       salvar(j);
       return j;
     } catch (_) {
       return registro();
+    } finally {
+      if (to) clearTimeout(to);
     }
   }
 
-  // Adiciona a lista DESTE device: registra na nuvem (best-effort) e grava local
-  // (offline-first). Assim o site (gerenciar) também enxerga o dispositivo.
-  async function adicionar(lista_url, epg_url) {
+  // POST genérico p/ a Edge Function (best-effort). Sempre injeta mac+key.
+  async function _post(payload) {
+    if (!ATIVACAO_API) return null;
+    try {
+      const r = await fetch(ATIVACAO_API, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON },
+        body: JSON.stringify({ mac: mac(), key: key(), ...payload }),
+      });
+      return await r.json().catch(() => ({ ok: r.ok }));
+    } catch (_) { return null; }
+  }
+
+  // Adiciona uma playlist DESTE device (nome opcional): registra na nuvem
+  // (best-effort) e grava local (offline-first). Vira a lista ATIVA.
+  async function adicionar(lista_url, epg_url, nome) {
     const local = {
       status: 'trial', lista_url, epg_url,
       trial_expira_em: new Date(Date.now() + 7 * 864e5).toISOString(),
     };
-    if (ATIVACAO_API) {
-      try {
-        const r = await fetch(ATIVACAO_API, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON },
-          body: JSON.stringify({ acao: 'adicionar', mac: mac(), key: key(), lista_url, epg_url, modelo: 'web' }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok && j.ok !== false) {
-          local.status = j.status || local.status;
-          local.trial_expira_em = j.trial_expira_em || local.trial_expira_em;
-        }
-      } catch (_) { /* sem rede: segue só com o local */ }
+    const j = await _post({ acao: 'adicionar', lista_url, epg_url, nome: nome || '', modelo: 'web' });
+    if (j && j.ok !== false) {
+      local.status = j.status || local.status;
+      local.trial_expira_em = j.trial_expira_em || local.trial_expira_em;
     }
     salvar(local);
     return local;
   }
 
-  return { mac, key, temLista, status, diasTeste, registro, salvar, consultar, adicionar, urlAtivacao };
+  // Playlists vinculadas a este device (via Edge Function). [] se offline/sem API.
+  async function listarPlaylists() {
+    const j = await _post({ acao: 'listar' });
+    return (j && Array.isArray(j.playlists)) ? j.playlists : [];
+  }
+  // Define a playlist ATIVA do device.
+  async function selecionarPlaylist(id) {
+    const j = await _post({ acao: 'selecionar', id });
+    return !!(j && j.ok !== false);
+  }
+  // Remove a playlist deste device (apaga do Supabase se ficar órfã).
+  async function excluirPlaylist(id) {
+    const j = await _post({ acao: 'excluir', id });
+    return !!(j && j.ok !== false);
+  }
+
+  return { init, mac, key, temLista, status, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, urlAtivacao };
 })();
 
 // Utilitarios de lista: montar a URL a partir do Xtream e DERIVAR o EPG da M3U.

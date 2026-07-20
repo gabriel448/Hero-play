@@ -376,6 +376,11 @@ allow_dynamic_registration = false
 [functions.ativacao]
 verify_jwt = false
 
+# Painel de revenda: valida o JWT do revendedor por conta própria (getUser) e usa
+# service role internamente — sem verify_jwt da plataforma (evita travar o preflight).
+[functions.painel]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

@@ -257,15 +257,29 @@ grant  select on public.contas_ativacao to authenticated;
 grant select, insert, update, delete on public.contas_ativacao to service_role;
 
 -- ============================================================================
--- APP DE TV — dispositivos por MAC+Key (sem conta/PII). REUSO TEMPORARIO deste
--- projeto. ⚠️ Ao construir o PAINEL DE REVENDA, migrar tudo isto para um projeto
--- Supabase SEPARADO (ver PLANO-TV-E-PAINEIS.md §3/§10). O app de TV nunca acessa
--- estas tabelas direto — apenas via Edge Function `ativacao` (service role).
+-- APP DE TV — modelo RESELLER-READY: revendedor → cliente → dispositivo → playlist.
+-- A playlist pertence ao CLIENTE e é VINCULADA a dispositivos (N↔N): pode estar em
+-- todos os dispositivos do cliente ou só em alguns. REUSO TEMPORARIO deste projeto.
+-- ⚠️ Migrar p/ projeto Supabase SEPARADO ao construir o painel de revenda
+-- (PLANO-TV-E-PAINEIS.md §3/§10). O app de TV nunca acessa estas tabelas direto —
+-- apenas via Edge Function `ativacao` (service role).
 -- ============================================================================
 create extension if not exists pgcrypto;
 
--- Dispositivo = MAC + Key (a Key, mostrada na TV, funciona como segredo do
--- aparelho: liga o device na 1a gravacao e protege leituras/trocas).
+-- CLIENTE = dono das playlists e dos dispositivos. revendedor_id NULL = self-serve
+-- (sem revenda). Quando o painel existir, revendedor_id aponta p/ `revendedores`.
+create table if not exists public.clientes (
+  id            uuid primary key default gen_random_uuid(),
+  revendedor_id uuid,                                -- FK p/ revendedores (futuro); NULL = self-serve
+  nome          text,
+  criado_em     timestamptz not null default now()
+);
+alter table public.clientes enable row level security;
+revoke all on public.clientes from anon, authenticated;
+grant all on public.clientes to service_role;
+
+-- Dispositivo = MAC + Key, pertencente a um cliente. A Key (mostrada na TV) é o
+-- segredo do aparelho: liga o device na 1a gravacao e protege leituras/trocas.
 create table if not exists public.dispositivos (
   id              uuid primary key default gen_random_uuid(),
   mac             text unique not null,
@@ -278,27 +292,126 @@ create table if not exists public.dispositivos (
   criado_em       timestamptz not null default now(),
   atualizado_em   timestamptz not null default now()
 );
+alter table public.dispositivos
+  add column if not exists cliente_id uuid references public.clientes(id) on delete set null;
+create index if not exists idx_dispositivos_cliente on public.dispositivos(cliente_id);
 alter table public.dispositivos enable row level security;
 revoke all on public.dispositivos from anon, authenticated;
 grant all on public.dispositivos to service_role;
 
--- Playlist do device. A URL (e o EPG) sao CIFRADOS pela Edge Function antes de
--- gravar — nunca em texto puro. Uma lista "selecionada" por device (MVP).
+-- Playlist do CLIENTE. URL/EPG CIFRADOS pela Edge Function (nunca em texto puro).
+-- Vinculada a dispositivos via `dispositivo_playlists`.
 create table if not exists public.playlists (
-  id             uuid primary key default gen_random_uuid(),
-  dispositivo_id uuid not null references public.dispositivos(id) on delete cascade,
-  nome           text,
-  tipo           text,                               -- xtream|m3u
-  url_cifrada    text not null,
-  epg_cifrada    text,
-  selecionada    boolean not null default true,
-  criado_em      timestamptz not null default now(),
-  atualizado_em  timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  cliente_id    uuid references public.clientes(id) on delete cascade,
+  nome          text,
+  tipo          text,                                -- xtream|m3u
+  url_cifrada   text not null,
+  epg_cifrada   text,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
 );
-create index if not exists idx_playlists_dispositivo on public.playlists(dispositivo_id);
+alter table public.playlists
+  add column if not exists cliente_id uuid references public.clientes(id) on delete cascade;
+alter table public.playlists add column if not exists pin text;                          -- senha da playlist no device (opcional)
+alter table public.playlists add column if not exists free_dns boolean not null default false; -- domínio parceiro → ativação sem crédito (ver Parceiros)
+create index if not exists idx_playlists_cliente on public.playlists(cliente_id);
 alter table public.playlists enable row level security;
 revoke all on public.playlists from anon, authenticated;
 grant all on public.playlists to service_role;
+
+-- Vínculo dispositivo ↔ playlist (N↔N). `selecionada` = playlist ATIVA naquele
+-- dispositivo (uma por device).
+create table if not exists public.dispositivo_playlists (
+  dispositivo_id uuid not null references public.dispositivos(id) on delete cascade,
+  playlist_id    uuid not null references public.playlists(id)    on delete cascade,
+  selecionada    boolean not null default false,
+  criado_em      timestamptz not null default now(),
+  primary key (dispositivo_id, playlist_id)
+);
+create index if not exists idx_dp_dispositivo on public.dispositivo_playlists(dispositivo_id);
+create index if not exists idx_dp_playlist    on public.dispositivo_playlists(playlist_id);
+alter table public.dispositivo_playlists enable row level security;
+revoke all on public.dispositivo_playlists from anon, authenticated;
+grant all on public.dispositivo_playlists to service_role;
+
+-- Migração do modelo antigo (playlists.dispositivo_id + playlists.selecionada):
+-- cria 1 cliente por device, liga device→cliente, move as playlists p/ o cliente
+-- e cria os vínculos. Idempotente: só roda se a coluna antiga ainda existir.
+do $$
+declare d record; novo_cliente uuid;
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'playlists' and column_name = 'dispositivo_id') then
+    -- 1) um cliente p/ cada device que ainda não tem
+    for d in select id, mac from public.dispositivos where cliente_id is null loop
+      insert into public.clientes (nome) values ('Cliente ' || d.mac) returning id into novo_cliente;
+      update public.dispositivos set cliente_id = novo_cliente where id = d.id;
+    end loop;
+    -- 2) move cada playlist p/ o cliente do seu device + cria o vínculo
+    --    (alias `dev` p/ não colidir com a variável `d` do loop)
+    update public.playlists p set cliente_id = dev.cliente_id
+      from public.dispositivos dev where p.dispositivo_id = dev.id and p.cliente_id is null;
+    insert into public.dispositivo_playlists (dispositivo_id, playlist_id, selecionada)
+      select p.dispositivo_id, p.id, coalesce(p.selecionada, true)
+      from public.playlists p where p.dispositivo_id is not null
+      on conflict (dispositivo_id, playlist_id) do nothing;
+    -- 3) remove as colunas antigas (agora no cliente / na junção)
+    alter table public.playlists drop column if exists dispositivo_id;
+    alter table public.playlists drop column if exists selecionada;
+  end if;
+end $$;
+
+-- OPERADOR DO PAINEL. Hierarquia de papéis: admin → master → reseller. Cada nível
+-- CRIA e DISTRIBUI crédito para o nível abaixo; o reseller CONSOME crédito ao ativar
+-- um device. Contas são TOP-DOWN (sem signup público): quem está acima cria o
+-- login/senha via Edge Function `painel` (auth.admin.createUser). `id`=auth.users(id).
+-- (Tabela chamada `revendedores` por legado; guarda os 3 papéis.)
+create table if not exists public.revendedores (
+  id                uuid primary key references auth.users(id) on delete cascade,
+  nome              text,
+  email             text,
+  papel             text not null default 'reseller',   -- admin | master | reseller
+  pode_criar_master boolean not null default false,     -- legado (hoje a criação deriva do papel)
+  criado_por        uuid references public.revendedores(id) on delete set null,
+  saldo_creditos    int not null default 0,
+  ativo             boolean not null default true,
+  codigo_indicacao  text,                              -- código do link de indicação (único)
+  criado_em         timestamptz not null default now()
+);
+alter table public.revendedores add column if not exists codigo_indicacao text;
+create unique index if not exists idx_revendedores_codigo on public.revendedores(codigo_indicacao);
+alter table public.revendedores enable row level security;
+revoke all on public.revendedores from anon, authenticated;
+grant all on public.revendedores to service_role;
+
+-- EXTRATO DE CRÉDITOS (uma linha por movimento). `revendedor_id` = dono do saldo
+-- afetado; `tipo` = adicionado|consumido|transferido_saida|transferido_entrada;
+-- `saldo_apos` = saldo do dono após o movimento; `por` = quem executou; `nota` =
+-- descrição (ex.: "Ativação AA:.. – plano 1 Ano").
+create table if not exists public.creditos_transacoes (
+  id            uuid primary key default gen_random_uuid(),
+  revendedor_id uuid not null references public.revendedores(id) on delete cascade,
+  tipo          text not null,
+  quantidade    int  not null,               -- +entra / -sai (do ponto de vista do dono)
+  saldo_apos    int,
+  por           uuid references public.revendedores(id) on delete set null,
+  nota          text,
+  criado_em     timestamptz not null default now()
+);
+create index if not exists idx_creditos_rev on public.creditos_transacoes(revendedor_id, criado_em desc);
+alter table public.creditos_transacoes enable row level security;
+revoke all on public.creditos_transacoes from anon, authenticated;
+grant all on public.creditos_transacoes to service_role;
+
+-- Liga cliente → revendedor (a coluna já existe; aqui só a FK, idempotente).
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'clientes_revendedor_fk') then
+    alter table public.clientes
+      add constraint clientes_revendedor_fk foreign key (revendedor_id) references public.revendedores(id) on delete set null;
+  end if;
+end $$;
 
 -- Codigos de ativacao do TV (o dev/revendedor gera; o cliente usa em "ativar").
 -- dias = null  -> vitalicio.

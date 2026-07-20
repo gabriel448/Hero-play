@@ -36,13 +36,16 @@ const Lista = (() => {
   }
   const nomeBase = (n) => semTags(n);
   const categoriaBase = (g) => semTags(g);
+  // Nome-base p/ fundir FONTES alternativas: remove os marcadores de backup
+  // (asterisco "*", superscritos ²³, sufixo " BR") — mas MANTÉM o número do canal
+  // (ex.: "SPORTV 2 *" → "SPORTV 2", que agrupa com "SPORTV 2"; antes virava
+  // "SPORTV" e ficava órfão). Também tolera "*" grudado/no meio e múltiplos.
   function nomeFonte(nome) {
-    let s = nomeBase(nome);
-    const ast = s.includes('*');
-    s = s.replace(/\*+/g, '').trim();
-    if (ast) s = s.replace(/\s+\d+$/, '').trim();
-    s = s.replace(_reSobre, '').trim().replace(_reBR, '').trim();
-    return s === '' ? nomeBase(nome) : s;
+    let s = nomeBase(nome).replace(/\*+/g, ' ').replace(_reEsp, ' ').trim(); // tira asteriscos
+    s = s.replace(_reSobre, '').trim();   // superscrito no fim = backup
+    s = s.replace(_reBR, '').trim();      // " BR" no fim = backup
+    s = s.replace(_reBordas, '').trim();
+    return s === '' ? nomeBase(nome).trim() : s;
   }
   function temMarcadorBackup(nome) {
     const b = nomeBase(nome).trim();
@@ -58,8 +61,10 @@ const Lista = (() => {
   // não VOD). Por isso NÃO usamos palavra do group-title aqui: dava falso
   // positivo (Telecine/TC Premium caíam em Filmes).
   function classificarTipo(url) {
-    const u = url.toLowerCase().split('?')[0];
-    if (u.includes('/movie/') || u.includes('/series/')) return 'filme';
+    // Sem split('?') — ele alocava um array por URL (167k vezes no boot).
+    const q = url.indexOf('?');
+    const u = (q === -1 ? url : url.slice(0, q)).toLowerCase();
+    if (u.indexOf('/movie/') !== -1 || u.indexOf('/series/') !== -1) return 'filme';
     for (const e of EXT_FILME) if (u.endsWith(e)) return 'filme';
     return 'live';
   }
@@ -81,19 +86,36 @@ const Lista = (() => {
     while ((m = re.exec(antes))) attrs[m[1].toLowerCase()] = m[2];
     return { nome, logo: attrs['tvg-logo'] || '', grupo: attrs['group-title'] || '', tvgId: attrs['tvg-id'] || '' };
   }
-  function parseM3U(texto) {
-    const linhas = (texto || '').split(/\r?\n/);
+  // Cede o event loop (mantém a UI viva durante o parse de listas gigantes).
+  const _cede = () => new Promise((r) => setTimeout(r, 0));
+
+  async function parseM3U(texto, prog) {
+    // Varre linha a linha SEM split(): num M3U de 46 MB o split alocava um array
+    // com ~330 mil strings de uma vez (pico de memória + tempo). Aqui só existe
+    // uma linha por vez. FATIADO: cede a UI a cada ~12ms e reporta progresso.
+    const s = texto || '';
+    const n = s.length;
     const canais = [];
-    let cur = null;
-    for (const raw of linhas) {
-      const ln = raw.trim();
-      if (!ln || ln.startsWith('#EXTM3U')) continue;
-      if (ln.startsWith('#EXTINF:')) { cur = parseExtinf(ln); continue; }
-      if (ln.startsWith('#')) continue;
-      if (cur) {
-        const grupo = (cur.grupo && cur.grupo.trim()) ? cur.grupo : 'Sem categoria';
-        canais.push({ nome: cur.nome, url: ln, logo: cur.logo, grupo, tvgId: cur.tvgId, tipo: classificarTipo(ln) });
-        cur = null;
+    let cur = null, i = 0, cnt = 0, t0 = Date.now();
+    while (i < n) {
+      let j = s.indexOf('\n', i);
+      if (j === -1) j = n;
+      let fim = j;
+      if (fim > i && s.charCodeAt(fim - 1) === 13) fim--;   // \r\n
+      const ln = s.slice(i, fim).trim();
+      i = j + 1;
+      if (ln && !ln.startsWith('#EXTM3U')) {
+        if (ln.startsWith('#EXTINF:')) cur = parseExtinf(ln);
+        else if (ln.charCodeAt(0) !== 35 && cur) {          // '#'
+          const grupo = (cur.grupo && cur.grupo.trim()) ? cur.grupo : 'Sem categoria';
+          canais.push({ nome: cur.nome, url: ln, logo: cur.logo, grupo, tvgId: cur.tvgId, tipo: classificarTipo(ln) });
+          cur = null;
+        }
+      }
+      // Checa o relógio só a cada 2048 linhas (Date.now() por linha custaria caro).
+      if ((++cnt & 2047) === 0 && Date.now() - t0 > 12) {
+        if (prog) prog(i / n);
+        await _cede(); t0 = Date.now();
       }
     }
     return canais;
@@ -173,19 +195,39 @@ const Lista = (() => {
   }
   const seasonOf = (n) => { const m = n.match(_reEp) || n.match(_reEp2); return m ? (parseInt(m[1]) || 0) : 0; };
   const episodeOf = (n) => { const m = n.match(_reEp) || n.match(_reEp2); return m ? (parseInt(m[2]) || 0) : 0; };
-  function agruparVod(vod) {
+  // Chave de ordenação PRÉ-CALCULADA (minúscula, sem acento). Calcular 1x por item
+  // e comparar com < / > é ordens de grandeza mais rápido que chamar
+  // toLowerCase()+localeCompare() DENTRO do comparador (que roda O(n log n) vezes).
+  const _chaveOrd = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  // Ordena um array por chave pré-calculada (decorate–sort–undecorate).
+  function _ordenarPorChave(arr, chaveDe) {
+    return arr.map((it) => ({ k: chaveDe(it), it }))
+      .sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0))
+      .map((x) => x.it);
+  }
+
+  async function agruparVod(vod, prog) {
     const filmes = [], map = {};
+    const total = vod.length || 1;
+    let cnt = 0, t0 = Date.now();
     for (const c of vod) {
       const nome = nomeSerie(c.nome);
-      if (!nome) { filmes.push(c); continue; }
-      if (!map[nome]) map[nome] = { nome, grupo: c.grupo, logo: '', eps: [] };
-      map[nome].eps.push(c);
-      if (!map[nome].logo && c.logo) map[nome].logo = c.logo;
+      if (!nome) filmes.push(c);
+      else {
+        if (!map[nome]) map[nome] = { nome, grupo: c.grupo, logo: '', eps: [] };
+        map[nome].eps.push(c);
+        if (!map[nome].logo && c.logo) map[nome].logo = c.logo;
+      }
+      if ((++cnt & 2047) === 0 && Date.now() - t0 > 12) {
+        if (prog) prog(cnt / total);
+        await _cede(); t0 = Date.now();
+      }
     }
-    const series = Object.values(map).map((b) => {
-      b.eps.sort((a, z) => { const sa = seasonOf(a.nome), sz = seasonOf(z.nome); return sa !== sz ? sa - sz : episodeOf(a.nome) - episodeOf(z.nome); });
-      return b;
-    }).sort((a, b) => a.nome.localeCompare(b.nome));
+    // ⚠️ NÃO ordenar os episódios aqui: era o maior custo do boot. O comparador
+    // chamava seasonOf()/episodeOf() (regex) A CADA COMPARAÇÃO — ~3 MILHÕES de
+    // execuções com 144k episódios. O app já ordena sob demanda em epsOrdenados()
+    // quando a série é aberta (dezenas de itens = instantâneo).
+    const series = _ordenarPorChave(Object.values(map), (b) => _chaveOrd(b.nome));
     return { filmes, series };
   }
 
@@ -229,18 +271,26 @@ const Lista = (() => {
   // ── Catálogo ──────────────────────────────────────────────────────────────
   // Filmes/Séries: categorias A-Z, com LANÇAMENTOS primeiro (igual ao mobile).
   function trilhosPorGrupo(itens) {
+    // Na TV (pouca RAM) limitamos o DOM: menos itens por trilho e menos trilhos.
+    const tv = (typeof EH_TV !== 'undefined' && EH_TV);
+    const maxItens = tv ? 20 : 40, maxTrilhos = tv ? 40 : 9999;
     const g = {};
     for (const i of itens) { const k = (i.generos && i.generos[0]) || 'Outros'; (g[k] || (g[k] = [])).push(i); }
-    const nomes = Object.keys(g).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    const nomes = _ordenarPorChave(Object.keys(g), _chaveOrd);
     const ordenadas = [...nomes.filter(ehLancamento), ...nomes.filter((n) => !ehLancamento(n))];
-    return ordenadas.map((titulo) => ({
+    return ordenadas.slice(0, maxTrilhos).map((titulo) => ({
       titulo,
-      itens: g[titulo].slice().sort((a, b) => a.titulo.toLowerCase().localeCompare(b.titulo.toLowerCase())).slice(0, 40),
+      // Chave pré-calculada (1x por item) em vez de toLowerCase()+localeCompare()
+      // por comparação — era centenas de milhares de operações lentas no boot.
+      itens: _ordenarPorChave(g[titulo], (it) => _chaveOrd(it.titulo)).slice(0, maxItens),
     }));
   }
 
-  function parse(texto) {
-    const todos = parseM3U(texto);
+  // `prog(pct 0..1, rotulo)` — reporta progresso REAL (o parse é fatiado e cede a
+  // UI), então a tela de carregamento não congela em listas gigantes.
+  async function parse(texto, prog) {
+    const p = (frac, rot) => { if (prog) prog(frac, rot); };
+    const todos = await parseM3U(texto, (f) => p(f * 0.55, 'ler'));   // scan ≈ 55% do custo
     const aoVivoRaw = todos.filter((c) => c.tipo === 'live');
     const vodRaw = todos.filter((c) => c.tipo === 'filme');
 
@@ -259,10 +309,20 @@ const Lista = (() => {
     }
 
     // VOD -> filmes / séries
-    const { filmes: fRaw, series: sRaw } = agruparVod(vodRaw);
+    const { filmes: fRaw, series: sRaw } = await agruparVod(vodRaw, (f) => p(0.55 + f * 0.38, 'agrupar'));
     const filmes = fRaw.map((c, i) => ({ id: 'f' + i, titulo: c.nome, url: c.url, logo: c.logo, generos: [c.grupo || 'Filmes'], ano: '', nota: 0, sinopse: '', tipo: 'filme' }));
     const series = sRaw.map((s, i) => ({ id: 's' + i, titulo: s.nome, url: (s.eps[0] || {}).url, logo: s.logo, generos: [s.grupo || 'Séries'], episodios: s.eps.map((e) => ({ nome: e.nome, url: e.url })), ano: '', nota: 0, sinopse: '', tipo: 'serie' }));
+    p(0.95, 'montar');
+    await _cede();
+    const { catalogo, indice } = montarCatalogo({ canais, filmes, series });
+    p(1, 'pronto');
+    return { canais, filmes, series, catalogo, indice, total: todos.length };
+  }
 
+  // Monta catálogo + índice a partir das listas planas. Exportado porque o CACHE
+  // guarda só {canais, filmes, series} (leve) e reconstrói isto na leitura — é
+  // barato (~25ms num desktop) e evita clonar o grafo de referências.
+  function montarCatalogo({ canais, filmes, series }) {
     const catalogo = {
       inicio: {
         destaque: filmes[0] || series[0] || null,
@@ -275,9 +335,10 @@ const Lista = (() => {
       series: { destaque: series[0] || null, trilhos: trilhosPorGrupo(series) },
     };
     const indice = {};
-    [...filmes, ...series].forEach((i) => { indice[i.id] = i; });
-    return { canais, filmes, series, catalogo, indice, total: todos.length };
+    for (const i of filmes) indice[i.id] = i;
+    for (const i of series) indice[i.id] = i;
+    return { canais, filmes, series, catalogo, indice, total: canais.length + filmes.length + series.length };
   }
 
-  return { parse, parseM3U, detectarQualidade };
+  return { parse, parseM3U, montarCatalogo, detectarQualidade };
 })();

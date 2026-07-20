@@ -49,7 +49,8 @@ const SERIES = [
 function _trilhosPorGenero(itens) {
   const porGenero = {};
   for (const it of itens) {
-    for (const g of it.generos) (porGenero[g] ||= []).push(it);
+    // Sem `||=` (Chromium 85+): webOS 5 = Chromium 68 → seria erro de sintaxe.
+    for (const g of it.generos) { if (!porGenero[g]) porGenero[g] = []; porGenero[g].push(it); }
   }
   return Object.entries(porGenero)
     .filter(([, l]) => l.length >= 3)

@@ -2,9 +2,47 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>Hero Play TV</title>
   <link rel="stylesheet" href="styles.css">
+
+  <!-- DIAGNÓSTICO NA TV: mostra erros REAIS de script direto na tela (o DevTools
+       do webOS 5 não abre no Chrome atual). IGNORA falhas de carregamento de
+       recurso (logo 404, stream indisponível) — são comuns e NÃO são bugs. -->
+  <script>
+    (function () {
+      var erros = [], esconder;
+      function pintar() {
+        var d = document.getElementById('__errbox');
+        if (!d) {
+          d = document.createElement('div');
+          d.id = '__errbox';
+          d.style.cssText = 'position:fixed;left:0;top:0;right:0;z-index:99999;background:#7f1d1d;'
+            + 'color:#fff;font:600 20px/1.45 monospace;padding:22px 26px;white-space:pre-wrap;'
+            + 'max-height:70vh;overflow:auto;border-bottom:4px solid #ef4444';
+          (document.body || document.documentElement).appendChild(d);
+        }
+        d.textContent = 'ERRO(S) NO APP:\n\n' + erros.join('\n\n');
+        // auto-esconde: nunca bloqueia a tela pra sempre.
+        clearTimeout(esconder);
+        esconder = setTimeout(function () { if (d && d.parentNode) d.parentNode.removeChild(d); erros = []; }, 12000);
+      }
+      window.addEventListener('error', function (e) {
+        // Erro de CARREGAMENTO de recurso (img/video/script/link que falha): tem
+        // e.target elemento e SEM mensagem → ignora (não é bug do app).
+        if (e && e.target && e.target !== window && e.target.nodeName) return;
+        if (!e || !e.message) return;
+        erros.push(e.message + '\n  em ' + (e.filename || '?') + ':' + (e.lineno || 0));
+        try { pintar(); } catch (_) {}
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e && e.reason;
+        if (!r) return;
+        erros.push('Promise rejeitada: ' + (r.message ? r.message : String(r)));
+        try { pintar(); } catch (_) {}
+      });
+    })();
+  </script>
 </head>
 <body>
   <!-- Shell: sidebar (nav por D-pad) + area de conteudo -->
@@ -15,6 +53,7 @@
         <img class="logo-mark" src="heroplay-icon.svg" alt="Hero Play">
         <span class="logo-text">Hero<b>Play</b></span>
       </div>
+      <div id="nav-perfil" class="nav-perfil"></div>
       <div id="nav-itens"></div>
       <div class="nav-rodape" id="nav-config"></div>
     </nav>
@@ -25,11 +64,17 @@
 
   <script src="data.js"></script>
   <script src="lista.js"></script>
+  <script src="cache.js"></script>
   <script src="tmdb.js"></script>
+  <script src="perfis.js"></script>
+  <script src="i18n.js"></script>
+  <script src="epg.js"></script>
   <script src="spatial-nav.js"></script>
   <script src="device.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script src="vendor/hls.min.js"></script>
+  <script src="config.js"></script>
+  <script src="jogos.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

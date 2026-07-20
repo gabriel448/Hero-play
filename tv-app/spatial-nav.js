@@ -20,7 +20,7 @@ const SpatialNav = (() => {
     let els = [...(top || document).querySelectorAll('.focusable')];
     // Busca de seção: a sidebar continua navegável (como na busca normal), mesmo
     // sendo um modal — inclui os itens do menu no escopo.
-    if (top && top.classList.contains('busca-secao')) {
+    if (top && (top.classList.contains('busca-secao') || top.classList.contains('addpl'))) {
       const sb = document.getElementById('sidebar');
       if (sb) els = els.concat([...sb.querySelectorAll('.focusable')]);
     }
@@ -40,6 +40,10 @@ const SpatialNav = (() => {
     if (el.closest('.tv-col-dir')) return 'tv-dir';   // TV ao vivo: preview/EPG
     if (el.closest('.bsc-esq')) return 'bsc-kb';      // Busca: teclado on-screen
     if (el.closest('.bsc-dir')) return 'bsc-res';     // Busca: grade de resultados
+    if (el.closest('.cfg-menu')) return 'cfg-menu';   // Config: coluna de menu (esq.)
+    if (el.closest('.jogos-datas')) return 'jg-datas';// Jogos: abas de data (topo)
+    if (el.closest('.jogos-ligas')) return 'jg-ligas';// Jogos: coluna de ligas (esq.)
+    if (el.closest('#jogos-jogos')) return 'jg-jogos';// Jogos: lista de jogos/canais (dir.)
     return 'main';
   };
 
@@ -47,7 +51,8 @@ const SpatialNav = (() => {
 
   function aoMudarFoco(el) {
     const sb = document.getElementById('sidebar');
-    if (sb) sb.classList.toggle('expandida', el.classList.contains('nav-item'));
+    // Expande a sidebar ao focar QUALQUER item dela (menu OU o botão de perfil).
+    if (sb) sb.classList.toggle('expandida', !!(el.closest && el.closest('#sidebar')));
     if (aoFocarCb) { try { aoFocarCb(el); } catch (_) {} }
   }
 
@@ -121,6 +126,16 @@ const SpatialNav = (() => {
   }
 
   function mover(dir) {
+    // Config: da ESQUERDA no painel de detalhe, se NÃO houver vizinho à esquerda
+    // dentro do próprio painel, volta ao item de seção SELECIONADO (não ao vizinho
+    // geométrico) — preserva a seção escolhida. Se houver vizinho no painel (ex.:
+    // toggle + "Definir PIN" na mesma linha), anda normalmente.
+    if (dir === 'left' && atual && atual.closest && atual.closest('.cfg-pane')) {
+      const cand = melhorCandidato('left');
+      if (!(cand && cand.closest && cand.closest('.cfg-pane'))) {
+        if (typeof configVoltarSelecao === 'function' && configVoltarSelecao()) return;
+      }
+    }
     let alvo = melhorCandidato(dir);
     // Ao voltar do conteudo para o menu lateral (seta esquerda), focar SEMPRE a
     // seção ativa — nao o item geometricamente mais proximo.
@@ -148,27 +163,70 @@ const SpatialNav = (() => {
     if (el) setFocus(el);
   }
 
-  // "Voltar": se um modal estiver aberto, fecha-o (via _onVoltar); senao, menu.
+  // "Voltar": sobe UM nível — modal aberto fecha; dentro do conteúdo de uma seção
+  // volta à SELEÇÃO de seção (não à sidebar); na seleção de seção, aí sim vai à
+  // sidebar. Vale p/ Configurações e p/ TV ao vivo (categorias/canais/preview).
   function voltar() {
     const modal = modalTopo();
     if (modal && typeof modal._onVoltar === 'function') { modal._onVoltar(); return; }
+    if (atual && atual.closest) {
+      // Config: dentro do painel → volta ao menu de seções (item selecionado).
+      if (atual.closest('.cfg-pane')) {
+        if (typeof configVoltarSelecao === 'function' && configVoltarSelecao()) return;
+      }
+      // TV ao vivo: preview/EPG → lista de canais (canal selecionado).
+      if (atual.closest('.tv-col-dir')) {
+        const pane = document.getElementById('tv-pane-canais');
+        const canal = pane && (pane.querySelector('.tv-canal-main.sel') || pane.querySelector('.tv-canal-main'));
+        if (canal) { setFocus(canal); return; }
+      }
+      // TV ao vivo: lista de canais → categorias (categoria selecionada).
+      if (atual.closest('.tv-pane-canais')) {
+        if (typeof mostrarCategorias === 'function') { mostrarCategorias(); return; }
+      }
+    }
     focarMenu();
   }
 
+  // Limite de velocidade da troca de foco: segurando o D-pad, o firmware repete o
+  // keydown muito rápido — sem limite o foco "voa", os banners não carregam e o
+  // hero de destaque trava. Limitamos a ~1 troca a cada MOVER_MIN_MS (contínuo,
+  // porém devagar o bastante p/ carregar). A 1ª pressão (após pausa) passa direto.
+  let _ultimoMover = 0;
+  const MOVER_MIN_MS = 150;
+  function moverThrottle(dir) {
+    const agora = Date.now();
+    if (agora - _ultimoMover < MOVER_MIN_MS) return;   // engole a repetição rápida
+    _ultimoMover = agora;
+    mover(dir);
+  }
+
   window.addEventListener('keydown', (e) => {
+    // Campo de texto focado (teclado NATIVO da TV ativo): não sequestrar o
+    // Backspace nem o Enter — deixar o input APAGAR/confirmar. Só o Back do
+    // controle sai do campo.
+    const foco = document.activeElement;
+    const emTexto = foco && (foco.tagName === 'INPUT' || foco.tagName === 'TEXTAREA');
+    // Botão VOLTAR do controle: webOS = keyCode 461, Tizen = 10009. Dependendo do
+    // firmware vem como e.key 'Back'/'BrowserBack'/'XF86Back'/'GoBack' — ou, no
+    // navegador/teclado, 'Backspace' (mas Backspace NUM CAMPO = apagar, não voltar).
+    if (e.keyCode === 461 || e.keyCode === 10009 ||
+        e.key === 'Back' || e.key === 'BrowserBack' || e.key === 'XF86Back' || e.key === 'GoBack' ||
+        (e.key === 'Backspace' && !emTexto)) {
+      e.preventDefault(); voltar(); return;
+    }
+    if (emTexto && (e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter')) return; // deixa o input tratar
     switch (e.key) {
-      case 'ArrowRight': e.preventDefault(); mover('right'); break;
-      case 'ArrowLeft':  e.preventDefault(); mover('left'); break;
-      case 'ArrowDown':  e.preventDefault(); mover('down'); break;
-      case 'ArrowUp':    e.preventDefault(); mover('up'); break;
-      case 'Enter':      e.preventDefault(); ativar(); break;
-      // Voltar do controle: webOS=461 / Tizen=10009 chegam como 'Backspace' aqui
-      case 'Backspace':  e.preventDefault(); voltar(); break;
+      case 'ArrowRight': e.preventDefault(); moverThrottle('right'); break;
+      case 'ArrowLeft':  e.preventDefault(); moverThrottle('left'); break;
+      case 'ArrowDown':  e.preventDefault(); moverThrottle('down'); break;
+      case 'ArrowUp':    e.preventDefault(); moverThrottle('up'); break;
+      case 'Enter':      e.preventDefault(); if (!e.repeat) ativar(); break;
     }
   });
 
   return {
-    setFocus, focarPrimeiro, focarMenu, refresh: () => atual,
+    setFocus, focarPrimeiro, focarMenu, voltar, refresh: () => atual,
     aoFocar: (fn) => { aoFocarCb = fn; },
     get atual() { return atual; },
   };

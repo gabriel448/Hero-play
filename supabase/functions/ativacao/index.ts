@@ -2,10 +2,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 // ============================================================================
 // Edge Function `ativacao` — backend do APP DE TV (device por MAC + Key).
-// Sem login: o app fala só com esta função (service role). A URL/EPG da playlist
-// são CIFRADOS (AES-256-CBC) antes de gravar. RLS bloqueia anon/authenticated.
-//   GET  ?mac=&key=                      -> { status, lista_url, epg_url, trial_expira_em, expira_em }
-//   POST { acao:'adicionar', mac,key,lista_url,epg_url?,modelo? } -> { ok, status, trial_expira_em }
+// Modelo reseller-ready: revendedor → cliente → dispositivo → playlist (a playlist
+// é do CLIENTE e vinculada a dispositivos via `dispositivo_playlists`). No self-serve
+// a função cria um cliente automático p/ o device. URL/EPG CIFRADOS (AES-256-CBC).
+//   GET  ?mac=&key=                      -> { status, lista_url, epg_url, trial_expira_em, expira_em }  (lista SELECIONADA)
+//   POST { acao:'adicionar', mac,key,lista_url,epg_url?,nome?,modelo? } -> { ok, status, trial_expira_em }
+//   POST { acao:'listar', mac,key }      -> { status, playlists:[{id,nome,tipo,selecionada}] }
+//   POST { acao:'selecionar', mac,key,id } -> { ok }   (define a playlist ativa do device)
+//   POST { acao:'excluir', mac,key,id }  -> { ok }   (tira o vínculo; apaga a playlist se ficar órfã)
 //   POST { acao:'ativar', mac, codigo }  -> { ok, status:'ativo', expira_em }
 // ⚠️ Reuso temporário do projeto atual — migrar p/ projeto próprio no painel.
 // ============================================================================
@@ -87,18 +91,27 @@ Deno.serve(async (req: Request) => {
       const key = (u.searchParams.get('key') || '').trim()
       if (!mac) return erro('mac obrigatorio')
 
-      const { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
-      if (!d) return json({ status: 'sem_lista', lista_url: '', epg_url: '' })
+      let { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
+      if (!d) {
+        // 1º contato: REGISTRA o device (sem cliente/lista) p/ ficar "claimable" no
+        // painel — o revendedor reivindica pela Key antes mesmo de ter lista (GTV).
+        if (!key) return json({ status: 'sem_lista', lista_url: '', epg_url: '' })
+        const ins = await sb.from('dispositivos').insert({ mac, device_key: key, status: 'sem_lista' }).select().single()
+        if (ins.error) return json({ status: 'sem_lista', lista_url: '', epg_url: '' })
+        d = ins.data
+      }
       if (key && d.device_key !== key) return erro('key invalida', 403)
 
-      const { data: pl } = await sb.from('playlists').select('*')
-        .eq('dispositivo_id', d.id).eq('selecionada', true)
-        .order('atualizado_em', { ascending: false }).maybeSingle()
-
+      // playlist ATIVA naquele device (via junção dispositivo_playlists)
+      const { data: dp } = await sb.from('dispositivo_playlists').select('playlist_id')
+        .eq('dispositivo_id', d.id).eq('selecionada', true).limit(1).maybeSingle()
       let lista_url = '', epg_url = ''
-      if (pl) {
-        try { lista_url = await decifrar(pl.url_cifrada) } catch { /* ignore */ }
-        if (pl.epg_cifrada) { try { epg_url = await decifrar(pl.epg_cifrada) } catch { /* ignore */ } }
+      if (dp?.playlist_id) {
+        const { data: pl } = await sb.from('playlists').select('url_cifrada, epg_cifrada').eq('id', dp.playlist_id).maybeSingle()
+        if (pl) {
+          try { lista_url = await decifrar(pl.url_cifrada) } catch { /* ignore */ }
+          if (pl.epg_cifrada) { try { epg_url = await decifrar(pl.epg_cifrada) } catch { /* ignore */ } }
+        }
       }
       return json({ status: statusAtual(d), lista_url, epg_url, trial_expira_em: d.trial_expira_em, expira_em: d.expira_em })
     }
@@ -129,16 +142,27 @@ Deno.serve(async (req: Request) => {
         d = ins.data
       }
 
+      // Garante um CLIENTE p/ o device (self-serve cria automático).
+      let cliente_id = d.cliente_id
+      if (!cliente_id) {
+        const insC = await sb.from('clientes').insert({ nome: 'Cliente ' + mac }).select('id').single()
+        if (insC.error) throw insC.error
+        cliente_id = insC.data.id
+        await sb.from('dispositivos').update({ cliente_id }).eq('id', d.id)
+      }
+
+      const nome = (body.nome || '').trim() || 'Minha lista'
       const url_cifrada = await cifrar(lista_url)
       const epg_cifrada = epg_url ? await cifrar(epg_url) : null
       const tipo = ehXtream(lista_url) ? 'xtream' : 'm3u'
 
-      // MVP: 1 lista selecionada por device — substitui a anterior.
-      await sb.from('playlists').delete().eq('dispositivo_id', d.id)
-      const insP = await sb.from('playlists').insert({
-        dispositivo_id: d.id, nome: 'Minha lista', tipo, url_cifrada, epg_cifrada, selecionada: true,
-      })
+      // Cria a playlist no cliente e vincula ao device como SELECIONADA (desmarca
+      // as outras do device). NÃO apaga as anteriores — agora são múltiplas.
+      const insP = await sb.from('playlists').insert({ cliente_id, nome, tipo, url_cifrada, epg_cifrada }).select('id').single()
       if (insP.error) throw insP.error
+      await sb.from('dispositivo_playlists').update({ selecionada: false }).eq('dispositivo_id', d.id)
+      const insDP = await sb.from('dispositivo_playlists').insert({ dispositivo_id: d.id, playlist_id: insP.data.id, selecionada: true })
+      if (insDP.error) throw insDP.error
 
       let status = statusAtual(d)
       if (status === 'sem_lista') {
@@ -147,6 +171,75 @@ Deno.serve(async (req: Request) => {
         status = 'trial'; d.trial_expira_em = trial
       }
       return json({ ok: true, status, trial_expira_em: d.trial_expira_em })
+    }
+
+    // ── POST listar: playlists vinculadas ao device (na ordem de criação) ─────
+    if (acao === 'listar') {
+      const mac = (body.mac || '').trim()
+      const key = (body.key || '').trim()
+      if (!mac) return erro('mac obrigatorio')
+      const { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
+      if (!d) return json({ status: 'sem_lista', playlists: [] })
+      if (key && d.device_key !== key) return erro('key invalida', 403)
+
+      const { data: vinc } = await sb.from('dispositivo_playlists')
+        .select('playlist_id, selecionada, criado_em').eq('dispositivo_id', d.id)
+        .order('criado_em', { ascending: true })
+      // deno-lint-ignore no-explicit-any
+      const ids = (vinc || []).map((v: any) => v.playlist_id)
+      let pls: Record<string, unknown>[] = []
+      if (ids.length) {
+        const { data } = await sb.from('playlists').select('id, nome, tipo').in('id', ids)
+        pls = data || []
+      }
+      // deno-lint-ignore no-explicit-any
+      const playlists = (vinc || []).map((v: any) => {
+        const p = pls.find((x) => x.id === v.playlist_id) || {}
+        return { id: v.playlist_id, nome: p.nome ?? null, tipo: p.tipo ?? null, selecionada: v.selecionada }
+      })
+      return json({ status: statusAtual(d), playlists })
+    }
+
+    // ── POST selecionar: define a playlist ATIVA do device ────────────────────
+    if (acao === 'selecionar') {
+      const mac = (body.mac || '').trim()
+      const key = (body.key || '').trim()
+      const id = (body.id || '').trim()
+      if (!mac || !id) return erro('mac e id obrigatorios')
+      const { data: d } = await sb.from('dispositivos').select('id, device_key').eq('mac', mac).maybeSingle()
+      if (!d) return erro('dispositivo nao encontrado', 404)
+      if (key && d.device_key !== key) return erro('key invalida', 403)
+      await sb.from('dispositivo_playlists').update({ selecionada: false }).eq('dispositivo_id', d.id)
+      const up = await sb.from('dispositivo_playlists').update({ selecionada: true }).eq('dispositivo_id', d.id).eq('playlist_id', id)
+      if (up.error) throw up.error
+      return json({ ok: true })
+    }
+
+    // ── POST excluir: tira o vínculo do device; apaga a playlist se ficar órfã ─
+    if (acao === 'excluir') {
+      const mac = (body.mac || '').trim()
+      const key = (body.key || '').trim()
+      const id = (body.id || '').trim()
+      if (!mac || !id) return erro('mac e id obrigatorios')
+      const { data: d } = await sb.from('dispositivos').select('id, device_key').eq('mac', mac).maybeSingle()
+      if (!d) return erro('dispositivo nao encontrado', 404)
+      if (key && d.device_key !== key) return erro('key invalida', 403)
+
+      const { data: vinc } = await sb.from('dispositivo_playlists').select('selecionada')
+        .eq('dispositivo_id', d.id).eq('playlist_id', id).maybeSingle()
+      await sb.from('dispositivo_playlists').delete().eq('dispositivo_id', d.id).eq('playlist_id', id)
+
+      // órfã (sem nenhum outro device) → apaga a playlist do Supabase
+      const { count } = await sb.from('dispositivo_playlists').select('*', { count: 'exact', head: true }).eq('playlist_id', id)
+      if (!count) await sb.from('playlists').delete().eq('id', id)
+
+      // se era a ativa e ainda há outras no device, ativa a 1ª
+      if (vinc?.selecionada) {
+        const { data: rest } = await sb.from('dispositivo_playlists').select('playlist_id')
+          .eq('dispositivo_id', d.id).order('criado_em', { ascending: true }).limit(1).maybeSingle()
+        if (rest?.playlist_id) await sb.from('dispositivo_playlists').update({ selecionada: true }).eq('dispositivo_id', d.id).eq('playlist_id', rest.playlist_id)
+      }
+      return json({ ok: true })
     }
 
     // ── POST ativar: valida codigo e ativa o device ──────────────────────────

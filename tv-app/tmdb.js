@@ -14,6 +14,8 @@ const TMDB = (() => {
 
   const _cacheInfo = {};
   const _cachePoster = {};
+  // Marca que há metadado novo ainda não persistido (ver exportarCache/CacheLista).
+  let _sujo = false;
 
   function prepararQuery(nome) {
     return (nome || '')
@@ -125,23 +127,45 @@ const TMDB = (() => {
         // referência/tradução (ex.: anime que na lista vem em inglês/japonês).
         nome: (item.name || item.title || '').trim(),
         original: (item.original_name || item.original_title || '').trim(),
+        // Gêneros do TMDB (IDs canônicos) — usados como "tags" p/ recomendação por perfil.
+        genero_ids: Array.isArray(item.genre_ids) ? item.genre_ids.slice() : [],
       };
     }
     _cacheInfo[chave] = out;
+    _sujo = true;
     return out;
   }
 
   // Só o poster (trilhos de série, que não têm logo na lista). Igual ao mobile
   // (posterSerie): busca em EN-US — nomes de série em listas costumam ser em
   // inglês, casa melhor — TV primeiro, depois movie (cobre anime/OVA).
-  async function poster(nome) {
-    if (nome in _cachePoster) return _cachePoster[nome];
-    const query = prepararQuery(nome);
-    const item = (await buscar('/3/search/tv', query, true, 'en-US'))
-      || (await buscar('/3/search/movie', query, false, 'en-US'));
-    const url = item ? poster500(item.poster_path) : '';
-    _cachePoster[nome] = url;
-    return url;
+  // Busca que PROPAGA falha de rede/rate-limit (get lança em !ok) mas retorna null
+  // em resultado vazio — p/ o poster() distinguir "TMDB não tem" de "falhou".
+  async function buscarStrict(endpoint, query, ehTv, idioma) {
+    let it = escolher((await get(endpoint, { query, language: idioma || IDIOMA, include_adult: 'false' })).results, query, ehTv);
+    if (it) return it;
+    const r = reduzir(query);
+    if (r) it = escolher((await get(endpoint, { query: r, language: idioma || IDIOMA, include_adult: 'false' })).results, r, ehTv);
+    return it;
+  }
+  const _inflightPoster = {};   // dedupe: 1 requisição por título mesmo com N pedidos simultâneos
+  function poster(nome) {
+    if (nome in _cachePoster) return Promise.resolve(_cachePoster[nome]);
+    if (_inflightPoster[nome]) return _inflightPoster[nome];
+    const p = (async () => {
+      const query = prepararQuery(nome);
+      let url = '', falhou = false;
+      try {
+        const item = (await buscarStrict('/3/search/tv', query, true, 'en-US'))
+          || (await buscarStrict('/3/search/movie', query, false, 'en-US'));
+        url = item ? poster500(item.poster_path) : '';
+      } catch (_) { falhou = true; }   // rede/rate-limit → NÃO cacheia (permite retry)
+      if (!falhou) { _cachePoster[nome] = url; _sujo = true; }
+      delete _inflightPoster[nome];
+      return url;
+    })();
+    _inflightPoster[nome] = p;
+    return p;
   }
 
   // Logo-título (PNG transparente, estilo Netflix). Prefere pt, depois en, depois
@@ -160,6 +184,7 @@ const TMDB = (() => {
       if (pick) url = IMG + 'w500' + pick.file_path;
     } catch (_) { /* ignore */ }
     _cacheLogo[k] = url;
+    _sujo = true;
     return url;
   }
 
@@ -223,5 +248,36 @@ const TMDB = (() => {
   const posterCache = (nome) => (nome in _cachePoster ? _cachePoster[nome] : null);
   const temporadaCache = (id, s) => _cacheTemp[id + '|' + s] || null; // já pré-carregada?
 
-  return { info, poster, elenco, tituloLogo, creditos, recomendados, temporada, infoCache, logoCache, posterCache, temporadaCache };
+  // ── Persistência dos metadados (IndexedDB, via CacheLista) ─────────────────
+  // Sem isto os caches acima são só de memória: a cada boot o app re-pergunta o
+  // pôster de CADA título ao TMDB. Guardamos os mais RECENTES (as chaves de
+  // objeto preservam ordem de inserção) para o dump não crescer sem limite.
+  const LIM_INFO = 4000, LIM_POSTER = 40000, LIM_LOGO = 8000;
+  function _ultimos(o, n) {
+    const ks = Object.keys(o);
+    if (ks.length <= n) return o;
+    const out = {};
+    for (const k of ks.slice(ks.length - n)) out[k] = o[k];
+    return out;
+  }
+  function exportarCache() {
+    return {
+      v: 1,
+      info: _ultimos(_cacheInfo, LIM_INFO),
+      poster: _ultimos(_cachePoster, LIM_POSTER),
+      logo: _ultimos(_cacheLogo, LIM_LOGO),
+    };
+  }
+  function importarCache(d) {
+    if (!d || d.v !== 1) return 0;
+    // Assign: o que já foi buscado nesta sessão é mais novo — não sobrescreve.
+    for (const k in (d.info || {})) if (!(k in _cacheInfo)) _cacheInfo[k] = d.info[k];
+    for (const k in (d.poster || {})) if (!(k in _cachePoster)) _cachePoster[k] = d.poster[k];
+    for (const k in (d.logo || {})) if (!(k in _cacheLogo)) _cacheLogo[k] = d.logo[k];
+    return Object.keys(d.poster || {}).length;
+  }
+  const estaSujo = () => _sujo;
+  const limparSujo = () => { _sujo = false; };
+
+  return { info, poster, elenco, tituloLogo, creditos, recomendados, temporada, infoCache, logoCache, posterCache, temporadaCache, exportarCache, importarCache, estaSujo, limparSujo };
 })();

@@ -25,7 +25,7 @@ const MENU = [
   { id: 'series', rotulo: 'Séries', ico: 'serie' },
   { id: 'playlists', rotulo: 'Playlists', ico: 'playlist' },
   { id: 'buscar', rotulo: 'Buscar', ico: 'busca' },
-  { id: 'jogos', rotulo: 'Jogos do dia', ico: 'jogos' },
+  { id: 'jogos', rotulo: 'Futebol', ico: 'jogos' },
 ];
 
 // Catálogo ATIVO: stub (data.js) por padrão; substituído pela lista REAL do
@@ -52,7 +52,9 @@ const escapar = (s) => s.replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const iniciais = (nome) => {
   const p = nome.trim().split(/\s+/);
-  return ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || nome.slice(0, 2).toUpperCase();
+  // Sem optional chaining (?.): webOS 5 = Chromium 68, onde `?.` é ERRO DE SINTAXE
+  // e derruba o arquivo inteiro. Mesma regra p/ `??` e `||=`.
+  return (((p[0] && p[0][0]) || '') + ((p[1] && p[1][0]) || '')).toUpperCase() || nome.slice(0, 2).toUpperCase();
 };
 const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 
@@ -70,7 +72,7 @@ function posterHTML(item) {
          onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="this.remove()">`
     : '';
   return `<div class="poster focusable" data-id="${item.id}"${lazy}>
-    <div class="poster-arte" style="background:${gradiente(item.titulo)}">
+    <div class="poster-arte">
       ${img}<span>${escapar(item.titulo)}</span>
     </div>
   </div>`;
@@ -82,6 +84,87 @@ function trilhoHTML(t) {
     <h2 class="trilho-titulo">${escapar(t.titulo)}</h2>
     <div class="trilho-fila">${t.itens.map(posterHTML).join('')}</div>
   </section>`;
+}
+
+// Pôster com barra de progresso (trilho "Continuar assistindo").
+function posterContHTML(item, prog) {
+  const ehSerie = item.tipo === 'serie';
+  const usarLogo = !!item.logo && !ehSerie;
+  const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}"` : '';
+  const img = usarLogo
+    ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" loading="lazy" onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="this.remove()">`
+    : '';
+  const pct = Math.round(Math.max(0, Math.min(1, prog || 0)) * 100);
+  return `<div class="poster focusable" data-id="${item.id}"${lazy}>
+    <div class="poster-arte">
+      ${img}<span>${escapar(item.titulo)}</span>
+      <div class="poster-prog"><span style="width:${pct}%"></span></div>
+    </div>
+  </div>`;
+}
+function trilhoContinuarHTML(entries) {
+  const posters = entries.map((e) => { const it = LISTA.indice[e.id]; return it ? posterContHTML(it, e.dur ? e.pos / e.dur : 0) : ''; }).filter(Boolean).join('');
+  return posters ? `<section class="trilho"><h2 class="trilho-titulo">${escapar(t('Continuar assistindo'))}</h2><div class="trilho-fila">${posters}</div></section>` : '';
+}
+// Prepende "Continuar assistindo" + "Recomendações pra você" no topo do Início (por perfil).
+function injetarTrilhosPerfil(main) {
+  const trilhos = main.querySelector('.trilhos'); if (!trilhos) return;
+  const rec = Biblioteca.recomendacoes(18);
+  const extra = trilhoContinuarHTML(Biblioteca.continuarAssistindo())
+    + (rec.length ? trilhoHTML({ titulo: t('Recomendações pra você'), itens: rec }) : '');
+  if (!extra) return;
+  // Marca como trilhos DO PERFIL (.trilho-perfil) p/ trocar só eles ao mudar de
+  // perfil, sem reconstruir o catálogo (que é o mesmo p/ todos). Insere na ordem.
+  const tmp = document.createElement('div'); tmp.innerHTML = extra;
+  const frag = document.createDocumentFragment();
+  [...tmp.children].forEach((s) => { s.classList.add('trilho-perfil'); frag.appendChild(s); });
+  trilhos.insertBefore(frag, trilhos.firstChild);
+}
+
+// Troca de perfil: substitui SÓ os trilhos do perfil (Continuar + Recomendações)
+// no Início já renderizado — sem recriar os pôsteres do catálogo nem re-decodar
+// as imagens compartilhadas. Observa apenas os pôsteres novos.
+function atualizarTrilhosPerfil(main) {
+  const trilhos = main && main.querySelector('.trilhos'); if (!trilhos) return;
+  trilhos.querySelectorAll('.trilho-perfil').forEach((s) => {
+    s.querySelectorAll('.poster[data-tmdb]').forEach((p) => { if (_obsPoster) _obsPoster.unobserve(p); });
+    s.remove();
+  });
+  injetarTrilhosPerfil(main);
+  if (_obsPoster) trilhos.querySelectorAll('.trilho-perfil .poster[data-tmdb]').forEach((p) => _obsPoster.observe(p));
+}
+
+// "Minha Lista" no TOPO das seções Filmes/Séries (separada por tipo, por perfil).
+function injetarMinhaLista(main, secaoId) {
+  const trilhos = main && main.querySelector('.trilhos'); if (!trilhos) return;
+  const tipo = secaoId === 'filmes' ? 'filme' : 'serie';
+  const itens = Biblioteca.minhaLista(tipo).map((e) => LISTA.indice[e.id]).filter(Boolean);
+  if (!itens.length) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = trilhoHTML({ titulo: t('Minha Lista'), itens });
+  const sec = tmp.firstElementChild; if (!sec) return;
+  sec.classList.add('trilho-minha-lista');
+  trilhos.insertBefore(sec, trilhos.firstChild);
+}
+// Atualiza o trilho "Minha Lista" da seção do TIPO ('filme'/'serie') no DOM
+// cacheado (esteja visível ou não) — mantém o cache consistente após adicionar/
+// remover no detalhe, sem reconstruir o catálogo.
+function atualizarMinhaLista(tipo) {
+  const secaoId = tipo === 'serie' ? 'series' : 'filmes';
+  let node = _secCacheGet(secaoId);
+  if (!node) {   // sem cache (TV): atualiza a seção VISÍVEL, se for a desse tipo
+    const ativo = document.querySelector('.nav-item.ativo');
+    if (ativo && ativo.dataset.secao === secaoId) node = document.getElementById('conteudo').firstElementChild;
+  }
+  const trilhos = node && node.querySelector('.trilhos'); if (!trilhos) return;
+  trilhos.querySelectorAll('.trilho-minha-lista').forEach((s) => {
+    s.querySelectorAll('.poster[data-tmdb]').forEach((p) => { if (_obsPoster) _obsPoster.unobserve(p); });
+    s.remove();
+  });
+  injetarMinhaLista(node, secaoId);
+  // Só observa (carrega banners) se a seção está visível agora; senão, o navegar
+  // futuro re-observa via ligarPostersSerie.
+  if (node.isConnected && _obsPoster) trilhos.querySelectorAll('.trilho-minha-lista .poster[data-tmdb]').forEach((p) => _obsPoster.observe(p));
 }
 
 // ── Render: hero (destaque) ─────────────────────────────────────────────────
@@ -99,10 +182,10 @@ function heroHTML(item) {
       <p class="hero-sinopse">${escapar(item.sinopse)}</p>
       <div class="hero-acoes">
         <button class="btn btn-primario focusable" data-id="${item.id}" data-acao="assistir">
-          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Assistir
+          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> ${escapar(t('Assistir'))}
         </button>
         <button class="btn btn-secundario focusable" data-acao="lista">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg> Minha Lista
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg> ${escapar(t('Minha Lista'))}
         </button>
       </div>
     </div>
@@ -125,24 +208,52 @@ function heroFixoHTML() {
     </div>
   </div>`;
 }
+const TV_TRILHOS_INICIAL = 8;   // TV: render inicial LEVE; o resto entra em chunks
 function renderMidia(cfg, secaoId) {
   if (!cfg.trilhos.length) {
-    return `<div class="secao">${renderPlaceholder('Nada por aqui', 'Sua lista não tem itens nesta seção.')}</div>`;
+    return `<div class="secao">${renderPlaceholder(t('Nada por aqui'), t('Sua lista não tem itens nesta seção.'))}</div>`;
   }
   // Botão de busca da seção (só Filmes/Séries) — canto superior direito.
   const btnBusca = (secaoId === 'filmes' || secaoId === 'series')
-    ? `<button class="midia-busca focusable" data-acao="busca-secao" data-escopo="${secaoId}" aria-label="Buscar nesta seção">${IC_BUSCA_LUPA}</button>`
+    ? `<button class="midia-busca focusable" data-acao="busca-secao" data-escopo="${secaoId}" aria-label="${escapar(t('Buscar'))}">${IC_BUSCA_LUPA}</button>`
     : '';
+  // TV: só os primeiros trilhos AGORA (evita travar a UI parseando centenas de
+  // pôsteres de uma vez). O restante é anexado em chunks (anexarTrilhosRestantes).
+  const trilhosIni = EH_TV ? cfg.trilhos.slice(0, TV_TRILHOS_INICIAL) : cfg.trilhos;
   return `<div class="midia">
     ${heroFixoHTML()}
-    <div class="trilhos">${cfg.trilhos.map(trilhoHTML).join('')}</div>
+    <div class="trilhos">${trilhosIni.map(trilhoHTML).join('')}</div>
     ${btnBusca}
   </div>`;
 }
 
+// TV: anexa os trilhos restantes em pequenos chunks (requestAnimationFrame) pra a
+// UI não congelar. Cancelável por token (ao navegar de novo) e por node desanexado.
+let _tokenTrilhos = 0;
+function anexarTrilhosRestantes(node, cfg) {
+  if (!EH_TV || !node || !cfg || cfg.trilhos.length <= TV_TRILHOS_INICIAL) return;
+  const cont = node.querySelector('.trilhos'); if (!cont) return;
+  const resto = cfg.trilhos.slice(TV_TRILHOS_INICIAL);
+  const meu = ++_tokenTrilhos;
+  let i = 0;
+  function chunk() {
+    if (meu !== _tokenTrilhos || !cont.isConnected) return;
+    const antes = cont.children.length;
+    let html = '';
+    for (let n = 0; n < 3 && i < resto.length; n++, i++) html += trilhoHTML(resto[i]);
+    cont.insertAdjacentHTML('beforeend', html);
+    // observa SÓ os pôsteres dos trilhos recém-adicionados (via observer existente)
+    if (_obsPoster) for (let k = antes; k < cont.children.length; k++) {
+      cont.children[k].querySelectorAll('.poster[data-tmdb]').forEach((p) => _obsPoster.observe(p));
+    }
+    if (i < resto.length) requestAnimationFrame(chunk);
+  }
+  requestAnimationFrame(chunk);   // começa DEPOIS do ligarPostersSerie do navegar
+}
+
 // ── Hero dinâmico (reflete o item em foco; metadados via TMDB) ───────────────
 let _heroItem = null, _heroToken = 0, _heroTimer = null, _heroBgAtivo = 'A';
-let _heroPendente = null, _heroDebounce = null;
+let _heroPendente = null, _heroDebounce = null, _heroUltimoAplicado = 0;
 const HERO_DELAY = 320; // só troca o hero após o foco ficar parado > ~0,3s
 
 function notaHero(item, inf) {
@@ -221,16 +332,20 @@ function atualizarHero(item) {
   // 1ª vez na seção (hero ainda vazio) → preenche já, sem esperar.
   if (_heroItem === null) {
     clearTimeout(_heroDebounce); _heroDebounce = null; _heroPendente = null;
-    aplicarHero(item);
+    aplicarHero(item); _heroUltimoAplicado = Date.now();
     return;
   }
   _heroPendente = item;
   clearTimeout(_heroDebounce);
+  // Debounce normal ao rolar; mas se faz muito tempo desde a última troca (D-pad
+  // SEGURADO, foco andando sem parar) aplica quase já — assim o hero ACOMPANHA
+  // devagar em vez de ficar preso na seleção anterior até soltar o botão.
+  const espera = (Date.now() - _heroUltimoAplicado > 550) ? 40 : HERO_DELAY;
   _heroDebounce = setTimeout(() => {
     _heroDebounce = null;
     const alvo = _heroPendente; _heroPendente = null;
-    if (alvo) aplicarHero(alvo); // aplicarHero ignora se já for o item exibido
-  }, HERO_DELAY);
+    if (alvo) { aplicarHero(alvo); _heroUltimoAplicado = Date.now(); } // aplicarHero ignora se já for o exibido
+  }, espera);
 }
 
 // Aplica de fato o hero do item (texto/meta + backdrop/logo via TMDB), com a
@@ -247,8 +362,8 @@ function aplicarHero(item) {
   if (logoEl) { logoEl.style.display = 'none'; logoEl.removeAttribute('src'); }
   titulo.style.display = '';
   titulo.textContent = item.titulo;
-  document.getElementById('hero2-meta').innerHTML = notaHero(item, null);
-  document.getElementById('hero2-sinopse').textContent = item.sinopse || '';
+  const meta = document.getElementById('hero2-meta'); if (meta) meta.innerHTML = notaHero(item, null);
+  const sinE = document.getElementById('hero2-sinopse'); if (sinE) sinE.textContent = item.sinopse || '';
   const info = document.getElementById('hero2-info');
   if (info) { info.classList.remove('hero-anim'); void info.offsetWidth; info.classList.add('hero-anim'); }
 
@@ -319,12 +434,17 @@ async function _precarregarHero(item) {
 // Executa uma fila de tarefas (funções que retornam Promise) com CONCORRÊNCIA
 // LIMITADA (evita o rate-limit do TMDB que deixava itens sem banner). Resolve
 // quando tudo termina; cancela se `valido()` passar a ser falso.
-function _executarFila(tarefas, conc, valido) {
+function _executarFila(tarefas, conc, valido, pausar) {
   return new Promise((resolve) => {
     let i = 0, ativos = 0, fechado = false;
     const fim = () => { if (!fechado && ativos === 0 && i >= tarefas.length) { fechado = true; resolve(); } };
     (function pump() {
-      if (valido && !valido()) { if (!fechado) { fechado = true; resolve(); } return; }
+      if (fechado) return;
+      if (valido && !valido()) { fechado = true; resolve(); return; }
+      // PAUSA (só background): enquanto uma tela pesada (detalhe/player) está aberta,
+      // NÃO dispara novas tarefas — libera as conexões do browser p/ o foreground.
+      // As já em voo terminam; a fila retoma sozinha quando a tela fecha.
+      if (pausar && pausar()) { setTimeout(pump, 250); return; }
       while (ativos < conc && i < tarefas.length) {
         ativos++;
         Promise.resolve(tarefas[i++]()).catch(() => {}).finally(() => { ativos--; fim(); setTimeout(pump, 30); });
@@ -333,6 +453,9 @@ function _executarFila(tarefas, conc, valido) {
     })();
   });
 }
+// Foreground "ocupado": detalhe/player abertos → o background pausa p/ o TMDB da
+// tela atual carregar na frente.
+const _focoOcupado = () => !!document.querySelector('#detalhe-overlay, .player-modal');
 
 // Pré-carrega o PÔSTER de um item (o que aparece nos trilhos), aquecendo o cache
 // do browser. Filme com logo próprio → aquece a URL da lista; série/filme sem
@@ -342,15 +465,40 @@ function _precarregarPoster(it) {
   return TMDB.poster(it.titulo).then(_aquece);
 }
 
-// Concorrência das filas de preload (equilíbrio: rápido sem estourar o rate-limit
-// do TMDB, que deixava itens sem banner).
-const PRELOAD_CONC = 5;
+// ── MODO TV (webOS/Tizen) — leve p/ pouca RAM ───────────────────────────────
+// Um pôster 500px decodificado custa ~1,5 MB de RAM. Numa lista real (centenas de
+// itens) o predload de TUDO + guardar catálogos em memória estoura e a TV reinicia.
+// Na TV: sem preload do catálogo, imagens VIRTUALIZADAS (descarrega fora da tela),
+// menos concorrência e DOM menor. No desktop, comportamento normal.
+const EH_TV = /web[0o]s|tizen|netcast|smart-?tv/i.test(navigator.userAgent);
+if (EH_TV) { try { document.documentElement.classList.add('tv'); } catch (_) {} }
+// Botão VOLTAR visível (SÓ na TV): em muitas TVs o botão Voltar do controle FECHA
+// o app no nível do sistema (nada em JS impede). Este botão focável garante voltar
+// pelo D-pad em telas que só saíam pelo Voltar. Vai no topo-esquerda do overlay.
+function htmlVoltar() {
+  if (!EH_TV) return '';
+  return '<button class="tela-voltar focusable" data-acao="tela-voltar" aria-label="Voltar">'
+    + '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    + ' ' + escapar(t('Voltar')) + '</button>';
+}
+const PRELOAD_CONC = EH_TV ? 2 : 5;
+const OBS_MARGIN = EH_TV ? '350px' : '1600px';   // TV: carrega pouco à frente
 
 // 1) Pré-carrega (AGUARDANDO, com teto) o HERO dos itens iniciais + os PÔSTERES
 //    do topo de TODAS as seções (filmes E séries) — p/ rolar um pouco já achar
 //    carregado. 2) Quando termina, dispara o RESTO (tudo) em background. O teto
 //    só libera a tela de loading; o preload continua rodando.
 async function precarregarBanners() {
+  if (EH_TV) {
+    // TV: aquece só o hero do 1º item (abre rápido). Pôsteres carregam sob demanda
+    // (lazy) e o catálogo NÃO é pré-carregado — evita estourar a memória.
+    const ini = _itensIniciaisDeExibicao(1);
+    await Promise.race([
+      _executarFila(ini.map((it) => () => _precarregarHero(it)), 1),
+      new Promise((r) => setTimeout(r, 2500)),
+    ]);
+    return;
+  }
   const iniciais = _itensIniciaisDeExibicao(10);     // hero dos 1ºs de cada trilho
   const feitosHero = new Set(iniciais.map((it) => it.id));
   const postersTopo = _itensIniciaisDeExibicao(18);  // pôster dos 1ºs de cada trilho
@@ -363,10 +511,31 @@ async function precarregarBanners() {
   await Promise.race([tudo, new Promise((r) => setTimeout(r, 9000))]); // teto do loading
 }
 
+// Aquece uma imagem RESOLVENDO no load/erro (p/ a fila limitar a concorrência real).
+function _aquecerImg(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve();
+    const im = new Image();
+    im.onload = im.onerror = () => resolve();
+    im.src = url;
+  });
+}
+// Pré-carrega os ÍCONES dos canais ao vivo — 1 por canal AGRUPADO (cada
+// LISTA.canais já é um grupo com um único `logo`). Background, com pausa quando o
+// player está aberto e cancelamento ao trocar de playlist (token).
+let _logosToken = 0;
+function precarregarLogosCanais() {
+  if (EH_TV) return Promise.resolve();   // TV: ícones carregam ao renderizar a lista (lazy)
+  const meu = ++_logosToken;
+  const tarefas = (LISTA.canais || []).filter((c) => c.logo).map((c) => () => _aquecerImg(c.logo));
+  return _executarFila(tarefas, PRELOAD_CONC, () => meu === _logosToken, _focoOcupado);
+}
+
 // Background: PÔSTER de TUDO (filmes + séries) + hero (backdrop/logo) dos demais,
 // com concorrência limitada. Garante que o catálogo inteiro fique pré-carregado.
 let _fundoToken = 0;
 function precarregarFundo(idsHeroFeitos) {
+  if (EH_TV) return Promise.resolve();   // TV: NÃO pré-carrega o catálogo inteiro (memória)
   const meu = ++_fundoToken;
   const feitos = idsHeroFeitos || new Set();
   const todos = [...(LISTA.filmes || []), ...(LISTA.series || [])];
@@ -374,7 +543,7 @@ function precarregarFundo(idsHeroFeitos) {
     ...todos.map((it) => () => _precarregarPoster(it)),                       // pôster de tudo
     ...todos.filter((it) => !feitos.has(it.id)).map((it) => () => _precarregarHero(it)), // hero dos demais
   ];
-  return _executarFila(tarefas, PRELOAD_CONC, () => meu === _fundoToken);
+  return _executarFila(tarefas, PRELOAD_CONC, () => meu === _fundoToken, _focoOcupado);
 }
 
 // Lazy: pôster TMDB ao entrar na viewport (com margem grande p/ carregar bem
@@ -384,27 +553,58 @@ let _obsPoster = null;
 function ligarPostersSerie(raiz) {
   if (!('IntersectionObserver' in window)) return;
   if (_obsPoster) _obsPoster.disconnect();
+  const MAX_TENT = 3;   // desiste após 3 falhas → fica só o fallback (preto + logo)
   const aplicar = (el, url) => {
     const arte = el.querySelector('.poster-arte');
     // já tem imagem OU já está carregando (re-observado num diff) → não duplica.
     if (!arte || arte.classList.contains('tem-img') || arte.dataset.carregando) return;
-    if (!url) return;   // sem pôster no TMDB → mantém o nome no gradiente
+    if (!url) return;   // sem pôster no TMDB → fica o fallback
     arte.dataset.carregando = '1';
     const img = new Image();
     img.className = 'poster-img';
     img.onload = () => { arte.classList.add('tem-img'); arte.appendChild(img); };
-    img.onerror = () => { delete arte.dataset.carregando; };
+    img.onerror = () => { delete arte.dataset.carregando; el.dataset.tent = (+(el.dataset.tent || 0)) + 1; };
     img.src = url;
+  };
+  const descarregar = (el) => {
+    const arte = el.querySelector('.poster-arte');
+    if (!arte) return;
+    const img = arte.querySelector('img.poster-img');
+    if (img) { img.onload = img.onerror = null; img.src = ''; img.remove(); }
+    arte.classList.remove('tem-img'); delete arte.dataset.carregando;
+  };
+  // TV: antes descarregávamos a imagem assim que ela saía da margem — o que fazia
+  // o pôster RECARREGAR ao voltar no carrossel (o cache de disco da TV é fraco).
+  // Agora mantemos as últimas N em memória e só descarregamos a mais ANTIGA
+  // quando passa do orçamento: ir e voltar não recarrega nada, e a RAM fica presa.
+  const LIMITE_VIVAS = 60;
+  const _vivas = [];                    // ordem de uso — o fim é o mais recente
+  const tocar = (el) => {
+    const i = _vivas.indexOf(el);
+    if (i >= 0) _vivas.splice(i, 1);
+    _vivas.push(el);
+    while (_vivas.length > LIMITE_VIVAS) descarregar(_vivas.shift());
   };
   _obsPoster = new IntersectionObserver((ents) => {
     for (const e of ents) {
-      if (!e.isIntersecting) continue;
-      const el = e.target; _obsPoster.unobserve(el);
+      const el = e.target;
+      if (!e.isIntersecting) continue;   // TV: quem descarrega é o LRU (tocar)
+      if (EH_TV) tocar(el);
+      if (+(el.dataset.tent || 0) >= MAX_TENT) { _obsPoster.unobserve(el); continue; }  // desistiu (3 falhas)
       const cache = TMDB.posterCache(el.dataset.tmdb);   // pré-carregado → instantâneo
-      if (cache !== null) aplicar(el, cache);
-      else TMDB.poster(el.dataset.tmdb).then((u) => aplicar(el, u));
+      if (cache !== null) { if (!EH_TV) _obsPoster.unobserve(el); aplicar(el, cache); continue; }
+      if (!EH_TV) _obsPoster.unobserve(el);              // desktop: busca 1x; TV: mantém p/ virtualizar
+      const obs = _obsPoster;
+      TMDB.poster(el.dataset.tmdb).then((u) => {
+        aplicar(el, u);
+        // Falha de REDE/rate-limit (não cacheada) → conta tentativa; re-tenta até 3x.
+        if (!u && obs === _obsPoster && el.isConnected && TMDB.posterCache(el.dataset.tmdb) === null) {
+          el.dataset.tent = (+(el.dataset.tent || 0)) + 1;
+          if (!EH_TV && +(el.dataset.tent || 0) < MAX_TENT) obs.observe(el);
+        }
+      });
     }
-  }, { rootMargin: '1600px' });   // carrega ~1,5 tela à frente (rolar um pouco já está pronto)
+  }, { rootMargin: OBS_MARGIN });   // desktop: ~1,5 tela à frente; TV: pouco (memória)
   (raiz || document).querySelectorAll('.poster[data-tmdb]').forEach((p) => _obsPoster.observe(p));
 }
 
@@ -413,15 +613,19 @@ let _tvCategoriaAtiva = null;
 let _tvCanalPreview = null;
 let _hlsPrev = null;
 
-let _favoritos = new Set();
-try { _favoritos = new Set(JSON.parse(localStorage.getItem('tv_favoritos') || '[]')); } catch (_) {}
-function salvarFavoritos() {
-  try { localStorage.setItem('tv_favoritos', JSON.stringify([..._favoritos])); } catch (_) {}
-}
+let _favoritos = new Set();                     // por perfil (Biblioteca)
+function recarregarFavoritos() { _favoritos = Biblioteca.favoritos(); }
+recarregarFavoritos();
+function salvarFavoritos() { Biblioteca.salvarFavoritos(_favoritos); }
 
 const IC_STAR = (on) => on
   ? '<svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77 5.82 21l1.18-6.88-5-4.87 7.1-1.01z"/></svg>'
   : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77 5.82 21l1.18-6.88-5-4.87 7.1-1.01z"/></svg>';
+
+// Ícones da Minha Lista: "+" (fora) e "✓" PREENCHIDO (dentro). O check é filled
+// porque `.btn svg { fill: currentColor }` preencheria um checkmark de traço aberto.
+const IC_MAIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const IC_OK = '<svg viewBox="0 0 24 24"><path d="M9.55 17.6 4.4 12.45l1.5-1.5 3.65 3.65L18.1 6.15l1.5 1.5z"/></svg>';
 
 const CHEV_R = '<svg class="tv-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
 const CHEV_L = '<svg class="tv-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
@@ -439,23 +643,57 @@ function canaisDaCategoria(cat) {
 
 function htmlCategorias() {
   const itens = [
-    `<div class="tv-cat-item focusable" data-cat="__fav"><span class="tv-cat-nome">Favoritos</span>${CHEV_R}</div>`,
+    `<div class="tv-cat-item focusable" data-cat="__fav"><span class="tv-cat-nome">${escapar(t('Favoritos'))}</span>${CHEV_R}</div>`,
     ...categorias().map((cat) =>
       `<div class="tv-cat-item focusable" data-cat="${escapar(cat)}"><span class="tv-cat-nome">${escapar(cat)}</span>${CHEV_R}</div>`),
   ].join('');
-  return `<div class="tv-lista tv-anim-esq"><div class="tv-lista-cab">Categorias</div>${itens}</div>`;
+  return `<div class="tv-lista tv-anim-esq"><div class="tv-lista-cab">${escapar(t('Categorias'))}</div>${itens}</div>`;
+}
+
+// Conteúdo de uma "caixa de logo" de canal: o logo REAL da playlist (tvg-logo)
+// quando existe, com fallback p/ iniciais no gradiente. Ao carregar a imagem,
+// marca o pai com .tem-img (esconde as iniciais); se falhar, some e fica o gradiente.
+function logoCanalInner(nome, logoUrl, lazy) {
+  // `loading="lazy"` não existe no Chromium 68 (webOS 5) → carregaria TUDO de uma
+  // vez. Em LISTA (lazy=true) usamos data-logo + observer (ligarLogosCanais);
+  // em logo único (preview/live) carregamos direto.
+  const attr = logoUrl ? (lazy ? `data-logo="${escapar(logoUrl)}"` : `src="${escapar(logoUrl)}"`) : '';
+  const img = logoUrl
+    ? `<img class="canal-logo-img" ${attr} alt="" onload="this.parentNode.classList.add('tem-img')" onerror="this.remove()">`
+    : '';
+  return `${img}<span>${escapar(iniciais(nome))}</span>`;
+}
+
+// Lazy + virtualização dos LOGOS dos canais (lista pode ter centenas). Carrega ao
+// entrar na viewport; na TV descarrega ao sair (libera RAM).
+let _obsCanalLogo = null;
+function ligarLogosCanais(raiz) {
+  const alvos = (raiz || document).querySelectorAll('.canal-logo-img[data-logo]');
+  if (!('IntersectionObserver' in window)) { alvos.forEach((im) => { im.src = im.dataset.logo; }); return; }
+  if (_obsCanalLogo) _obsCanalLogo.disconnect();
+  _obsCanalLogo = new IntersectionObserver((ents) => {
+    for (const e of ents) {
+      const im = e.target;
+      if (e.isIntersecting) { if (!im.getAttribute('src') && im.dataset.logo) im.src = im.dataset.logo; if (!EH_TV) _obsCanalLogo.unobserve(im); }
+      else if (EH_TV && im.getAttribute('src')) { im.removeAttribute('src'); if (im.parentNode) im.parentNode.classList.remove('tem-img'); }
+    }
+  }, { rootMargin: EH_TV ? '300px' : '1200px' });
+  alvos.forEach((im) => _obsCanalLogo.observe(im));
 }
 
 function htmlCanais(cat) {
   const lista = canaisDaCategoria(cat);
-  const nome = cat === '__fav' ? 'Favoritos' : cat;
+  const nome = cat === '__fav' ? t('Favoritos') : cat;
   const itens = lista.map((c) =>
-    `<div class="tv-canal-item focusable" data-canal="${c.id}">
-       <div class="tv-canal-logo" style="background:${gradiente(c.nome, true)}"><span>${iniciais(c.nome)}</span></div>
-       <div class="tv-canal-txt">
-         <div class="tv-canal-nome">${c.num} · ${escapar(c.nome)}</div>
-         <div class="tv-canal-agora">${escapar(c.agora)}</div>
+    `<div class="tv-canal-item" data-canal="${c.id}">
+       <div class="tv-canal-main focusable" data-canal="${c.id}">
+         <div class="tv-canal-logo" style="background:${gradiente(c.nome, true)}">${logoCanalInner(c.nome, c.logo, true)}</div>
+         <div class="tv-canal-txt">
+           <div class="tv-canal-nome">${c.num} · ${escapar(c.nome)}</div>
+           <div class="tv-canal-agora"><span class="tv-live-dot"></span><span class="tv-canal-prog">${rotuloAgora(c)}</span></div>
+         </div>
        </div>
+       <button class="tv-canal-fav focusable${_favoritos.has(c.id) ? ' ativo' : ''}" data-canal="${c.id}" data-acao="fav-lista" aria-label="${escapar(t('Favoritar'))}">${IC_STAR(_favoritos.has(c.id))}</button>
      </div>`).join('');
   return `<div class="tv-lista tv-anim-dir">
     <div class="tv-lista-cab">${CHEV_L} ${escapar(nome)}</div>
@@ -466,22 +704,58 @@ function htmlCanais(cat) {
 function htmlPreviewVazio() {
   return `<div class="tv-preview tv-preview-vazio">
     <div class="tv-vazio-logo">▶</div>
-    <div class="tv-vazio-titulo">Canais ao vivo</div>
-    <div class="tv-vazio-sub">Selecione uma categoria e um canal</div>
+    <div class="tv-vazio-titulo">${escapar(t('Canais ao vivo'))}</div>
+    <div class="tv-vazio-sub">${escapar(t('Selecione uma categoria e um canal'))}</div>
   </div>`;
 }
 
+// Rótulo do programa atual p/ a lista/preview: "AGORA: <programa>" (ou "Ao vivo"
+// quando não há EPG casado p/ o canal).
+// Retorna HTML: "AGORA:" em negrito + o programa (escapado). Sem EPG → "Ao vivo".
+function rotuloAgora(c) {
+  const prog = (EPG.agora(c).atual || {}).titulo || c.agora;
+  return prog ? `<b class="tv-agora-lbl">${escapar(t('AGORA'))}:</b> ${escapar(prog)}` : escapar(t('Ao vivo'));
+}
+
 function htmlEpg(c) {
-  const linhas = [
-    { hora: 'AGORA', nome: c.agora, atual: true },
-    { hora: c.proxIni, nome: c.prox },
-    { hora: '—', nome: 'Programa seguinte' },
-    { hora: '—', nome: 'Mais tarde' },
-  ];
-  return `<div class="tv-prog-lista">${linhas.map((l) =>
-    `<div class="tv-prog-row${l.atual ? ' atual' : ''}">
-       <span class="tv-prog-hora">${l.hora}</span><span class="tv-prog-nome">${escapar(l.nome)}</span>
-     </div>`).join('')}</div>`;
+  const prox = EPG.proximos(c, 6);   // EPG real (XMLTV do Xtream), se houver
+  if (prox.length) {
+    const now = Date.now();
+    return `<div class="tv-prog-lista">${prox.map((p) => {
+      const atual = p.ini <= now && now < p.fim;
+      return `<div class="tv-prog-row${atual ? ' atual' : ''}">
+         <span class="tv-prog-hora">${atual ? t('AGORA') : hhmm(new Date(p.ini))}</span><span class="tv-prog-nome">${escapar(p.titulo)}</span>
+       </div>`;
+    }).join('')}</div>`;
+  }
+  // Fallback (sem EPG p/ este canal): só o "agora".
+  return `<div class="tv-prog-lista">
+    <div class="tv-prog-row atual"><span class="tv-prog-hora">${t('AGORA')}</span><span class="tv-prog-nome">${escapar(c.agora || t('Ao vivo'))}</span></div>
+  </div>`;
+}
+
+// Baixa o EPG (XMLTV do Xtream) em 2º plano, 1x por lista. Ao concluir, atualiza
+// os rótulos "agora" da lista + o painel da preview (best-effort; falha → fallback).
+function carregarEpgSeNecessario() {
+  const reg = Dispositivo.registro();
+  let url = reg && reg.epg_url;
+  // Sem epg_url salvo? deriva de get.php → xmltv.php (mesmas credenciais Xtream).
+  if (!url && reg && reg.lista_url && typeof ListaUtil !== 'undefined') url = ListaUtil.derivarEpg(reg.lista_url);
+  if (!url) return;
+  EPG.carregar(url, LISTA.canais || []).then((ok) => { if (ok && document.querySelector('.tv-vivo')) atualizarEpgNaTela(); });
+}
+function atualizarEpgNaTela() {
+  const mapa = {};
+  for (const c of (LISTA.canais || [])) mapa[c.id] = c;   // O(1) por linha (evita find O(n²))
+  document.querySelectorAll('.tv-canal-item').forEach((row) => {
+    const c = mapa[row.dataset.canal]; if (!c) return;
+    const el = row.querySelector('.tv-canal-prog');
+    if (el) el.innerHTML = rotuloAgora(c);
+  });
+  if (_tvCanalPreview) {
+    const area = document.getElementById('tv-prog-area'); if (area) area.innerHTML = htmlEpg(_tvCanalPreview);
+    const pa = document.getElementById('tv-prev-agora'); if (pa) pa.innerHTML = rotuloAgora(_tvCanalPreview);
+  }
 }
 
 // Estrutura FIXA do preview (criada uma vez). O <video> persiste entre canais —
@@ -492,7 +766,7 @@ function htmlPreviewShell() {
       <video id="tv-prev-video" playsinline muted></video>
       <div class="tv-tela-hint">
         <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-        Abrir em tela cheia
+        ${escapar(t('Abrir em tela cheia'))}
       </div>
     </div>
     <div class="tv-prev-cab">
@@ -504,7 +778,7 @@ function htmlPreviewShell() {
       <button class="tv-fav-btn focusable" id="tv-fav-btn" data-acao="favoritar"></button>
     </div>
     <div class="tv-prog">
-      <div class="tv-prog-titulo">Programação</div>
+      <div class="tv-prog-titulo">${escapar(t('Programação'))}</div>
       <div id="tv-prog-area"></div>
     </div>
   </div>`;
@@ -524,12 +798,17 @@ function renderTvAoVivo() {
   </div>`;
 }
 
-function mostrarCanais(cat) {
+function mostrarCanais(cat, _okPin) {
   const lista = canaisDaCategoria(cat);
-  if (cat === '__fav' && lista.length === 0) { toast('Nenhum canal favoritado ainda'); return; }
+  if (cat === '__fav' && lista.length === 0) { toast(t('Nenhum canal favoritado ainda')); return; }
+  // Controle dos pais: categoria bloqueada pede PIN antes de abrir.
+  if (!_okPin && typeof canalCatBloqueada === 'function' && canalCatBloqueada(cat)) {
+    pedirPin(() => mostrarCanais(cat, true)); return;
+  }
   _tvCategoriaAtiva = cat;
   const pane = document.getElementById('tv-pane-canais');
   pane.innerHTML = htmlCanais(cat);
+  ligarLogosCanais(pane);          // logos lazy (não carrega centenas de uma vez)
   // As categorias continuam visiveis a esquerda (recuadas + fade); ver CSS.
   document.getElementById('tv-panes').classList.add('com-canais');
   const primeiro = pane.querySelector('.focusable');
@@ -537,11 +816,16 @@ function mostrarCanais(cat) {
 }
 
 function mostrarCategorias() {
+  const anterior = _tvCategoriaAtiva;   // categoria que estava aberta (p/ voltar o foco a ela)
   _tvCategoriaAtiva = null;
   document.getElementById('tv-panes').classList.remove('com-canais');
   const pane = document.getElementById('tv-pane-canais');
   if (pane) pane.innerHTML = ''; // limpa p/ nao deixar canais focaveis escondidos
-  const alvo = document.querySelector('#tv-pane-cat .focusable');
+  // Volta o foco à categoria que estava SELECIONADA (não à primeira), preservando
+  // a seção escolhida — independente de onde o foco andou na lista de canais.
+  const cats = [...document.querySelectorAll('#tv-pane-cat .tv-cat-item')];
+  const alvo = (anterior && cats.find((el) => el.dataset.cat === anterior))
+    || document.querySelector('#tv-pane-cat .focusable');
   if (alvo) SpatialNav.setFocus(alvo);
 }
 
@@ -555,32 +839,220 @@ function pararPreview() {
 function tocarNoPreview(url, muted) {
   const v = document.getElementById('tv-prev-video');
   if (!v || !url) return;
+  monitorarVideoQualidade(v);            // 1x: travas/erros → auto-qualidade
+  // Zera o monitor a cada nova reprodução: o <video> é REUSADO entre canais, então
+  // travas/erros do canal anterior não podem contar pro novo. `_qIniciado` só vira
+  // true quando o canal REALMENTE começa a tocar (evento 'playing').
+  v._qStalls = 0; v._qT0 = 0; v._qIniciado = false; v._qPlayEm = 0;
   if (_hlsPrev) { _hlsPrev.destroy(); _hlsPrev = null; }
   const ehHls = /\.m3u8(\?|$)/i.test(url);
-  if (ehHls && window.Hls && Hls.isSupported()) {
+  const hlsNativo = !!v.canPlayType('application/vnd.apple.mpegurl');   // TV (webOS/Tizen): sim
+  // PREFERE o player NATIVO da TV: toca .ts/.mkv/HEVC e HLS pela media pipeline do
+  // sistema (mais compatível que o hls.js, que é SW e não decoda HEVC/.ts). Só usa
+  // hls.js quando o nativo NÃO toca HLS (ex.: Chrome desktop no teste).
+  if (!ehHls || hlsNativo) {
+    v.muted = muted; v.src = url;
+    v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
+  } else if (window.Hls && Hls.isSupported()) {
     _hlsPrev = new Hls();
     _hlsPrev.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = muted; v.play().catch(() => {}); });
+    _hlsPrev.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal && autoQualidadeOn() && _qAtual) autoTrocarFonte(); });
     _hlsPrev.attachMedia(v);
     _hlsPrev.loadSource(url);
   } else {
-    // .ts e demais: player nativo (em TV real, live .ts pode exigir AVPlay).
     v.muted = muted; v.src = url;
     v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
   }
 }
+
+// ── Qualidade dos canais ao vivo (preferência + auto-degradar/trocar fonte) ──
+const _RANK_Q = { '4K': 4, 'FHD': 3, 'HD': 2, 'SD': 1, 'Padrão': 0 };
+function autoQualidadeOn() { return localStorage.getItem(Perfis.chave('tv_auto_qualidade')) !== '0'; } // default ON, por perfil
+function qualidadePadrao() { return localStorage.getItem(Perfis.chave('tv_qualidade_padrao')) || 'max'; }
+// Fontes do canal: a PRINCIPAL (canal em si) + as alternativas (canal.fontes).
+function fontesDoCanal(canal) {
+  return [{ nome: t('Principal'), url: canal.url, variantes: canal.variantes || [] }, ...(canal.fontes || [])];
+}
+function variantesDaFonte(f) { return (f.variantes && f.variantes.length) ? f.variantes : [{ rotulo: 'Padrão', url: f.url }]; }
+// Escolhe a variante conforme a preferência (max/fhd/hd/min).
+function escolherVariante(vars, pref) {
+  if (!vars || !vars.length) return null;
+  const arr = vars.map((v) => ({ v, r: _RANK_Q[v.rotulo] != null ? _RANK_Q[v.rotulo] : 0 }));
+  if (pref === 'max') return arr.reduce((a, b) => (b.r > a.r ? b : a)).v;
+  if (pref === 'min') return arr.reduce((a, b) => (b.r < a.r ? b : a)).v;
+  const cap = pref === 'fhd' ? 3 : 2;                       // fhd→≤FHD, hd→≤HD
+  const abaixo = arr.filter((x) => x.r <= cap).sort((a, b) => b.r - a.r);
+  return (abaixo[0] || arr.slice().sort((a, b) => a.r - b.r)[0]).v;
+}
+function videoMutedAtual() { const v = document.getElementById('tv-prev-video'); return v ? v.muted : true; }
+
+let _qAtual = null;   // { canal, fontes, fi, vi } — reprodução ativa (p/ auto-switch)
+function tocarCanalAuto(canal, muted) {
+  const fontes = fontesDoCanal(canal);
+  const vars = variantesDaFonte(fontes[0]);
+  const v = escolherVariante(vars, qualidadePadrao());
+  _qAtual = { canal, fontes, fi: 0, vi: Math.max(0, vars.indexOf(v)) };
+  tocarNoPreview((v || fontes[0]).url, muted);
+}
+// Travou demais → cai uma qualidade (mesma fonte); no fim, troca de fonte.
+function autoDegradar() {
+  if (!_qAtual) return;
+  const vars = variantesDaFonte(_qAtual.fontes[_qAtual.fi]);
+  if (_qAtual.vi < vars.length - 1) {
+    _qAtual.vi++;
+    const rot = vars[_qAtual.vi].rotulo;
+    toast(t('Conexão instável — qualidade reduzida') + (rot ? ' (' + rot + ')' : ''));
+    tocarNoPreview(vars[_qAtual.vi].url, videoMutedAtual());
+  } else { autoTrocarFonte(); }
+}
+// Canal caiu (erro fatal) → próxima fonte, na qualidade preferida.
+function autoTrocarFonte() {
+  if (!_qAtual || _qAtual.fi >= _qAtual.fontes.length - 1) return;
+  _qAtual.fi++;
+  const vars = variantesDaFonte(_qAtual.fontes[_qAtual.fi]);
+  const v = escolherVariante(vars, qualidadePadrao());
+  _qAtual.vi = Math.max(0, vars.indexOf(v));
+  toast(t('Canal instável — trocando de fonte…'));
+  tocarNoPreview((v || _qAtual.fontes[_qAtual.fi]).url, videoMutedAtual());
+}
+// Monitor (1x por <video>): conta travas (waiting) e erros → auto-qualidade.
+function monitorarVideoQualidade(v) {
+  if (v._qMon) return; v._qMon = true;
+  // O canal COMEÇOU a tocar → a partir daqui travas contam como instabilidade.
+  // Zera o contador só no PRIMEIRO 'playing': ele também dispara ao sair de cada
+  // trava, e zerar sempre impediria a contagem de chegar em 3.
+  v.addEventListener('playing', () => {
+    if (v._qIniciado) return;
+    v._qIniciado = true; v._qPlayEm = Date.now(); v._qStalls = 0;
+  });
+  v.addEventListener('waiting', () => {
+    if (!autoQualidadeOn() || !_qAtual) return;
+    // Buffering INICIAL (canal ainda conectando/enchendo buffer) NÃO é instabilidade
+    // — era isso que fazia trocar de fonte antes do canal sequer carregar.
+    if (!v._qIniciado) return;
+    if (Date.now() - (v._qPlayEm || 0) < 6000) return;                 // respiro após começar
+    const now = Date.now();
+    if (now - (v._qT0 || 0) > 20000) { v._qStalls = 0; v._qT0 = now; }  // janela de 20s
+    v._qStalls = (v._qStalls || 0) + 1;
+    if (v._qStalls >= 3) { v._qStalls = 0; autoDegradar(); }            // 3 travas → degrada
+  });
+  v.addEventListener('error', () => {
+    if (!autoQualidadeOn() || !_qAtual) return;
+    // MEDIA_ERR_ABORTED (1): o <video> abortou porque TROCAMOS a fonte/canal —
+    // não é falha da fonte. Os demais (rede/decode/src inválido) sim.
+    const err = v.error;
+    if (err && err.code === 1) return;
+    autoTrocarFonte();
+  });
+}
+
+// ── Legendas e faixas de ÁUDIO ──────────────────────────────────────────────
+// Duas fontes possíveis, nesta ordem:
+//  1) hls.js (quando ELE está tocando): expõe subtitleTracks/audioTracks.
+//  2) O próprio <video>: textTracks (legendas in-band/WebVTT) e audioTracks.
+// ⚠️ `video.audioTracks` NÃO é implementado no Chromium (nem no da TV) — então em
+// stream tocado pelo player NATIVO normalmente só há legenda; quando não há faixa
+// alguma, avisamos em vez de fingir que trocou.
+function _hlsDoVideo(v) {
+  if (_hls && v === document.getElementById('player-video')) return _hls;
+  if (_hlsPrev && v === document.getElementById('tv-prev-video')) return _hlsPrev;
+  return null;
+}
+function faixasLegenda(v) {
+  const hls = _hlsDoVideo(v);
+  if (hls && hls.subtitleTracks && hls.subtitleTracks.length) {
+    return hls.subtitleTracks.map((tr, i) => ({ i, rotulo: tr.name || tr.lang || (t('Legenda') + ' ' + (i + 1)) }));
+  }
+  const tt = v.textTracks || [];
+  const out = [];
+  for (let i = 0; i < tt.length; i++) {
+    if (tt[i].kind && tt[i].kind !== 'subtitles' && tt[i].kind !== 'captions') continue;
+    out.push({ i, rotulo: tt[i].label || tt[i].language || (t('Legenda') + ' ' + (i + 1)) });
+  }
+  return out;
+}
+function legendaAtual(v) {
+  const hls = _hlsDoVideo(v);
+  if (hls && hls.subtitleTracks && hls.subtitleTracks.length) return hls.subtitleDisplay === false ? -1 : hls.subtitleTrack;
+  const tt = v.textTracks || [];
+  for (let i = 0; i < tt.length; i++) if (tt[i].mode === 'showing') return i;
+  return -1;
+}
+function selecionarLegenda(v, i) {          // i = -1 → desativar
+  const hls = _hlsDoVideo(v);
+  if (hls && hls.subtitleTracks && hls.subtitleTracks.length) {
+    hls.subtitleDisplay = i >= 0; hls.subtitleTrack = i; return;
+  }
+  const tt = v.textTracks || [];
+  for (let k = 0; k < tt.length; k++) tt[k].mode = (k === i) ? 'showing' : 'disabled';
+}
+function faixasAudio(v) {
+  const hls = _hlsDoVideo(v);
+  if (hls && hls.audioTracks && hls.audioTracks.length) {
+    return hls.audioTracks.map((tr, i) => ({ i, rotulo: tr.name || tr.lang || (t('Áudio') + ' ' + (i + 1)) }));
+  }
+  const at = v.audioTracks;                 // undefined no Chromium
+  const out = [];
+  if (at) for (let i = 0; i < at.length; i++) out.push({ i, rotulo: at[i].label || at[i].language || (t('Áudio') + ' ' + (i + 1)) });
+  return out;
+}
+function audioAtual(v) {
+  const hls = _hlsDoVideo(v);
+  if (hls && hls.audioTracks && hls.audioTracks.length) return hls.audioTrack;
+  const at = v.audioTracks;
+  if (at) for (let i = 0; i < at.length; i++) if (at[i].enabled) return i;
+  return -1;
+}
+function selecionarAudio(v, i) {
+  const hls = _hlsDoVideo(v);
+  if (hls && hls.audioTracks && hls.audioTracks.length) { hls.audioTrack = i; return; }
+  const at = v.audioTracks;
+  if (at) for (let k = 0; k < at.length; k++) at[k].enabled = (k === i);
+}
+const _marca = (txt, on) => txt + (on ? '  ✓' : '');
+function abrirMenuLegendas(v) {
+  if (!v) return;
+  const fx = faixasLegenda(v);
+  if (!fx.length) { toast(t('Este conteúdo não oferece legendas')); return; }
+  const at = legendaAtual(v);
+  const rotulos = [_marca(t('Desativadas'), at < 0)].concat(fx.map((f) => _marca(f.rotulo, f.i === at)));
+  abrirMenu(t('Legendas'), rotulos, (k) => {
+    if (k === 0) { selecionarLegenda(v, -1); toast(t('Legendas desativadas')); return; }
+    selecionarLegenda(v, fx[k - 1].i);
+    toast(t('Legenda') + ': ' + fx[k - 1].rotulo);
+  });
+}
+function abrirMenuAudio(v) {
+  if (!v) return;
+  const fx = faixasAudio(v);
+  if (fx.length < 2) { toast(t('Este conteúdo tem apenas uma faixa de áudio')); return; }
+  const at = audioAtual(v);
+  abrirMenu(t('Áudio'), fx.map((f) => _marca(f.rotulo, f.i === at)), (k) => {
+    selecionarAudio(v, fx[k].i);
+    toast(t('Áudio') + ': ' + fx[k].rotulo);
+  });
+}
+
 function carregarPreviewVideo() {
-  tocarNoPreview((_tvCanalPreview && _tvCanalPreview.url) || TEST_HLS, true);
+  if (_tvCanalPreview) tocarCanalAuto(_tvCanalPreview, true);
+  else tocarNoPreview(TEST_HLS, true);
 }
 
 function selecionarPreview(canal) {
   _tvCanalPreview = canal;
+  // Marca o canal SELECIONADO na lista (p/ o "voltar" da preview retornar a ele).
+  document.querySelectorAll('.tv-canal-main.sel').forEach((e) => e.classList.remove('sel'));
+  const cel = document.querySelector(`.tv-canal-main[data-canal="${canal.id}"]`);
+  if (cel) cel.classList.add('sel');
   const col = document.getElementById('tv-col-dir');
   if (!document.getElementById('tv-prev-video')) col.innerHTML = htmlPreviewShell();
 
-  document.getElementById('tv-prev-logo').style.background = gradiente(canal.nome, true);
-  document.getElementById('tv-prev-ini').textContent = iniciais(canal.nome);
+  const prevLogo = document.getElementById('tv-prev-logo');
+  prevLogo.style.background = gradiente(canal.nome, true);
+  prevLogo.classList.remove('tem-img');
+  prevLogo.innerHTML = logoCanalInner(canal.nome, canal.logo);
   document.getElementById('tv-prev-canal').textContent = `${canal.num} · ${canal.nome}`;
-  document.getElementById('tv-prev-agora').textContent = `Agora: ${canal.agora}`;
+  document.getElementById('tv-prev-agora').innerHTML = rotuloAgora(canal);
   const fav = _favoritos.has(canal.id);
   const favBtn = document.getElementById('tv-fav-btn');
   favBtn.innerHTML = IC_STAR(fav);
@@ -599,7 +1071,10 @@ function alternarFavorito(id) {
     b.innerHTML = IC_STAR(on);
     b.classList.toggle('ativo', on);
   });
-  toast(on ? 'Adicionado aos favoritos' : 'Removido dos favoritos');
+  // Estrela na LISTA (botão de favoritar de cada canal), sem depender da preview.
+  const listBtn = document.querySelector(`.tv-canal-fav[data-canal="${id}"]`);
+  if (listBtn) { listBtn.innerHTML = IC_STAR(on); listBtn.classList.toggle('ativo', on); }
+  toast(on ? t('Adicionado aos favoritos') : t('Removido dos favoritos'));
 }
 
 function renderPlaceholder(titulo, msg) {
@@ -650,17 +1125,18 @@ function renderBuscar() {
     `<button class="bsc-key focusable" data-k="${c}">${c}</button>`).join('');
   return `<div class="bsc">
     <div class="bsc-esq">
-      <h2 class="bsc-titulo">Buscar</h2>
+      <h2 class="bsc-titulo">${escapar(t('Buscar'))}</h2>
       <div class="bsc-input">
         <span class="bsc-input-ico">${IC_BUSCA_LUPA}</span>
-        <span class="bsc-campo"><span class="bsc-q" id="bsc-q"></span><span class="bsc-caret"></span><span class="bsc-ph" id="bsc-ph">Buscar…</span></span>
+        <span class="bsc-campo"><span class="bsc-q" id="bsc-q"></span><span class="bsc-caret"></span><span class="bsc-ph" id="bsc-ph">${escapar(t('Buscar…'))}</span></span>
       </div>
       <div class="bsc-teclado">
         ${teclas}
         <button class="bsc-key bsc-key-acao focusable" data-acao="apagar">${IC_BUSCA_DEL}</button>
-        <button class="bsc-key bsc-key-acao focusable" data-acao="espaco">Espaço</button>
-        <button class="bsc-key bsc-key-acao focusable" data-acao="limpar">Limpar</button>
+        <button class="bsc-key bsc-key-acao focusable" data-acao="espaco">${escapar(t('Espaço'))}</button>
+        <button class="bsc-key bsc-key-acao focusable" data-acao="limpar">${escapar(t('Limpar'))}</button>
       </div>
+      <div class="bsc-sug" id="bsc-sug"></div>
     </div>
     <div class="bsc-dir" id="bsc-dir">${htmlBuscaVazia()}</div>
   </div>`;
@@ -669,15 +1145,15 @@ function renderBuscar() {
 function htmlBuscaVazia() {
   return `<div class="bsc-vazio">
     <div class="bsc-vazio-ico">${IC_BUSCA_LUPA}</div>
-    <div class="bsc-vazio-titulo">Encontre seus filmes e séries</div>
-    <div class="bsc-vazio-sub">Digite o nome no teclado ao lado para começar</div>
+    <div class="bsc-vazio-titulo">${escapar(t('Encontre seus filmes e séries'))}</div>
+    <div class="bsc-vazio-sub">${escapar(t('Digite o nome no teclado ao lado para começar'))}</div>
   </div>`;
 }
 function htmlBuscaSemResultado(q) {
   return `<div class="bsc-vazio">
     <div class="bsc-vazio-ico">${IC_BUSCA_LUPA}</div>
-    <div class="bsc-vazio-titulo">Nada encontrado para “${escapar(q)}”</div>
-    <div class="bsc-vazio-sub">Confira a digitação ou tente outro título</div>
+    <div class="bsc-vazio-titulo">${escapar(t('Nada encontrado para “{q}”').replace('{q}', q))}</div>
+    <div class="bsc-vazio-sub">${escapar(t('Confira a digitação ou tente outro título'))}</div>
   </div>`;
 }
 
@@ -687,13 +1163,42 @@ function atualizarBusca() {
   const span = document.getElementById('bsc-q'); if (span) span.textContent = q;
   const ph = document.getElementById('bsc-ph'); if (ph) ph.style.display = q ? 'none' : '';
   const dir = document.getElementById('bsc-dir'); if (!dir) return;
+  const sug = document.getElementById('bsc-sug');
   const nq = normBusca(q);
-  if (!nq) { dir.innerHTML = htmlBuscaVazia(); return; }
+  if (!nq) { dir.innerHTML = htmlBuscaVazia(); if (sug) renderSugestoes(sug, sugestoesPopulares(), true); return; }
   const nqSemEsp = nq.replace(/\s+/g, '');
-  const itens = [...(LISTA.filmes || []), ...(LISTA.series || [])]
-    .filter((it) => casaBusca(it, nq, nqSemEsp))
-    .slice(0, 60);
-  aplicarResultados(dir, itens, q);
+  const matched = [...(LISTA.filmes || []), ...(LISTA.series || [])].filter((it) => casaBusca(it, nq, nqSemEsp));
+  aplicarResultados(dir, matched.slice(0, 60), q);
+  if (sug) {
+    // Prioriza quem COMEÇA com o texto (autocomplete de verdade); depois contém no
+    // título; por último os que casaram só por referência/tradução (rank 3).
+    const rank = (it) => {
+      const t = normBusca(it.titulo || '');
+      if (t.startsWith(nq)) return 0;
+      if (t.replace(/\s+/g, '').startsWith(nqSemEsp)) return 1;
+      if (t.includes(nq)) return 2;
+      return 3;
+    };
+    renderSugestoes(sug, [...matched].sort((a, b) => rank(a) - rank(b)).slice(0, 8), false);
+  }
+}
+
+// Autocomplete estilo Netflix (abaixo do teclado): títulos prováveis. OK abre o detalhe.
+function renderSugestoes(container, itens, populares) {
+  // Enquanto o foco está numa sugestão, NÃO re-renderiza (senão o elemento focado
+  // é removido, o foco "some" e o próximo toque cai na sidebar).
+  if (SpatialNav.atual && container.contains(SpatialNav.atual)) return;
+  if (!itens.length) { container.innerHTML = ''; return; }
+  const cab = `<div class="bsc-sug-cab">${escapar(populares ? t('Sugestões') : t('Resultados prováveis'))}</div>`;
+  container.innerHTML = cab + itens.map((it) =>
+    `<button class="bsc-sug-item focusable" data-id="${escapar(it.id)}"><span class="bsc-sug-nome">${escapar(it.titulo)}</span><span class="bsc-sug-tipo">${it.tipo === 'serie' ? t('Série') : t('Filme')}</span></button>`).join('');
+  container.querySelectorAll('.bsc-sug-item').forEach((b) => b.addEventListener('click', () => { const it = LISTA.indice[b.dataset.id]; if (it) abrirDetalhe(it); }));
+}
+// Quando o campo está vazio: alguns títulos do catálogo (intercala filmes/séries).
+function sugestoesPopulares() {
+  const f = LISTA.filmes || [], s = LISTA.series || [], out = [];
+  for (let i = 0; out.length < 8 && (i < f.length || i < s.length); i++) { if (f[i]) out.push(f[i]); if (s[i]) out.push(s[i]); }
+  return out;
 }
 
 // Atualiza a GRADE por DIFF (sem reconstruir tudo → sem "piscar"): mantém os
@@ -735,7 +1240,7 @@ function indexar(itens, reRender, ativo) {
     setTimeout(() => { agendado = false; if (vivo()) reRender(); }, 350);
   };
   const tarefas = pend.map((it) => () => TMDB.info(it.titulo, it.tipo === 'serie').then(aviso, () => {}));
-  _executarFila(tarefas, 3, vivo);
+  _executarFila(tarefas, 3, vivo, _focoOcupado);
 }
 
 // Liga os cliques do teclado on-screen, zera a busca e inicia a indexação.
@@ -751,6 +1256,7 @@ function ligarBuscar(raiz) {
     else _buscaQuery += k.dataset.k;
     atualizarBusca();
   }));
+  atualizarBusca(); // sugestões iniciais (populares) já ao abrir
   indexar([...(LISTA.series || []), ...(LISTA.filmes || [])], atualizarBusca, () => !!document.getElementById('bsc-dir'));
 }
 
@@ -760,27 +1266,28 @@ function ligarBuscar(raiz) {
 function abrirBuscaSecao(escopo, btn) {
   const itensEscopo = (escopo === 'series') ? (LISTA.series || []) : (LISTA.filmes || []);
   const cats = (((LISTA.catalogo || {})[escopo] || {}).trilhos || []).map((t) => t.titulo);
-  const titulo = escopo === 'series' ? 'Buscar em Séries' : 'Buscar em Filmes';
+  const titulo = escopo === 'series' ? t('Buscar em Séries') : t('Buscar em Filmes');
   let query = '', catSel = null;
 
   const teclas = [...BUSCA_TECLAS].map((c) => `<button class="bsc-key focusable" data-k="${c}">${c}</button>`).join('')
     + `<button class="bsc-key bsc-key-acao focusable" data-acao="apagar">${IC_BUSCA_DEL}</button>`
-    + `<button class="bsc-key bsc-key-acao focusable" data-acao="espaco">Espaço</button>`
-    + `<button class="bsc-key bsc-key-acao focusable" data-acao="limpar">Limpar</button>`;
-  const catsHTML = [`<button class="bsc-cat focusable ativa" data-cat="">Todos</button>`,
+    + `<button class="bsc-key bsc-key-acao focusable" data-acao="espaco">${escapar(t('Espaço'))}</button>`
+    + `<button class="bsc-key bsc-key-acao focusable" data-acao="limpar">${escapar(t('Limpar'))}</button>`;
+  const catsHTML = [`<button class="bsc-cat focusable ativa" data-cat="">${escapar(t('Todos'))}</button>`,
     ...cats.map((c) => `<button class="bsc-cat focusable" data-cat="${escapar(c)}">${escapar(c)}</button>`)].join('');
 
   const ov = document.createElement('div');
   ov.className = 'nav-modal busca-secao';
   ov.innerHTML = `
     <div class="bs-reveal"></div>
+    ${htmlVoltar()}
     <div class="bs-conteudo">
       <div class="bsc">
         <div class="bsc-esq">
-          <h2 class="bsc-titulo">${titulo}</h2>
+          <h2 class="bsc-titulo">${escapar(titulo)}</h2>
           <div class="bsc-input">
             <span class="bsc-input-ico">${IC_BUSCA_LUPA}</span>
-            <span class="bsc-campo"><span class="bsc-q" id="bs-q"></span><span class="bsc-caret"></span><span class="bsc-ph" id="bs-ph">Buscar…</span></span>
+            <span class="bsc-campo"><span class="bsc-q" id="bs-q"></span><span class="bsc-caret"></span><span class="bsc-ph" id="bs-ph">${escapar(t('Buscar…'))}</span></span>
           </div>
           <div class="bsc-teclado">${teclas}</div>
           <div class="bsc-cats">${catsHTML}</div>
@@ -844,41 +1351,65 @@ function abrirBuscaSecao(escopo, btn) {
 }
 
 // ── Roteamento entre secoes ─────────────────────────────────────────────────
+// Cache do DOM já renderizado de Início/Filmes/Séries: alternar entre seções
+// REUSA o node (com os banners já carregados) em vez de reconstruir tudo — evita
+// travar e os pôsteres sumirem ao trocar rápido. Invalidado ao trocar de perfil
+// (só Filmes/Séries, pela Minha Lista) e ao recarregar a lista.
+// TV: cache DESLIGADO (guardar 3 catálogos em DOM+imagens estoura a RAM). No
+// desktop, cacheia p/ troca instantânea. `_secCache` centraliza o acesso.
+let _secoesCache = {};
+function limparCacheSecoes() { _secoesCache = {}; }
+const _secCacheGet = (id) => (EH_TV ? null : _secoesCache[id]);
+const _secCacheSet = (id, node) => { if (!EH_TV) _secoesCache[id] = node; };
+
 function navegar(secaoId) {
   pararPreview(); // para o preview da TV ao vivo ao sair da secao
-  const bsAberta = document.querySelector('.busca-secao'); if (bsAberta) bsAberta.remove(); // fecha a busca de seção ao trocar de seção
+  document.querySelectorAll('.busca-secao, .addpl').forEach((o) => o.remove()); // fecha busca de seção / add playlist ao trocar de seção
   clearTimeout(_heroDebounce); _heroDebounce = null; _heroPendente = null; // cancela troca de hero pendente
   document.querySelectorAll('.nav-item').forEach((n) =>
     n.classList.toggle('ativo', n.dataset.secao === secaoId));
 
   const main = document.getElementById('conteudo');
   if (secaoId === 'inicio' || secaoId === 'filmes' || secaoId === 'series') {
-    main.innerHTML = renderMidia(LISTA.catalogo[secaoId], secaoId);
-    _heroItem = null;                              // força o hero a atualizar no 1º foco
-    ligarPostersSerie(main);                       // pôster TMDB (cache-first; lazy ao rolar)
+    let node = _secCacheGet(secaoId);
+    if (node) {
+      while (main.firstChild) main.removeChild(main.firstChild);  // detach (node cacheado sobrevive)
+      main.appendChild(node);                      // reusa o DOM (banners já carregados)
+      _tokenTrilhos++;                             // cacheado (desktop): cancela append pendente
+    } else {
+      main.innerHTML = renderMidia(LISTA.catalogo[secaoId], secaoId);
+      if (secaoId === 'inicio') injetarTrilhosPerfil(main);  // Continuar assistindo + Recomendações
+      else injetarMinhaLista(main, secaoId);               // Minha Lista no topo de Filmes/Séries
+      node = main.firstElementChild;
+      _secCacheSet(secaoId, node);
+      anexarTrilhosRestantes(node, LISTA.catalogo[secaoId]);  // TV: resto dos trilhos em chunks (não trava)
+    }
+    // Reset do hero: o node (fresco OU cacheado) pode ter estado antigo de
+    // backdrop; zera as camadas e o ponteiro A/B p/ o 1º foco aplicar limpo.
+    _heroItem = null; _heroUltimoAplicado = 0; _heroBgAtivo = 'A';
+    const _bA = node.querySelector('#hero2-bgA'), _bB = node.querySelector('#hero2-bgB');
+    if (_bA) _bA.classList.remove('on'); if (_bB) _bB.classList.remove('on');
+    ligarPostersSerie(node);                       // re-observa (pôsteres já carregados são pulados)
   } else if (secaoId === 'tvaovivo') {
     main.innerHTML = renderTvAoVivo();
+    carregarEpgSeNecessario();
   } else if (secaoId === 'playlists') {
     main.innerHTML = renderPlaylists();
-    gerarQr('pl-qr', Dispositivo.urlAtivacao());
-    const rec = document.getElementById('pl-reload');
-    if (rec) rec.addEventListener('click', async () => {
-      toast('Verificando…');
-      await Dispositivo.consultar();
-      navegar('playlists');
-    });
+    preencherPlaylists();
   } else if (secaoId === 'buscar') {
     main.innerHTML = renderBuscar();
     ligarBuscar(main);
   } else if (secaoId === 'jogos') {
-    main.innerHTML = renderPlaceholder('Jogos do dia', 'Agenda de jogos + onde assistir (próxima fase).');
+    main.innerHTML = renderJogos();
+    ligarJogos();
   } else if (secaoId === 'config') {
-    main.innerHTML = renderPlaceholder('Configurações', 'Idioma, conta, ativação, sobre (próxima fase).');
+    main.innerHTML = renderConfig();
   }
   main.scrollTop = 0;
 
   // Foca o 1o elemento do conteudo; se nao houver (placeholder), mantem no menu.
-  const primeiro = main.querySelector('.focusable');
+  // Jogos: começa na aba HOJE (a ativa), não na 1ª aba (Ontem).
+  const primeiro = main.querySelector('.jogos-data.ativa') || main.querySelector('.focusable');
   if (primeiro) SpatialNav.setFocus(primeiro);
 }
 
@@ -891,6 +1422,14 @@ function epsOrdenados(item) { return [...(item.episodios || [])].sort((a, b) => 
 function primeiroEp(item) { return epsOrdenados(item)[0]; }
 function primeiroEpLabel(item) { const ep = primeiroEp(item); if (!ep) return ''; const { s, e } = epInfo(ep.nome); return `T${s}:E${e}`; }
 function rotuloEp(item, ep) { const { s, e } = epInfo(ep.nome); return `${item.titulo} — T${s} E${String(e).padStart(2, '0')}`; }
+// Episódio salvo no "continuar assistindo" (casa pela URL) e rótulo do botão.
+function _epDoProgresso(item, pr) { return (pr && pr.url) ? epsOrdenados(item).find((ep) => ep.url === pr.url) || null : null; }
+function rotuloContinuar(item, pr) {
+  if (item.tipo !== 'serie') return t('Continuar');
+  const ep = _epDoProgresso(item, pr);
+  if (ep) { const { s, e } = epInfo(ep.nome); return `${t('Continuar')} EP ${e} T ${s}`; }
+  return t('Continuar');
+}
 function estrelas(n10) { const n = Math.max(0, Math.min(5, Math.round((n10 || 0) / 2))); return '★'.repeat(n) + '☆'.repeat(5 - n); }
 function metaDetalhe(item, inf) {
   const ano = (inf && inf.ano) || item.ano || '';
@@ -911,7 +1450,7 @@ function montarRec(cont, itens) {
   for (const it of itens) {
     const el = document.createElement('div');
     el.className = 'rec-poster focusable';
-    el.innerHTML = `<div class="rec-arte" style="background:${gradiente(it.titulo)}"><span>${escapar(it.titulo)}</span></div>`;
+    el.innerHTML = `<div class="rec-arte"><span>${escapar(it.titulo)}</span></div>`;
     el.addEventListener('click', () => { fecharDetalhe(); abrirDetalhe(it); });
     cont.appendChild(el);
     const setImg = (u) => { if (!u) return; const im = new Image(); im.className = 'rec-img'; im.onload = () => { const a = el.querySelector('.rec-arte'); if (a) { a.classList.add('tem-img'); a.appendChild(im); } }; im.src = u; };
@@ -929,38 +1468,50 @@ function montarElenco(cont, elenco) {
   }
 }
 
-function abrirDetalhe(item) {
+function abrirDetalhe(item, _okPin) {
+  // Controle dos pais: se o item cai numa categoria bloqueada, pede o PIN.
+  if (!_okPin && typeof conteudoBloqueado === 'function' && conteudoBloqueado(item)) {
+    pedirPin(() => abrirDetalhe(item, true)); return;
+  }
   const ehSerie = item.tipo === 'serie';
+  // Continuar assistindo: se há progresso salvo, o botão vira "Continuar" (filme)
+  // ou "Continuar EP e T s" (série) e, ao clicar, pergunta continuar × do início.
+  const prog = Biblioteca.progressoDe(item.id);
+  const temProg = !!(prog && prog.pos > 15 && (!prog.dur || prog.pos < prog.dur - 20));
+  const rotPrinc = temProg ? rotuloContinuar(item, prog)
+    : (ehSerie ? `${t('Assistir')} ${primeiroEpLabel(item)}` : t('Assistir'));
   let inf = null, cred = { elenco: [], direcao: [] };
   const ov = document.createElement('div');
   ov.id = 'detalhe-overlay';
   ov.className = 'nav-modal det2';
+  const btnPrinc = `<button class="btn btn-primario focusable" data-acao="assistir"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> ${escapar(rotPrinc)}</button>`;
   const acoes = ehSerie
-    ? `<button class="btn btn-primario focusable" data-acao="assistir"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Assistir ${escapar(primeiroEpLabel(item))}</button>
-       <button class="btn btn-secundario focusable" data-acao="episodios"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h13M3 12h13M3 18h9"/><path d="m18 11 4 3-4 3z" fill="currentColor" stroke="none"/></svg> Episódios e mais</button>`
-    : `<button class="btn btn-primario focusable" data-acao="assistir"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Assistir</button>`;
+    ? `${btnPrinc}
+       <button class="btn btn-secundario focusable" data-acao="episodios"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h13M3 12h13M3 18h9"/><path d="m18 11 4 3-4 3z" fill="currentColor" stroke="none"/></svg> ${escapar(t('Episódios e mais'))}</button>`
+    : btnPrinc;
   ov.innerHTML = `
     <div class="det2-bg" id="det2-bg" style="background:${FUNDO_PADRAO}"></div>
     <div class="det2-grad"></div>
+    ${htmlVoltar()}
     <div class="det2-scroll" id="det2-scroll">
       <section class="det2-topo">
         <img class="det2-logo" id="det2-logo" alt="" style="display:none">
         <h1 class="det2-titulo" id="det2-titulo">${escapar(item.titulo)}</h1>
         <div class="det2-meta" id="det2-meta"></div>
-        <span class="det2-tag">${ehSerie ? 'Série' : 'Filme'}</span>
+        <span class="det2-tag">${ehSerie ? t('Série') : t('Filme')}</span>
         <p class="det2-sinopse" id="det2-sinopse">${escapar(item.sinopse || '')}</p>
         <div class="det2-acoes">
           ${acoes}
-          <button class="btn btn-icone focusable" data-acao="lista" title="Minha Lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button class="btn btn-icone focusable" data-acao="lista" title="${escapar(t('Minha Lista'))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
           <button class="btn btn-icone focusable" data-acao="creditos" title="Créditos e mais informações"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5" stroke-linecap="round"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg></button>
         </div>
       </section>
       <section class="det2-secao oculto" id="det2-elenco">
-        <h2 class="det2-h2">Elenco</h2>
+        <h2 class="det2-h2">${escapar(t('Elenco'))}</h2>
         <div class="det2-fila" id="det2-elenco-fila"></div>
       </section>
       <section class="det2-secao oculto" id="det2-rec">
-        <h2 class="det2-h2">Títulos semelhantes</h2>
+        <h2 class="det2-h2">${escapar(t('Títulos semelhantes'))}</h2>
         <div class="det2-fila" id="det2-rec-fila"></div>
       </section>
     </div>`;
@@ -968,12 +1519,37 @@ function abrirDetalhe(item) {
   ov._onVoltar = fecharDetalhe;
   ov._voltarFoco = SpatialNav.atual;   // p/ voltar ao item que abriu (ex.: resultado da busca de seção)
   const q = (a) => ov.querySelector(`[data-acao="${a}"]`);
+  // Reproduz: continuar (retoma) ou reiniciar (do início). Série sem progresso → 1º ep.
+  const reproduzir = (reiniciar) => {
+    fecharDetalhe();
+    if (ehSerie) {
+      let url = temProg && prog ? prog.url : null, rot = (temProg && prog && prog.ep) || '';
+      if (!url) { const ep = primeiroEp(item); if (ep) { url = ep.url; rot = rotuloEp(item, ep); } }
+      if (url) abrirPlayer({ titulo: rot || item.titulo, url }, ctxProgresso(item, url, rot), reiniciar);
+    } else {
+      abrirPlayer(item, ctxProgresso(item, item.url), reiniciar);
+    }
+  };
   q('assistir').addEventListener('click', () => {
-    if (ehSerie) { const ep = primeiroEp(item); if (ep) { fecharDetalhe(); abrirPlayer({ titulo: rotuloEp(item, ep), url: ep.url }); } }
-    else { fecharDetalhe(); abrirPlayer(item); }
+    if (temProg) modalContinuarAssistir(item, prog, () => reproduzir(false), () => reproduzir(true));
+    else reproduzir(false);
   });
   if (q('episodios')) q('episodios').addEventListener('click', () => abrirEpisodios(item, inf));
-  q('lista').addEventListener('click', () => toast('Minha Lista — em breve'));
+  // Minha Lista: adiciona/remove (por perfil) e atualiza o carrossel da seção.
+  const btnLista = q('lista');
+  const syncLista = () => {
+    const na = Biblioteca.naLista(item.id);
+    btnLista.classList.toggle('ativo', na);
+    btnLista.title = na ? t('Remover da Minha Lista') : t('Minha Lista');
+    btnLista.innerHTML = na ? IC_OK : IC_MAIS;
+  };
+  syncLista();
+  btnLista.addEventListener('click', () => {
+    const add = Biblioteca.alternarLista(item);
+    syncLista();
+    atualizarMinhaLista(item.tipo);
+    toast(add ? t('Adicionado à Minha Lista') : t('Removido da Minha Lista'));
+  });
   q('creditos').addEventListener('click', () => abrirCreditos(item, inf, cred));
   SpatialNav.setFocus(q('assistir'));
 
@@ -984,10 +1560,10 @@ function abrirDetalhe(item) {
   TMDB.info(item.titulo, ehSerie).then(async (i) => {
     if (!document.getElementById('detalhe-overlay')) return;
     inf = i;
-    if (!i || i.vazio) { const s = document.getElementById('det2-sinopse'); if (s && !s.textContent) s.textContent = 'Sem descrição disponível.'; return; }
+    if (!i || i.vazio) { const s = document.getElementById('det2-sinopse'); if (s && !s.textContent) s.textContent = t('Sem descrição disponível.'); return; }
     const bg = document.getElementById('det2-bg');
     if (i.backdrop && bg) bg.style.background = `#000 right top / cover no-repeat url("${i.backdrop}")`;
-    const sin = document.getElementById('det2-sinopse'); if (sin) sin.textContent = i.sinopse || item.sinopse || 'Sem descrição disponível.';
+    const sin = document.getElementById('det2-sinopse'); if (sin) sin.textContent = i.sinopse || item.sinopse || t('Sem descrição disponível.');
     document.getElementById('det2-meta').innerHTML = metaDetalhe(item, i);
     if (i.id) {
       const lg = await TMDB.tituloLogo(i.id, i.ehTv);
@@ -1013,18 +1589,45 @@ function fecharDetalhe() {
   if (f) SpatialNav.setFocus(f);
 }
 
+// Modal "Continuar assistindo?": retomar de onde parou × ver desde o início.
+function modalContinuarAssistir(item, pr, aoContinuar, aoInicio) {
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal cont-modal';
+  const ep = item.tipo === 'serie' ? _epDoProgresso(item, pr) : null;
+  let sub;
+  if (ep) { const { s, e } = epInfo(ep.nome); sub = `T${s} · EP ${e} — ${fmtTempo(pr.pos)}`; }
+  else sub = t('Parou em') + ' ' + fmtTempo(pr.pos);
+  ov.innerHTML = `<div class="cont-card">
+    <div class="cont-tit">${escapar(t('Continuar assistindo?'))}</div>
+    <div class="cont-sub">${escapar(item.titulo)}</div>
+    <div class="cont-pos">${escapar(sub)}</div>
+    <div class="cont-acoes">
+      <button class="btn btn-primario focusable" data-c="1"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> ${escapar(t('Continuar'))}</button>
+      <button class="btn btn-secundario focusable" data-i="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/></svg> ${escapar(t('Do início'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const ant = SpatialNav.atual;
+  const fechar = () => { ov.remove(); if (ant && document.contains(ant)) SpatialNav.setFocus(ant); };
+  ov._onVoltar = fechar;
+  ov.querySelector('[data-c]').addEventListener('click', () => { ov.remove(); aoContinuar(); });
+  ov.querySelector('[data-i]').addEventListener('click', () => { ov.remove(); aoInicio(); });
+  SpatialNav.setFocus(ov.querySelector('[data-c]'));
+}
+
 // Créditos e mais informações — menu à esquerda + painel à direita (estilo GTV).
 function abrirCreditos(item, inf, cred) {
   const sec = [];
-  if (cred && cred.direcao && cred.direcao.length) sec.push(['Direção', cred.direcao.join(', ')]);
-  if (cred && cred.elenco && cred.elenco.length) sec.push(['Elenco', cred.elenco.map((a) => a.personagem ? `${a.nome} — ${a.personagem}` : a.nome).join('\n')]);
-  const gen = (item.generos || []).join(', '); if (gen) sec.push(['Gêneros', gen]);
-  const sin = (inf && inf.sinopse) || item.sinopse || ''; if (sin) sec.push(['Sinopse', sin]);
-  if (!sec.length) sec.push(['Informações', 'Sem informações adicionais.']);
+  if (cred && cred.direcao && cred.direcao.length) sec.push([t('Direção'), cred.direcao.join(', ')]);
+  if (cred && cred.elenco && cred.elenco.length) sec.push([t('Elenco'), cred.elenco.map((a) => a.personagem ? `${a.nome} — ${a.personagem}` : a.nome).join('\n')]);
+  const gen = (item.generos || []).join(', '); if (gen) sec.push([t('Gêneros'), gen]);
+  const sin = (inf && inf.sinopse) || item.sinopse || ''; if (sin) sec.push([t('Sinopse'), sin]);
+  if (!sec.length) sec.push([t('Informações'), t('Sem informações adicionais.')]);
 
   const ov = document.createElement('div');
   ov.className = 'nav-modal cr';
   ov.innerHTML = `
+    ${htmlVoltar()}
     <div class="cr-card">
       <div class="cr-menu">
         <div class="cr-titulo">${escapar(item.titulo)}</div>
@@ -1065,13 +1668,14 @@ function abrirEpisodios(item, inf) {
   ov.innerHTML = `
     <div class="ep-bg" id="ep-bg" style="background:${FUNDO_PADRAO}"></div>
     <div class="ep-grad"></div>
+    ${htmlVoltar()}
     <div class="ep-conteudo">
       <div class="ep-cabecalho">
         <img class="ep-logo" id="ep-logo" alt="" style="display:none">
         <h1 class="ep-titulo" id="ep-titulo">${escapar(item.titulo)}</h1>
       </div>
       <div class="ep-temps" id="ep-temps">
-        ${temps.map((t) => `<div class="ep-temp-item focusable${t === tAtual ? ' ativa' : ''}" data-s="${t}"><span class="ep-temp-dot"></span><span class="ep-temp-lbl">Temporada ${t}</span></div>`).join('')}
+        ${(() => { const _tTemp = t('Temporada'); return temps.map((s) => `<div class="ep-temp-item focusable${s === tAtual ? ' ativa' : ''}" data-s="${s}"><span class="ep-temp-dot"></span><span class="ep-temp-lbl">${escapar(_tTemp)} ${s}</span></div>`).join(''); })()}
       </div>
       <div class="ep-centro"><div class="ep-lista" id="ep-lista"></div></div>
     </div>`;
@@ -1154,7 +1758,7 @@ function abrirEpisodios(item, inf) {
       const el = document.createElement('div');
       el.className = 'ep-item focusable';
       el.innerHTML = epItemHTML(ep, e, cache ? cache[e] : null, temTmdb && !cache);
-      el.addEventListener('click', () => { _epCtrl = null; ov.remove(); const d = document.getElementById('detalhe-overlay'); if (d) d.remove(); abrirPlayer({ titulo: rotuloEp(item, ep), url: ep.url }); });
+      el.addEventListener('click', () => { _epCtrl = null; ov.remove(); const d = document.getElementById('detalhe-overlay'); if (d) d.remove(); const rot = rotuloEp(item, ep); abrirPlayer({ titulo: rot, url: ep.url }, ctxProgresso(item, ep.url, rot)); });
       lista.appendChild(el);
       refs.push({ el, e });
     }
@@ -1208,7 +1812,9 @@ function fmtTempo(s) {
   return h > 0 ? `${h}:${String(m % 60).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
-function abrirPlayer(item) {
+let _playerCtx = null, _lastProgSave = 0;   // contexto p/ "continuar assistindo"
+function abrirPlayer(item, ctx, reiniciar) {
+  _playerCtx = ctx || null; _lastProgSave = 0;
   const ov = document.createElement('div');
   ov.id = 'player-overlay';
   ov.className = 'nav-modal player-modal';
@@ -1256,7 +1862,7 @@ function abrirPlayer(item) {
   video.addEventListener('loadstart', () => spinner(true));
   video.addEventListener('playing', () => spinner(false));
   video.addEventListener('canplay', () => spinner(false));
-  video.addEventListener('error', () => erroPlayer('Não foi possível reproduzir. O formato pode exigir o player nativo da TV.'));
+  video.addEventListener('error', () => erroPlayer(t('Não foi possível reproduzir. O formato pode exigir o player nativo da TV.')));
 
   const fonte = item.url || TEST_HLS;     // URL real do item (fallback: teste)
   const ehHls = /\.m3u8(\?|$)/i.test(fonte);
@@ -1265,23 +1871,35 @@ function abrirPlayer(item) {
     video.src = fonte;                    // arquivo (mp4/ts) ou HLS nativo
   } else if (window.Hls && Hls.isSupported()) {
     _hls = new Hls();
-    _hls.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal) erroPlayer('Não foi possível reproduzir este conteúdo.'); });
+    _hls.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal) erroPlayer(t('Não foi possível reproduzir este conteúdo.')); });
     _hls.loadSource(fonte);
     _hls.attachMedia(video);
   } else {
     video.src = fonte;
   }
   video.play().catch(() => {});
+  // Retomar de onde parou (mesmo item/URL) — "continuar assistindo" por perfil.
+  // Se `reiniciar` (escolheu "Do início"), começa do zero.
+  video.addEventListener('loadedmetadata', () => {
+    if (reiniciar || !_playerCtx) return;
+    const pr = Biblioteca.progressoDe(_playerCtx.id);
+    if (pr && pr.url === fonte && pr.pos > 15 && (!pr.dur || pr.pos < pr.dur - 20)) { try { video.currentTime = pr.pos; } catch (_) {} }
+  }, { once: true });
 
   const q = (a) => ov.querySelector(`[data-acao="${a}"]`);
   q('fechar').addEventListener('click', fecharPlayer);
   q('playpause').addEventListener('click', () => (video.paused ? video.play() : video.pause()));
   q('retroceder').addEventListener('click', () => { video.currentTime = Math.max(0, video.currentTime - 10); revelarControles(); });
   q('avancar').addEventListener('click', () => { video.currentTime = Math.min(video.duration || 1e9, video.currentTime + 10); revelarControles(); });
-  q('legendas').addEventListener('click', () => toast('Legendas — em breve'));
-  q('audio').addEventListener('click', () => toast('Faixas de áudio — em breve'));
+  q('legendas').addEventListener('click', () => { abrirMenuLegendas(video); revelarControles(); });
+  q('audio').addEventListener('click', () => { abrirMenuAudio(video); revelarControles(); });
 
   video.addEventListener('timeupdate', () => {
+    // Salva o progresso a cada ~5s (continuar assistindo por perfil).
+    if (_playerCtx && video.duration && Date.now() - _lastProgSave > 5000) {
+      _lastProgSave = Date.now();
+      Biblioteca.salvarProgresso(_playerCtx, video.currentTime, video.duration);
+    }
     if (_scrub) return; // durante a busca, a barra mostra o ALVO (preview)
     const prog = document.getElementById('pc-prog');
     if (!prog) return;
@@ -1373,16 +1991,16 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight' && at.classList.contains('tv-cat-item')) {
     e.preventDefault(); e.stopPropagation();
     mostrarCanais(at.dataset.cat);
-  } else if (e.key === 'ArrowLeft' && at.classList.contains('tv-canal-item')) {
+  } else if (e.key === 'ArrowLeft' && at.classList.contains('tv-canal-main')) {
     e.preventDefault(); e.stopPropagation();
-    mostrarCategorias();
+    mostrarCategorias();                       // ← do retângulo principal volta p/ categorias
   } else if (e.key === 'ArrowLeft' && at.closest('.tv-col-dir')) {
     // Da coluna do player (preview/EPG/estrela) → vai para a LISTA DE CANAIS
     // que esta aparecendo (nao para o sliver de categorias).
     const pane = document.getElementById('tv-pane-canais');
     const alvoCanal = pane && (
-      pane.querySelector(`.tv-canal-item[data-canal="${_tvCanalPreview ? _tvCanalPreview.id : ''}"]`) ||
-      pane.querySelector('.tv-canal-item')
+      pane.querySelector(`.tv-canal-main[data-canal="${_tvCanalPreview ? _tvCanalPreview.id : ''}"]`) ||
+      pane.querySelector('.tv-canal-main')
     );
     if (alvoCanal) {
       e.preventDefault(); e.stopPropagation();
@@ -1444,7 +2062,20 @@ function revelarControles() {
 
 function fecharPlayer() {
   clearTimeout(_hideTimer);
+  // Salva o ponto final ao sair (continuar assistindo / concluir → recomendação).
+  const vf = document.getElementById('player-video');
+  if (_playerCtx && vf && vf.duration) Biblioteca.salvarProgresso(_playerCtx, vf.currentTime, vf.duration);
+  _playerCtx = null;
   if (_hls) { _hls.destroy(); _hls = null; }
+  // "Continuar assistindo" mudou: se o Início está visível, atualiza-o na hora;
+  // senão descarta o cache pra rebuildar na volta.
+  const ativo = document.querySelector('.nav-item.ativo');
+  const main = document.getElementById('conteudo');
+  if (ativo && ativo.dataset.secao === 'inicio' && main && main.querySelector('.trilhos')) {
+    atualizarTrilhosPerfil(main); _secCacheSet('inicio', main.firstElementChild);
+  } else {
+    delete _secoesCache['inicio'];
+  }
   const ov = document.getElementById('player-overlay');
   if (ov) ov.remove();
   const f = document.querySelector('#conteudo .focusable');
@@ -1471,6 +2102,12 @@ function abrirLive(canal) {
       <button class="live-top-btn focusable" data-acao="fontes">
         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2" stroke="#fff" stroke-width="2" fill="none"/><path d="M8 21h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg> Fontes
       </button>
+      <button class="live-top-btn focusable" data-acao="audio">
+        <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3z"/><path d="M16 8.5a4 4 0 0 1 0 7" stroke="#fff" stroke-width="1.8" fill="none"/></svg> ${escapar(t('Áudio'))}
+      </button>
+      <button class="live-top-btn focusable" data-acao="legendas">
+        <span class="cc">CC</span>
+      </button>
     </div>
     <div class="live-bar">
       <div class="live-bar-esq">
@@ -1483,7 +2120,7 @@ function abrirLive(canal) {
       </div>
       <div class="live-bar-dir">
         <div class="live-relogio" id="live-relogio">--:--</div>
-        <div class="live-logo" style="background:${gradiente(canal.nome, true)}"><span>${iniciais(canal.nome)}</span></div>
+        <div class="live-logo" style="background:${gradiente(canal.nome, true)}">${logoCanalInner(canal.nome, canal.logo)}</div>
         <button class="live-epg-btn focusable" data-acao="epg">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke="#fff" stroke-width="2" fill="none"/><path d="M3 9h18M8 4v16" stroke="#fff" stroke-width="2"/></svg> Programação
         </button>
@@ -1505,19 +2142,25 @@ function abrirLive(canal) {
   const q = (a) => ov.querySelector(`[data-acao="${a}"]`);
   q('fechar').addEventListener('click', fecharLive);
   q('favoritar').addEventListener('click', () => alternarFavorito(canal.id));
+  // Legendas/áudio do canal ao vivo (o <video> é o do preview, reusado aqui).
+  q('audio').addEventListener('click', () => abrirMenuAudio(document.getElementById('tv-prev-video')));
+  q('legendas').addEventListener('click', () => abrirMenuLegendas(document.getElementById('tv-prev-video')));
   q('qualidade').addEventListener('click', () => {
-    if (!canal.variantes || canal.variantes.length < 2) { toast('Sem outras qualidades nesta fonte'); return; }
-    abrirMenu('Qualidade', canal.variantes.map((v) => v.rotulo), (i) => tocarNoPreview(canal.variantes[i].url, false));
+    const fonte = _qAtual && _qAtual.fontes[_qAtual.fi];
+    const vars = fonte ? variantesDaFonte(fonte) : (canal.variantes || []);
+    if (vars.length < 2) { toast(t('Sem outras qualidades nesta fonte')); return; }
+    abrirMenu(t('Qualidade'), vars.map((v) => v.rotulo), (i) => { if (_qAtual) _qAtual.vi = i; tocarNoPreview(vars[i].url, false); });
   });
   q('fontes').addEventListener('click', () => {
-    if (!canal.fontes || canal.fontes.length < 2) { toast('Sem outras fontes'); return; }
-    abrirMenu('Fontes', canal.fontes.map((f, i) => f.nome || ('Fonte ' + (i + 1))), (i) => {
-      const f = canal.fontes[i];
-      if (f.variantes && f.variantes.length) canal.variantes = f.variantes; // qualidade segue a fonte
-      tocarNoPreview(f.url, false);
+    const fontes = _qAtual ? _qAtual.fontes : fontesDoCanal(canal);
+    if (fontes.length < 2) { toast(t('Sem outras fontes')); return; }
+    abrirMenu(t('Fontes'), fontes.map((f, i) => f.nome || (t('Fonte') + ' ' + (i + 1))), (i) => {
+      const f = fontes[i], vars = variantesDaFonte(f), v = escolherVariante(vars, qualidadePadrao());
+      if (_qAtual) { _qAtual.fi = i; _qAtual.vi = Math.max(0, vars.indexOf(v)); }
+      tocarNoPreview((v || f).url, false);
     });
   });
-  q('epg').addEventListener('click', () => toast('Programação — em breve'));
+  q('epg').addEventListener('click', () => toast(t('Programação — em breve')));
 
   const tick = () => { const r = document.getElementById('live-relogio'); if (r) r.textContent = hhmm(new Date()); };
   tick();
@@ -1588,6 +2231,84 @@ function gerarQr(elId, dados) {
 // Tela cheia mostrada quando NAO ha lista (app neutro abre vazio — conformidade).
 // Layout estilo apps de TV: logo no topo-centro, QR+link a esquerda, login
 // (Xtream OU URL M3U) a direita, MAC/Key no rodape.
+// ── Teclado on-screen (TV) ───────────────────────────────────────────────────
+// O IME do sistema é inconstante em Tizen/webOS (e no desktop nem aparece), então
+// os campos de texto (Xtream/URL) abrem ESTE teclado próprio, navegável por D-pad.
+// Também aceita teclado físico (desktop/teste). Abre ao ativar (Enter/clique) o campo.
+let _kbShift = false;
+// TVs (LG webOS / Samsung Tizen) têm teclado virtual NATIVO do sistema que abre
+// ao focar um <input>. Nesses casos NÃO abrimos o nosso (evita 2 teclados) —
+// só focamos o campo e deixamos o nativo agir. No desktop/navegador comum (sem
+// VKB do sistema), abrimos o teclado on-screen do Hero Play.
+const _tvComTecladoNativo = () => /web[0o]s|tizen|netcast|smart-?tv/i.test(navigator.userAgent);
+function abrirTeclado(input) {
+  if (!input || document.querySelector('.tv-kb')) return;
+  if (_tvComTecladoNativo()) {
+    try { input.focus({ preventScroll: true }); } catch (_) { try { input.focus(); } catch (_) {} }
+    return;
+  }
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal tv-kb';
+  const rotulo = input.getAttribute('placeholder') || t('Digite');
+  let valor = input.value || '';
+  _kbShift = false;
+  const linhas = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+  const simbolos = ['.', '/', ':', '@', '-', '_', '?', '&', '=', '+'];
+
+  const pintar = () => {
+    const d = ov.querySelector('#tv-kb-disp');
+    if (d) d.innerHTML = (valor ? escapar(valor) : `<span class="tv-kb-ph">${escapar(t('Digite…'))}</span>`) + '<span class="tv-kb-caret"></span>';
+  };
+  const aplicar = () => { input.value = valor; input.dispatchEvent(new Event('input', { bubbles: true })); };
+  const digitar = (t) => { valor += t; aplicar(); pintar(); };
+  const render = () => {
+    const up = _kbShift;
+    const rows = linhas.map((ln, i) => {
+      const keys = [...ln].map((c) => { const ch = up ? c.toUpperCase() : c; return `<button class="tv-kb-key focusable" data-k="${ch}">${ch}</button>`; }).join('');
+      const extra = i === 3
+        ? `<button class="tv-kb-key tv-kb-act focusable" data-acao="shift"${up ? ' data-on="1"' : ''}>⇧</button><button class="tv-kb-key tv-kb-act focusable" data-acao="apagar">⌫</button>`
+        : '';
+      return `<div class="tv-kb-row">${keys}${extra}</div>`;
+    }).join('');
+    const simbRow = `<div class="tv-kb-row">${simbolos.map((c) => `<button class="tv-kb-key focusable" data-k="${c}">${c === '&' ? '&amp;' : c}</button>`).join('')}</div>`;
+    const acaoRow = `<div class="tv-kb-row">
+      <button class="tv-kb-key tv-kb-wide focusable" data-k=".com">.com</button>
+      <button class="tv-kb-key tv-kb-space focusable" data-acao="espaco">${escapar(t('Espaço'))}</button>
+      <button class="tv-kb-key tv-kb-wide focusable" data-acao="limpar">${escapar(t('Limpar'))}</button>
+      <button class="tv-kb-key tv-kb-ok focusable" data-acao="ok">OK</button>
+    </div>`;
+    ov.innerHTML = `<div class="tv-kb-card">
+      <div class="tv-kb-titulo">${escapar(rotulo)}</div>
+      <div class="tv-kb-display" id="tv-kb-disp"></div>
+      <div class="tv-kb-grid">${rows}${simbRow}${acaoRow}</div>
+    </div>`;
+    pintar();
+  };
+  const fisico = (e) => {
+    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      valor += e.key; aplicar(); pintar(); e.stopPropagation(); e.preventDefault();
+    }
+  };
+  const fechar = () => { aplicar(); window.removeEventListener('keydown', fisico, true); ov.remove(); SpatialNav.setFocus(input); };
+
+  ov.addEventListener('click', (e) => {
+    const k = e.target.closest('.tv-kb-key'); if (!k) return;
+    const a = k.dataset.acao;
+    if (a === 'ok') return fechar();
+    if (a === 'shift') { _kbShift = !_kbShift; render(); const s = ov.querySelector('[data-acao="shift"]'); if (s) SpatialNav.setFocus(s); return; }
+    if (a === 'apagar') { valor = valor.slice(0, -1); aplicar(); pintar(); return; }
+    if (a === 'espaco') return digitar(' ');
+    if (a === 'limpar') { valor = ''; aplicar(); pintar(); return; }
+    digitar(k.dataset.k);
+  });
+
+  render();
+  document.body.appendChild(ov);
+  ov._onVoltar = fechar;
+  window.addEventListener('keydown', fisico, true);
+  SpatialNav.setFocus(ov.querySelector('.tv-kb-key'));
+}
+
 function mostrarOnboarding() {
   document.getElementById('app').classList.add('oculto');
   let ob = document.getElementById('onboarding');
@@ -1601,34 +2322,34 @@ function mostrarOnboarding() {
   ob.innerHTML = `
     <div class="ob-wrap ob-grid">
       <div class="ob-top">
-        <div class="logo ob-logo"><span class="logo-mark">▶</span><span class="ob-logo-text"><b>Hero</b> Play</span></div>
+        <div class="logo ob-logo"><img class="logo-mark" src="heroplay-icon.svg" alt="Hero Play"><span class="ob-logo-text"><b>Hero</b> Play</span></div>
       </div>
 
       <div class="ob-left">
-        <h2 class="ob-h2">Adicionar Playlist</h2>
+        <h2 class="ob-h2">${escapar(t('Adicionar Playlist'))}</h2>
         <div class="ob-qr" id="ob-qr"></div>
-        <div class="ob-left-txt">Adicione e ative <b>tudo pelo site</b></div>
+        <div class="ob-left-txt">${t('Adicione e ative <b>tudo pelo site</b>')}</div>
         <div class="ob-link">heroplaytv.com/upload</div>
-        <button class="btn btn-secundario focusable" id="ob-reload">↻ Recarregar</button>
-        <div class="ob-ou"><span>ou</span></div>
-        <div class="ob-hint">Use as credenciais ou a URL da playlist no formulário ao lado</div>
+        <button class="btn btn-secundario focusable" id="ob-reload">${escapar(t('↻ Recarregar'))}</button>
+        <div class="ob-ou"><span>${escapar(t('ou'))}</span></div>
+        <div class="ob-hint">${escapar(t('Use as credenciais ou a URL da playlist no formulário ao lado'))}</div>
       </div>
 
       <div class="ob-right">
-        <h2 class="ob-h2 ob-right-h">Entrar com credenciais</h2>
+        <h2 class="ob-h2 ob-right-h">${escapar(t('Entrar com credenciais'))}</h2>
         <div class="ob-tabs">
           <button class="ob-tab focusable ativo" data-modo="xtream">Xtream</button>
           <button class="ob-tab focusable" data-modo="m3u">M3U / URL</button>
         </div>
         <div class="ob-form" id="ob-form-xtream">
-          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="x-host" placeholder="Servidor (http://host:porta)" autocomplete="off" spellcheck="false"></div>
-          <div class="ob-campo"><span class="ob-ico">${IC_USER}</span><input class="ob-input focusable" id="x-user" placeholder="Usuário" autocomplete="off" spellcheck="false"></div>
-          <div class="ob-campo"><span class="ob-ico">${IC_LOCK}</span><input class="ob-input focusable" id="x-pass" type="password" placeholder="Senha" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="x-host" placeholder="${escapar(t('Servidor (http://host:porta)'))}" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_USER}</span><input class="ob-input focusable" id="x-user" placeholder="${escapar(t('Usuário'))}" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_LOCK}</span><input class="ob-input focusable" id="x-pass" type="password" placeholder="${escapar(t('Senha'))}" autocomplete="off" spellcheck="false"></div>
         </div>
         <div class="ob-form oculto" id="ob-form-m3u">
           <div class="ob-campo"><span class="ob-ico">${IC_LINK}</span><input class="ob-input focusable" id="m-url" placeholder="https://.../lista.m3u" autocomplete="off" spellcheck="false"></div>
         </div>
-        <button class="btn btn-primario focusable" id="ob-add">Conectar</button>
+        <button class="btn btn-primario focusable" id="ob-add">${escapar(t('Conectar'))}</button>
         <div class="ob-erro" id="ob-erro"></div>
       </div>
     </div>
@@ -1641,6 +2362,7 @@ function mostrarOnboarding() {
   document.getElementById('ob-add').addEventListener('click', onboardingAdicionar);
   ob.querySelectorAll('.ob-tab').forEach((t) =>
     t.addEventListener('click', () => trocarModoOnboarding(t.dataset.modo)));
+  ob.querySelectorAll('.ob-input').forEach((inp) => inp.addEventListener('click', () => abrirTeclado(inp)));
   SpatialNav.setFocus(document.getElementById('x-host'));
 }
 
@@ -1658,35 +2380,36 @@ function trocarModoOnboarding(modo) {
 function onboardingAdicionar() {
   const val = (id) => (document.getElementById(id).value || '').trim();
   const erro = (m) => { document.getElementById('ob-erro').textContent = m; };
-  const modo = document.querySelector('.ob-tab.ativo')?.dataset.modo || 'xtream';
-  let lista_url, epg_url;
+  const _tab = document.querySelector('.ob-tab.ativo');
+  const modo = (_tab && _tab.dataset.modo) || 'xtream';
+  let lista_url, epg_url, user = '';
 
   if (modo === 'xtream') {
-    const host = val('x-host'), user = val('x-user'), pass = val('x-pass');
-    if (!host || !user || !pass) return erro('Preencha servidor, usuário e senha.');
+    const host = val('x-host'); user = val('x-user'); const pass = val('x-pass');
+    if (!host || !user || !pass) return erro(t('Preencha servidor, usuário e senha.'));
     ({ lista_url, epg_url } = ListaUtil.montarXtream(host, user, pass));
   } else {
     lista_url = val('m-url');
-    if (!/^https?:\/\//i.test(lista_url)) return erro('Informe uma URL M3U válida (http/https).');
+    if (!/^https?:\/\//i.test(lista_url)) return erro(t('Informe uma URL M3U válida (http/https).'));
     epg_url = ListaUtil.derivarEpg(lista_url);
   }
 
   // Registra na nuvem (best-effort) + grava local, depois carrega a lista.
   const ob = document.getElementById('onboarding');
   if (ob) ob.remove();
-  mostrarLoading('Adicionando sua lista…');
-  Dispositivo.adicionar(lista_url, epg_url).then(() => iniciarApp());
+  mostrarLoading(t('Adicionando sua lista…'));
+  Dispositivo.adicionar(lista_url, epg_url, _nomeDaPlaylist(modo, lista_url, user)).then(() => iniciarApp());
 }
 
 async function recarregarOnboarding() {
-  toast('Verificando…');
+  toast(t('Verificando…'));
   await Dispositivo.consultar();
   if (Dispositivo.temLista()) {
     const ob = document.getElementById('onboarding');
     if (ob) ob.remove();
     iniciarApp();
   } else {
-    toast('Nenhuma lista ainda. Adicione no celular e tente de novo.');
+    toast(t('Nenhuma lista ainda. Adicione no celular e tente de novo.'));
   }
 }
 
@@ -1698,14 +2421,13 @@ function mostrarAvisoTeste() {
   ov.className = 'nav-modal';
   ov.innerHTML = `
     <div class="aviso-card">
-      <div class="aviso-badge">Período de teste</div>
-      <h1 class="aviso-titulo">${Dispositivo.diasTeste()} dias grátis</h1>
-      <p class="aviso-sub">Sua lista foi adicionada e o app está em teste. Para continuar
-        depois do período, ative o app — você mesmo pode ativar escaneando o QR.</p>
+      <div class="aviso-badge">${escapar(t('Período de teste'))}</div>
+      <h1 class="aviso-titulo">${escapar(t('{n} dias grátis').replace('{n}', Dispositivo.diasTeste()))}</h1>
+      <p class="aviso-sub">${escapar(t('Sua lista foi adicionada e o app está em teste. Para continuar depois do período, ative o app — você mesmo pode ativar escaneando o QR.'))}</p>
       <div class="ob-qr" id="aviso-qr"></div>
-      <div class="aviso-rotulo">Ativar / gerenciar</div>
+      <div class="aviso-rotulo">${escapar(t('Ativar / gerenciar'))}</div>
       <div class="ob-link">heroplaytv.com/upload</div>
-      <button class="btn btn-primario focusable" id="aviso-ok">Continuar no teste</button>
+      <button class="btn btn-primario focusable" id="aviso-ok">${escapar(t('Continuar no teste'))}</button>
     </div>`;
   document.body.appendChild(ov);
   ov._onVoltar = fecharAvisoTeste;
@@ -1721,43 +2443,194 @@ function fecharAvisoTeste() {
   if (f) SpatialNav.setFocus(f);
 }
 
-// Seção Playlists: mostra a lista atual + QR para adicionar/trocar.
+// ── Playlists (Minhas Playlists) ────────────────────────────────────────────
+const IC_PL_REFRESH = '<svg viewBox="0 0 24 24" style="fill:none" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v5h-5"/></svg>';
+const IC_PL_TRASH = '<svg viewBox="0 0 24 24" style="fill:none" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+const IC_PL_ADD = '<svg viewBox="0 0 24 24" style="fill:none" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const IC_PL_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+let _plBusy = false;
+
+// Catálogo vazio (estrutura segura quando o device fica sem playlist).
+function _listaVazia() {
+  return { catalogo: { inicio: { trilhos: [] }, filmes: { trilhos: [] }, series: { trilhos: [] } }, canais: [], filmes: [], series: [], indice: {} };
+}
+
+// Shell da tela; as playlists chegam async (Dispositivo.listarPlaylists).
 function renderPlaylists() {
-  const r = Dispositivo.registro();
-  const tem = Dispositivo.temLista();
-  const corpoLista = tem
-    ? `<div class="pl-ok">✓ Lista configurada</div>
-       <div class="pl-url">${escapar(r.lista_url)}</div>
-       ${r.epg_url ? `<div class="pl-epg">EPG: ${escapar(r.epg_url)}</div>` : ''}
-       <div class="pl-status">Status: <b>${STATUS_PT[Dispositivo.status()] || Dispositivo.status()}</b></div>`
-    : `<div class="pl-vazio">Nenhuma lista configurada</div>`;
   return `<div class="secao secao-pl">
-    <h2 class="titulo-secao">Sua lista</h2>
-    <div class="pl-card">
-      ${corpoLista}
-      <p class="pl-add">Para adicionar ou trocar a lista, escaneie o QR com o celular:</p>
-      <div class="pl-grid">
-        <div class="ob-qr" id="pl-qr"></div>
-        <div class="ob-cred">
-          <div><span>MAC</span><b>${Dispositivo.mac()}</b></div>
-          <div><span>Key</span><b>${Dispositivo.key()}</b></div>
-        </div>
+    <div class="pl-topo">
+      <div class="pl-topo-tit">
+        <h2 class="pl-titulo">${escapar(t('Minhas Playlists'))}</h2>
+        <div class="pl-sub" id="pl-sub">${escapar(t('Carregando…'))}</div>
       </div>
-      <button class="btn btn-secundario focusable" id="pl-reload">↻ Recarregar</button>
+      <div class="pl-topo-acoes">
+        <button class="btn btn-secundario focusable" id="pl-add">${IC_PL_ADD} ${escapar(t('Adicionar Playlist'))}</button>
+        <button class="btn btn-secundario focusable" id="pl-atualizar">${IC_PL_REFRESH} ${escapar(t('Atualizar'))}</button>
+      </div>
     </div>
+    <div class="pl-lista" id="pl-lista"><div class="pl-skel">${escapar(t('Carregando playlists…'))}</div></div>
   </div>`;
+}
+
+// Busca as playlists DO DEVICE no Supabase (via Edge Function) e desenha as linhas.
+async function preencherPlaylists() {
+  const lista = document.getElementById('pl-lista');
+  if (!lista) return;
+  const pls = await Dispositivo.listarPlaylists();
+  if (!document.getElementById('pl-lista')) return; // saiu da tela
+  const sub = document.getElementById('pl-sub');
+  if (sub) sub.textContent = pls.length ? `${pls.length} ${t(pls.length > 1 ? 'playlists' : 'playlist')}` : t('Nenhuma playlist');
+  if (!pls.length) {
+    lista.innerHTML = `<div class="pl-vazio">
+      <div class="pl-vazio-tit">${escapar(t('Nenhuma playlist neste dispositivo'))}</div>
+      <div class="pl-vazio-sub">${escapar(t('Use "Adicionar Playlist" para começar'))}</div>
+    </div>`;
+    return;
+  }
+  lista.innerHTML = pls.map((p) => `
+    <div class="pl-row${p.selecionada ? ' ativa' : ''}">
+      <button class="pl-row-nome focusable" data-acao="selecionar" data-id="${escapar(p.id)}">
+        <span class="pl-check">${p.selecionada ? IC_PL_CHECK : ''}</span>
+        <span class="pl-nome">${escapar(p.nome || 'Playlist')}</span>
+        ${p.tipo ? `<span class="pl-tipo">${escapar(p.tipo)}</span>` : ''}
+      </button>
+      <button class="pl-row-btn focusable" data-acao="recarregar" data-id="${escapar(p.id)}" title="${escapar(t('Recarregar títulos'))}">${IC_PL_REFRESH}</button>
+      <button class="pl-row-btn pl-row-del focusable" data-acao="excluir" data-id="${escapar(p.id)}" title="${escapar(t('Excluir'))}">${IC_PL_TRASH}</button>
+    </div>`).join('');
+}
+
+// Recarrega o catálogo a partir da playlist ATIVA do device (após selecionar/excluir/add).
+async function _recarregarCatalogoAtivo() {
+  await Dispositivo.consultar();                 // GET retorna a URL da playlist selecionada
+  const reg = Dispositivo.registro();
+  // `true` = ignora o cache e re-parseia (é isto que "Recarregar"/trocar playlist
+  // deve fazer; o boot normal usa o cache).
+  if (reg && reg.lista_url) { const ok = await carregarLista(reg.lista_url, true); if (!ok) aplicarLista(_listaVazia()); }
+  else aplicarLista(_listaVazia());
+  _heroItem = null;                              // força o hero a atualizar
+  limparCacheSecoes();                           // catálogo mudou → descarta o DOM cacheado
+  precarregarLogosCanais();                      // re-aquece os ícones da nova lista
+}
+
+// Ações das linhas de playlist (selecionar/recarregar ativam a playlist e
+// recarregam os títulos; excluir tira do device e apaga do Supabase se órfã).
+async function acaoPlaylist(acao, id) {
+  if (_plBusy || !id) return;
+  _plBusy = true;
+  try {
+    if (acao === 'excluir') {
+      toast(t('Excluindo…'));
+      await Dispositivo.excluirPlaylist(id);
+      await _recarregarCatalogoAtivo();
+      toast(t('Playlist excluída'));
+    } else { // selecionar | recarregar
+      toast(acao === 'recarregar' ? t('Recarregando títulos…') : t('Selecionando…'));
+      await Dispositivo.selecionarPlaylist(id);
+      await _recarregarCatalogoAtivo();
+      toast(t('Pronto'));
+    }
+  } finally { _plBusy = false; }
+  preencherPlaylists();                          // atualiza ✓/contagem
+}
+
+// Deriva o nome da playlist a partir das credenciais (Xtream: usuário; M3U: host).
+function _nomeDaPlaylist(modo, lista_url, user) {
+  if (modo === 'xtream') return (user || '').trim() || 'Playlist';
+  try { const u = new URL(lista_url); return u.searchParams.get('username') || u.hostname || 'Playlist'; } catch (_) { return 'Playlist'; }
+}
+
+// Tela "Adicionar Playlist" (overlay estilo onboarding: QR + Xtream/M3U). Ao
+// conectar, adiciona a playlist (nome derivado), recarrega e volta p/ Playlists.
+function abrirAddPlaylist() {
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal addpl';
+  ov.innerHTML = `
+    <div class="ob-wrap ob-grid">
+      <div class="ob-top"><div class="logo ob-logo"><img class="logo-mark" src="heroplay-icon.svg" alt="Hero Play"><span class="ob-logo-text"><b>Hero</b> Play</span></div></div>
+      <div class="ob-left">
+        <h2 class="ob-h2">${escapar(t('Adicionar Playlist'))}</h2>
+        <div class="ob-qr" id="ap-qr"></div>
+        <div class="ob-left-txt">${t('Adicione e ative <b>tudo pelo site</b>')}</div>
+        <div class="ob-link">heroplaytv.com/upload</div>
+        <div class="ap-cred"><span>Key <b>${Dispositivo.key()}</b></span><span>MAC <b>${Dispositivo.mac()}</b></span></div>
+        <div class="ob-ou"><span>${escapar(t('ou'))}</span></div>
+        <div class="ob-hint">${escapar(t('Use as credenciais ou a URL da playlist ao lado'))}</div>
+      </div>
+      <div class="ob-right">
+        <h2 class="ob-h2 ob-right-h">${escapar(t('Adicionar por credenciais ou Link'))}</h2>
+        <div class="ob-tabs">
+          <button class="ob-tab focusable ativo" data-modo="xtream">Xtream</button>
+          <button class="ob-tab focusable" data-modo="m3u">M3U / URL</button>
+        </div>
+        <div class="ob-form" id="ap-form-xtream">
+          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="ap-host" placeholder="${escapar(t('Servidor (http://host:porta)'))}" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_USER}</span><input class="ob-input focusable" id="ap-user" placeholder="${escapar(t('Usuário'))}" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_LOCK}</span><input class="ob-input focusable" id="ap-pass" type="password" placeholder="${escapar(t('Senha'))}" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="ob-form oculto" id="ap-form-m3u">
+          <div class="ob-campo"><span class="ob-ico">${IC_LINK}</span><input class="ob-input focusable" id="ap-url" placeholder="https://.../lista.m3u" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <button class="btn btn-primario focusable" id="ap-add">${escapar(t('Conectar'))}</button>
+        <div class="ob-erro" id="ap-erro"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov._onVoltar = () => { ov.remove(); const f = document.getElementById('pl-add'); if (f) SpatialNav.setFocus(f); };
+  gerarQr('ap-qr', Dispositivo.urlAtivacao());
+  ov.querySelectorAll('.ob-tab').forEach((t) => t.addEventListener('click', () => {
+    ov.querySelectorAll('.ob-tab').forEach((x) => x.classList.toggle('ativo', x === t));
+    ov.querySelector('#ap-form-xtream').classList.toggle('oculto', t.dataset.modo !== 'xtream');
+    ov.querySelector('#ap-form-m3u').classList.toggle('oculto', t.dataset.modo !== 'm3u');
+    SpatialNav.setFocus(document.getElementById(t.dataset.modo === 'xtream' ? 'ap-host' : 'ap-url'));
+  }));
+  ov.querySelector('#ap-add').addEventListener('click', () => addPlaylistSubmit(ov));
+  ov.querySelectorAll('.ob-input').forEach((inp) => inp.addEventListener('click', () => abrirTeclado(inp)));
+  SpatialNav.setFocus(document.getElementById('ap-host'));
+}
+
+async function addPlaylistSubmit(ov) {
+  const val = (id) => (document.getElementById(id).value || '').trim();
+  const erro = (m) => { const e = document.getElementById('ap-erro'); if (e) e.textContent = m; };
+  const _tab = ov.querySelector('.ob-tab.ativo');
+  const modo = (_tab && _tab.dataset.modo) || 'xtream';
+  let lista_url, epg_url, user = '';
+  if (modo === 'xtream') {
+    const host = val('ap-host'); user = val('ap-user'); const pass = val('ap-pass');
+    if (!host || !user || !pass) return erro(t('Preencha servidor, usuário e senha.'));
+    ({ lista_url, epg_url } = ListaUtil.montarXtream(host, user, pass));
+  } else {
+    lista_url = val('ap-url');
+    if (!/^https?:\/\//i.test(lista_url)) return erro(t('Informe uma URL M3U válida (http/https).'));
+    epg_url = ListaUtil.derivarEpg(lista_url);
+  }
+  ov.remove();
+  mostrarLoading(t('Adicionando playlist…'));
+  await Dispositivo.adicionar(lista_url, epg_url, _nomeDaPlaylist(modo, lista_url, user));
+  loadingMsg(t('Carregando títulos…'));
+  await _recarregarCatalogoAtivo();
+  esconderLoading();
+  navegar('playlists');
 }
 
 // ── Boot ────────────────────────────────────────────────────────────────────
 function montarSidebar() {
   document.getElementById('nav-itens').innerHTML = MENU.map((m) =>
     `<div class="nav-item focusable" data-secao="${m.id}">
-       <span class="ico">${svg(m.ico)}</span><span class="rotulo">${m.rotulo}</span>
+       <span class="ico">${svg(m.ico)}</span><span class="rotulo">${escapar(t(m.rotulo))}</span>
      </div>`).join('');
   document.getElementById('nav-config').innerHTML =
     `<div class="nav-item focusable" data-secao="config">
-       <span class="ico">${svg('config')}</span><span class="rotulo">Configurações</span>
+       <span class="ico">${svg('config')}</span><span class="rotulo">${escapar(t('Configurações'))}</span>
      </div>`;
+  // Indicador do perfil ativo (abaixo da logo) — BOTÃO p/ trocar de perfil.
+  const np = document.getElementById('nav-perfil'); const pf = Perfis.ativo();
+  if (np) {
+    np.innerHTML = pf
+      ? `<button class="nav-perfil-btn focusable" aria-label="${escapar(t('Trocar perfil'))}"><span class="perfil-av perfil-av-mini" style="background:${_avBg(pf)}">${escapar(iniciais(pf.nome) || 'P')}</span><span class="rotulo perfil-mini-nome">${escapar(pf.nome)}</span></button>`
+      : '';
+    const btn = np.querySelector('.nav-perfil-btn');
+    if (btn) btn.addEventListener('click', () => trocarPerfilAnimado());
+  }
 
   document.querySelectorAll('.nav-item').forEach((n) =>
     n.addEventListener('click', () => navegar(n.dataset.secao)));
@@ -1765,13 +2638,20 @@ function montarSidebar() {
 
 // Clicks de conteudo (delegado): poster abre detalhe; "Assistir" do hero idem.
 document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-acao="tela-voltar"]')) { SpatialNav.voltar(); return; }  // botão Voltar da tela
   const btnBuscaSec = e.target.closest('[data-acao="busca-secao"]');
   if (btnBuscaSec) { abrirBuscaSecao(btnBuscaSec.dataset.escopo, btnBuscaSec); return; }
+  if (e.target.closest('#pl-add')) { abrirAddPlaylist(); return; }
+  if (e.target.closest('#pl-atualizar')) { toast(t('Atualizando…')); preencherPlaylists(); return; }
+  const plac = e.target.closest('.secao-pl [data-acao]');
+  if (plac) { acaoPlaylist(plac.dataset.acao, plac.dataset.id); return; }
   const cat = e.target.closest('.tv-cat-item');
   if (cat) { mostrarCanais(cat.dataset.cat); return; }
-  const canalItem = e.target.closest('.tv-canal-item');
-  if (canalItem) {
-    const c = LISTA.canais.find((x) => x.id === canalItem.dataset.canal);
+  const canalFav = e.target.closest('.tv-canal-fav');
+  if (canalFav) { alternarFavorito(canalFav.dataset.canal); return; }   // favorita sem abrir
+  const canalMain = e.target.closest('.tv-canal-main');
+  if (canalMain) {
+    const c = LISTA.canais.find((x) => x.id === canalMain.dataset.canal);
     if (c) selecionarPreview(c);
     return;
   }
@@ -1798,26 +2678,73 @@ function mostrarLoading(msg) {
   if (!el) { el = document.createElement('div'); el.id = 'loading'; document.body.appendChild(el); }
   el.innerHTML = `
     <div class="ld-card">
-      <div class="logo ld-logo"><span class="logo-mark">▶</span><span class="ob-logo-text"><b>Hero</b> Play</span></div>
+      <div class="logo ld-logo"><img class="logo-mark" src="heroplay-icon.svg" alt="Hero Play"><span class="ob-logo-text"><b>Hero</b> Play</span></div>
       <div class="ld-barra"><span></span></div>
-      <div class="ld-msg" id="ld-msg">${escapar(msg || 'Carregando…')}</div>
+      <div class="ld-msg" id="ld-msg">${escapar(msg || t('Carregando…'))}</div>
     </div>`;
   el.style.display = 'grid';
 }
 function loadingMsg(m) { const e = document.getElementById('ld-msg'); if (e) e.textContent = m; }
+// Progresso REAL (0..100): troca a barra indeterminada por uma determinada.
+// Só chamada durante o parse fatiado, que reporta o avanço de verdade.
+function loadingProgresso(pct) {
+  const b = document.querySelector('#loading .ld-barra');
+  if (!b) return;
+  b.classList.add('determinada');
+  const s = b.querySelector('span');
+  if (s) s.style.width = Math.max(0, Math.min(100, Math.round(pct))) + '%';
+  const m = document.getElementById('ld-msg');
+  if (m) m.textContent = t('Organizando seus canais…') + ' ' + Math.round(pct) + '%';
+}
 function esconderLoading() { const el = document.getElementById('loading'); if (el) el.remove(); }
 
 // Baixa + parseia a lista do dispositivo e aplica ao catálogo. O parse roda
 // após um frame (a barra continua animando). Retorna true se carregou.
-async function carregarLista(url) {
+// ── Diagnóstico de memória/tamanho (painel em Configurações → Diagnóstico) ────
+// `performance.memory` existe no Chromium (inclui o 68 da TV) e dá o LIMITE de
+// heap do app — é ele que diz o orçamento real de RAM que temos.
+const _diag = { bytesLista: 0, linhas: 0, msParse: 0, heapAntes: 0, heapPico: 0 };
+const _heap = () => { try { return (performance.memory || {}).usedJSHeapSize || 0; } catch (_) { return 0; } };
+const _heapLimite = () => { try { return (performance.memory || {}).jsHeapSizeLimit || 0; } catch (_) { return 0; } };
+const _mb = (b) => (b ? (b / 1048576).toFixed(1) + ' MB' : '—');
+
+async function carregarLista(url, forcar) {
   if (!url) return false;
   try {
+    // 1) CACHE: catálogo já parseado (IndexedDB). Evita baixar 46 MB e gastar
+    //    ~23s parseando de novo a cada boot. Só no 1º boot (ou quando a lista
+    //    muda / "Recarregar") pagamos o custo.
+    if (!forcar) {
+      const cache = await CacheLista.ler(url, null);
+      if (cache) {
+        loadingMsg(t('Carregando catálogo salvo…'));
+        await new Promise((r) => requestAnimationFrame(r));
+        const _tc = Date.now();
+        aplicarLista(Lista.montarCatalogo(cache));
+        _diag.msParse = Date.now() - _tc;
+        _diag.doCache = true;
+        _diag.bytesLista = cache.tam || 0;
+        return true;
+      }
+    }
+    _diag.doCache = false;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const txt = await resp.text();
-    loadingMsg('Organizando seus canais…');
+    loadingMsg(t('Organizando seus canais…'));
     await new Promise((r) => requestAnimationFrame(r)); // deixa a UI respirar
-    const parsed = Lista.parse(txt);
+    _diag.bytesLista = txt.length;
+    _diag.heapAntes = _heap();
+    const _t0 = Date.now();
+    // 2) Parse FATIADO com progresso real (não congela a tela).
+    const parsed = await Lista.parse(txt, (frac) => loadingProgresso(frac * 100));
+    _diag.msParse = Date.now() - _t0;
+    _diag.heapPico = _heap();
+    // Guarda pro próximo boot (best-effort — falha de IDB não quebra nada). O
+    // clone de 167k objetos custa alguns segundos na TV, então avisamos.
+    loadingMsg(t('Salvando catálogo para abrir rápido…'));
+    await new Promise((r) => requestAnimationFrame(r));
+    try { await CacheLista.gravar(url, txt.length, parsed); } catch (_) {}
     if (!parsed.canais.length && !parsed.filmes.length && !parsed.series.length) {
       throw new Error('lista vazia ou formato não reconhecido');
     }
@@ -1829,18 +2756,74 @@ async function carregarLista(url) {
   }
 }
 
+// Metadados do TMDB (pôster/logo/sinopse) persistidos: sem isto o app re-pergunta
+// o pôster de CADA título a cada boot — é o "a foto carrega de novo". Gravamos em
+// intervalo (só quando há novidade) porque na TV o `beforeunload` não é confiável.
+async function restaurarMetaTmdb() {
+  try {
+    const d = await CacheLista.lerMeta();
+    if (d) TMDB.importarCache(d);
+  } catch (_) { /* best-effort */ }
+}
+let _metaGravando = false;
+async function salvarMetaTmdb() {
+  if (_metaGravando || !TMDB.estaSujo()) return;
+  _metaGravando = true;
+  TMDB.limparSujo();   // antes de gravar: novidades durante a gravação re-sujam
+  try { await CacheLista.gravarMeta(TMDB.exportarCache()); } catch (_) { /* best-effort */ }
+  _metaGravando = false;
+}
+function ligarSalvamentoMeta() {
+  setInterval(salvarMetaTmdb, 60000);
+  // Melhor esforço ao sair/esconder (webOS manda o app pra background aqui).
+  document.addEventListener('visibilitychange', () => { if (document.hidden) salvarMetaTmdb(); });
+  window.addEventListener('beforeunload', salvarMetaTmdb);
+}
+
 async function iniciarApp() {
   document.getElementById('app').classList.remove('oculto');
   const reg = Dispositivo.registro();
+  await restaurarMetaTmdb();
+  ligarSalvamentoMeta();
   if (reg && reg.lista_url) {
-    mostrarLoading('Baixando sua lista…');
+    mostrarLoading(t('Baixando sua lista…'));
     const ok = await carregarLista(reg.lista_url);
-    if (ok) { loadingMsg('Preparando seus banners…'); await precarregarBanners(); }
+    // TV: NÃO segura a tela pré-carregando banner — eles carregam lazy (observer)
+    // e o hero carrega no 1º foco. Dispensa o loading assim que a lista é parseada.
+    if (ok && !EH_TV) { loadingMsg(t('Preparando seus banners…')); await precarregarBanners(); precarregarLogosCanais(); }
     esconderLoading();
-    if (!ok) toast('Não foi possível carregar sua lista. Verifique a URL/conexão.');
+    if (!ok) toast(t('Não foi possível carregar sua lista. Verifique a URL/conexão.'));
   }
-  navegar('inicio');
-  if (Dispositivo.status() === 'trial') mostrarAvisoTeste();
+  // Gate de perfis ("Quem está assistindo?") → aplica o perfil e entra no app.
+  abrirGatePerfis(entrarNoApp);
+}
+
+// Entra no app com o perfil selecionado (usado no boot, no botão de perfil e no config).
+// A LISTA/catálogo é a mesma p/ todos os perfis — na TROCA de perfil NÃO
+// reconstruímos o Início inteiro; só trocamos os trilhos do perfil (leve).
+let _appIniciado = false;
+function entrarNoApp() {
+  const jaIniciado = _appIniciado;
+  aplicarPerfilAtivo();                              // favoritos + idioma + sidebar
+  if (jaIniciado) limparCacheSecoes();               // trilhos/Minha Lista mudam por perfil → invalida
+  const main = document.getElementById('conteudo');
+  const secaoAtiva = (document.querySelector('.nav-item.ativo') || {}).dataset;
+  if (jaIniciado && secaoAtiva && secaoAtiva.secao === 'inicio' && main && main.querySelector('.trilhos')) {
+    atualizarTrilhosPerfil(main);                    // atualiza a Início VISÍVEL sem rebuild
+    _secCacheSet('inicio', main.firstElementChild);  // re-cacheia já com os trilhos do novo perfil
+  } else {
+    navegar('inicio');                               // 1ª entrada (ou vindo de outra seção)
+  }
+  _appIniciado = true;
+  if (!jaIniciado && Dispositivo.status() === 'trial') mostrarAvisoTeste();
+}
+
+// Troca de perfil: recarrega a biblioteca do perfil (favoritos) e re-aplica o
+// idioma dele; re-renderiza a sidebar + seção atual. Chamado ao selecionar perfil.
+function aplicarPerfilAtivo() {
+  recarregarFavoritos();
+  try { document.documentElement.lang = idiomaAtual() === 'pt' ? 'pt-BR' : idiomaAtual(); } catch (_) {}
+  montarSidebar();
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -1862,9 +2845,30 @@ window.addEventListener('DOMContentLoaded', async () => {
       mostrarCredito(el);                    // créditos: painel reage ao foco
     } else if (el.classList.contains('ep-temp-item')) {
       if (_epCtrl) _epCtrl.selecionarTemporada(+el.dataset.s); // temporada abre ao focar
+    } else if (el.classList.contains('cfg-item')) {
+      mostrarConfigPane(el.dataset.pane);    // Config: painel reage ao item em foco
+    } else if (el.classList.contains('jogos-data')) {
+      selecionarDataJogos(el.dataset.iso, false);  // Jogos: troca a data ao focar a aba
+    } else if (el.classList.contains('jogos-liga')) {
+      mostrarJogosLiga(el.dataset.liga);           // Jogos: liga reage ao foco
     }
   });
-  await Dispositivo.consultar(); // best-effort (offline-first)
-  if (Dispositivo.temLista()) iniciarApp();
-  else mostrarOnboarding(); // app neutro: abre vazio ate ter lista (conformidade)
+  // Boot BLINDADO: se a consulta à nuvem falhar/pendurar, ou qualquer coisa
+  // lançar, ainda assim mostramos uma tela (nunca fica em branco/cinza).
+  try {
+    await Dispositivo.init();      // resolve identidade ESTÁVEL (mac/key) ANTES de usar
+  } catch (e) { console.error('[Hero Play] init()', e); }
+  try {
+    await Dispositivo.consultar(); // best-effort (offline-first, com timeout)
+  } catch (e) { console.error('[Hero Play] consultar()', e); }
+  try {
+    if (Dispositivo.temLista()) iniciarApp();
+    else mostrarOnboarding(); // app neutro: abre vazio ate ter lista (conformidade)
+  } catch (e) {
+    console.error('[Hero Play] boot', e);
+    try { mostrarOnboarding(); } catch (_) {
+      document.body.innerHTML = '<div style="color:#fff;padding:60px;font:600 28px sans-serif">'
+        + 'Erro ao iniciar: ' + String((e && e.message) || e) + '</div>';
+    }
+  }
 });

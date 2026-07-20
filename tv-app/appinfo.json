@@ -8,7 +8,5 @@
   "icon": "icon.png",
   "largeIcon": "largeIcon.png",
   "bgColor": "#0F0E0D",
-  "iconColor": "#E53935",
-  "supportTouchMode": "none",
-  "handlesRelaunch": true
+  "iconColor": "#E53935"
 }
