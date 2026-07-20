@@ -1244,6 +1244,31 @@ html.tv *, html.tv *::before, html.tv *::after { backdrop-filter: none !importan
 html.tv .cr, html.tv .menu-opcoes, html.tv .cfg-pin, html.tv .cfg-confirm,
 html.tv .cfg-termos, html.tv .jg-modal, html.tv .cont-modal, html.tv .perfil-form { -webkit-backdrop-filter: none !important; }
 
+/* ── TV: nada de animar LAYOUT ───────────────────────────────────────────────
+   `width`/`max-width`/`height` em transição forçam relayout a CADA frame — o
+   oposto de animar só transform/opacity, que o compositor resolve na GPU. Num
+   painel com centenas de linhas (lista de canais) isso é o travamento que se vê.
+   Aqui os tamanhos passam a MUDAR NA HORA; a sensação de movimento continua vindo
+   das keyframes slideDir/slideEsq (transform+opacity), que são baratas.
+   Diferença assumida vs. desktop: o recuo dos painéis e a abertura da sidebar
+   não deslizam na TV — trocam direto. */
+html.tv #sidebar,
+html.tv .tv-pane-cat, html.tv .tv-pane-canais,
+html.tv .logo-text, html.tv .nav-item .rotulo, html.tv .perfil-mini-nome { transition: none !important; }
+/* Máscara de gradiente no painel recuado: filtro caro por frame. O fade de
+   opacidade (.45) já sinaliza o recuo. */
+html.tv .tv-panes.com-canais .tv-pane-cat { -webkit-mask-image: none; mask-image: none; }
+
+/* Sombra de foco barata. `0 22px 48px -16px` é um blur de 48px repintado a cada
+   troca de foco (em DOIS pôsteres: o que sai e o que entra) — caro na GPU da TV.
+   O anel sólido dá o mesmo destaque a custo ~zero. O scale continua. */
+html.tv .poster.is-focused { box-shadow: 0 0 0 4px var(--accent-bright); }
+
+/* Scroll instantâneo: o smooth scroll repinta a fila inteira por frame e é o que
+   dá a sensação de "arrastado" ao segurar o D-pad. */
+html.tv #conteudo, html.tv .trilho-fila,
+html.tv .tv-pane-cat, html.tv .tv-pane-canais { scroll-behavior: auto; }
+
 /* ── Acessibilidade: reduzir movimento ────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
