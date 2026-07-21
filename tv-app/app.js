@@ -337,10 +337,11 @@ function atualizarHero(item) {
   }
   _heroPendente = item;
   clearTimeout(_heroDebounce);
-  // Debounce normal ao rolar; mas se faz muito tempo desde a última troca (D-pad
-  // SEGURADO, foco andando sem parar) aplica quase já — assim o hero ACOMPANHA
-  // devagar em vez de ficar preso na seleção anterior até soltar o botão.
-  const espera = (Date.now() - _heroUltimoAplicado > 550) ? 40 : HERO_DELAY;
+  // Debounce ao rolar. No desktop, se faz tempo desde a última troca (D-pad
+  // SEGURADO) o hero acompanha devagar (40ms). Na TV isso era jank: cada passo
+  // recarregava backdrop/logo e reanimava o hero enquanto o foco corria. Na TV o
+  // hero só troca quando o foco PARA (sempre o debounce cheio) — bem mais leve.
+  const espera = (!EH_TV && Date.now() - _heroUltimoAplicado > 550) ? 40 : HERO_DELAY;
   _heroDebounce = setTimeout(() => {
     _heroDebounce = null;
     const alvo = _heroPendente; _heroPendente = null;
@@ -577,7 +578,10 @@ function ligarPostersSerie(raiz) {
   // o pôster RECARREGAR ao voltar no carrossel (o cache de disco da TV é fraco).
   // Agora mantemos as últimas N em memória e só descarregamos a mais ANTIGA
   // quando passa do orçamento: ir e voltar não recarrega nada, e a RAM fica presa.
-  const LIMITE_VIVAS = 60;
+  // 60 era baixo demais: quem rola vários trilhos passa disso e as primeiras
+  // imagens somem, "recarregando" ao voltar. Com o heap medido em 19% do orçamento
+  // (54/290 MB) dá p/ segurar ~200 pôsteres (~40 MB decodificados) sem risco.
+  const LIMITE_VIVAS = 200;
   const _vivas = [];                    // ordem de uso — o fim é o mais recente
   const tocar = (el) => {
     const i = _vivas.indexOf(el);

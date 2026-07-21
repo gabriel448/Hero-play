@@ -207,16 +207,25 @@ const Lista = (() => {
   }
 
   async function agruparVod(vod, prog) {
-    const filmes = [], map = {};
+    const filmes = [], filmeVisto = new Set(), map = {};
     const total = vod.length || 1;
     let cnt = 0, t0 = Date.now();
     for (const c of vod) {
       const nome = nomeSerie(c.nome);
-      if (!nome) filmes.push(c);
-      else {
-        if (!map[nome]) map[nome] = { nome, grupo: c.grupo, logo: '', eps: [] };
-        map[nome].eps.push(c);
-        if (!map[nome].logo && c.logo) map[nome].logo = c.logo;
+      if (!nome) {
+        // Dedup de FILMES: a mesma lista traz o mesmo título várias vezes (outra
+        // categoria, ou "HD"/"4K"). Sem isto aparecem pôsteres repetidos. A chave
+        // é o nome normalizado (minúsculo/sem acento); fica o 1º que aparece.
+        const ch = _chaveOrd(c.nome);
+        if (filmeVisto.has(ch)) { cnt++; continue; }
+        filmeVisto.add(ch); filmes.push(c);
+      } else {
+        // Séries agrupadas pela chave NORMALIZADA (antes era o nome cru: "Round 6"
+        // e "round 6" viravam duas séries). O nome de exibição é o 1º visto.
+        const ch = _chaveOrd(nome);
+        if (!map[ch]) map[ch] = { nome, grupo: c.grupo, logo: '', eps: [] };
+        map[ch].eps.push(c);
+        if (!map[ch].logo && c.logo) map[ch].logo = c.logo;
       }
       if ((++cnt & 2047) === 0 && Date.now() - t0 > 12) {
         if (prog) prog(cnt / total);

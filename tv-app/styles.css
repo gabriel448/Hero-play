@@ -1269,6 +1269,23 @@ html.tv .poster.is-focused { box-shadow: 0 0 0 4px var(--accent-bright); }
 html.tv #conteudo, html.tv .trilho-fila,
 html.tv .tv-pane-cat, html.tv .tv-pane-canais { scroll-behavior: auto; }
 
+/* ── TV: menos animação, mais fluidez ────────────────────────────────────────
+   "Não precisa ser tudo animado, apenas fluido." Estas rodavam a cada troca de
+   foco / entrada de seção e não agregam numa TV lenta: */
+/* O bloco de texto do hero deslizava (translateY) toda vez que o foco assentava
+   num item novo — inclusive rápido, com o D-pad segurado. Vira troca seca. */
+html.tv .hero-anim { animation: none; }
+/* Entrada da seção inteira (fadeIn com translateY) — reflow/paint da tela cheia
+   a cada navegação. O conteúdo aparece direto. */
+html.tv .secao, html.tv .cfg, html.tv .jogos { animation: none; }
+/* Slides de troca entre categorias/canais: mantidos, mas mais curtos (a lista
+   é grande; 240ms de transform nela ainda pesa). */
+html.tv .tv-anim-dir, html.tv .tv-anim-esq { animation-duration: .16s; }
+/* Foco do pôster: reduz o zoom (1.10 → 1.06) e encurta a transição. O scale é
+   composited, mas com pôster grande + sombra o repaint da borda ainda aparece. */
+html.tv .poster { transition: transform .12s ease; }
+html.tv .poster.is-focused { transform: scale(1.06); }
+
 /* ── Acessibilidade: reduzir movimento ────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
