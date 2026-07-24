@@ -79,8 +79,30 @@ const IC = {
   ticket: '<path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
   lifebuoy: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff: '<path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.1 6.1A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 3.4-.66"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="2" x2="22" y1="2" y2="22"/>',
 }
 const svg = (name, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"${extra}>${IC[name]}</svg>`
+
+// Campo de senha com botão de "olho" (mostrar/ocultar). `id` é o do <input>.
+const campoSenha = (id, autocomplete) => `<div class="senha-wrap">
+  <input id="${id}" type="password" placeholder="••••••••" autocomplete="${autocomplete}">
+  <button type="button" class="olho" data-alvo="${id}" aria-label="Mostrar senha">${svg('eye')}</button>
+</div>`
+// Liga o toggle do olho de todos os campos-senha dentro de `raiz` (default: document).
+function ligarOlhos(raiz) {
+  (raiz || document).querySelectorAll('.olho').forEach((b) => {
+    b.onclick = () => {
+      const inp = document.getElementById(b.dataset.alvo)
+      if (!inp) return
+      const ver = inp.type === 'password'
+      inp.type = ver ? 'text' : 'password'
+      b.innerHTML = svg(ver ? 'eyeoff' : 'eye')
+      b.setAttribute('aria-label', ver ? 'Ocultar senha' : 'Mostrar senha')
+      inp.focus()
+    }
+  })
+}
 
 // ── Navegação (Conteúdo é por papel: admin=Masters+Revendedores+Clientes;
 //    master=Revendedores; reseller=Clientes) ──────────────────────────────────
@@ -163,7 +185,7 @@ function viewLogin(msg) {
         <label>Usuário</label>
         <input id="usuario" type="text" placeholder="seu_usuario" autocomplete="username" autocapitalize="none" spellcheck="false">
         <label>Senha</label>
-        <input id="senha" type="password" placeholder="••••••••" autocomplete="current-password">
+        ${campoSenha('senha', 'current-password')}
         <button class="btn" id="entrar">Entrar</button>
         <div class="erro" id="erro">${msg ? esc(msg) : ''}</div>
       </div>
@@ -183,6 +205,7 @@ function viewLogin(msg) {
   }
   document.getElementById('entrar').onclick = entrar
   document.getElementById('senha').onkeydown = (e) => { if (e.key === 'Enter') entrar() }
+  ligarOlhos(app)
   document.getElementById('usuario').focus()
 }
 async function sair() { await sb.auth.signOut(); me = null; cache.clear(); viewLogin() }

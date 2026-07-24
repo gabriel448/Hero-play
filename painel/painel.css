@@ -44,6 +44,12 @@ a { color: inherit; text-decoration: none; }
 .form-inner label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; }
 .form-inner input { background: var(--surface2); border: 1px solid var(--divider); border-radius: 12px; padding: 15px 16px; color: var(--text); font-size: 16px; }
 .form-inner input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(229,57,53,.18); }
+/* Campo de senha com botão de olho (mostrar/ocultar) */
+.senha-wrap { position: relative; display: flex; }
+.senha-wrap input { flex: 1; padding-right: 48px; width: 100%; }
+.olho { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--muted); cursor: pointer; border-radius: 9px; }
+.olho:hover { color: var(--text); background: var(--surface1); }
+.olho svg { width: 20px; height: 20px; }
 .form-inner .btn { margin-top: 24px; padding: 15px; font-size: 16px; }
 .erro { color: var(--accent2); font-size: 14px; min-height: 18px; margin-top: 12px; }
 @media (max-width: 840px) { .login2 { grid-template-columns: 1fr; } .login2-brand { display: none; } }

@@ -8,6 +8,8 @@ const app = document.getElementById('app')
 const ano = new Date().getFullYear()
 const ref = (new URLSearchParams(location.search).get('ref') || '').trim()
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const IC_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>'
+const IC_EYEOFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.1 6.1A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 3.4-.66"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="2" x2="22" y1="2" y2="22"/></svg>'
 
 const brand = (h1, sub) => `<div class="login2-brand"><div class="brand-inner">
   <img class="brand-logo" src="heroplay-icon.svg" alt="Hero Play">
@@ -25,7 +27,8 @@ function render(msg) {
       ${ref ? `
         <label>Nome</label><input id="nome" placeholder="Seu nome" autocomplete="name">
         <label>Usuário (login)</label><input id="usuario" type="text" placeholder="ex: revenda_joao" autocomplete="username" autocapitalize="none" spellcheck="false">
-        <label>Senha (mín. 6)</label><input id="senha" type="password" placeholder="••••••••" autocomplete="new-password">
+        <label>Senha (mín. 6)</label>
+        <div class="senha-wrap"><input id="senha" type="password" placeholder="••••••••" autocomplete="new-password"><button type="button" class="olho" id="olho" aria-label="Mostrar senha">${IC_EYE}</button></div>
         <button class="btn" id="criar">Criar conta</button>
         <div class="erro" id="erro">${msg ? esc(msg) : ''}</div>
       ` : '<div class="erro">Peça o link de indicação a um revendedor Hero Play.</div>'}
@@ -53,6 +56,12 @@ function render(msg) {
   }
   document.getElementById('criar').onclick = criar
   document.getElementById('senha').onkeydown = (e) => { if (e.key === 'Enter') criar() }
+  const olho = document.getElementById('olho')
+  if (olho) olho.onclick = () => {
+    const inp = document.getElementById('senha'); const ver = inp.type === 'password'
+    inp.type = ver ? 'text' : 'password'; olho.innerHTML = ver ? IC_EYEOFF : IC_EYE
+    olho.setAttribute('aria-label', ver ? 'Ocultar senha' : 'Mostrar senha'); inp.focus()
+  }
 }
 
 function sucesso() {
