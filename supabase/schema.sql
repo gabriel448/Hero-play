@@ -427,4 +427,88 @@ alter table public.codigos_ativacao_tv enable row level security;
 revoke all on public.codigos_ativacao_tv from anon, authenticated;
 grant all on public.codigos_ativacao_tv to service_role;
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  RPCs de CRÉDITO — transacionais (corrigem o double-spend).
+--  Antes a Edge Function fazia read-modify-write em 2 statements separados:
+--  duas requisições simultâneas liam o mesmo saldo e ambas gravavam → crédito
+--  duplicado / device ativado sem debitar. Aqui o débito é um único UPDATE com
+--  guarda `saldo >= qtd`, que serializa no lock da linha — impossível gastar 2x.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Transfere créditos de um revendedor p/ outro (débito + crédito + 2 lançamentos
+-- no extrato), tudo numa transação. Levanta exceção se saldo insuficiente.
+create or replace function public.rpc_transferir_creditos(
+  p_de uuid, p_para uuid, p_qtd int, p_por uuid,
+  p_nota_saida text, p_nota_entrada text
+) returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_saldo_de   int;
+  v_saldo_para int;
+begin
+  if p_qtd is null or p_qtd <= 0 then raise exception 'QTD_INVALIDA'; end if;
+
+  -- Débito atômico: só desconta se houver saldo. `not found` = saldo insuficiente.
+  update revendedores set saldo_creditos = saldo_creditos - p_qtd
+    where id = p_de and saldo_creditos >= p_qtd
+    returning saldo_creditos into v_saldo_de;
+  if not found then raise exception 'SALDO_INSUFICIENTE'; end if;
+
+  -- Crédito no destino.
+  update revendedores set saldo_creditos = saldo_creditos + p_qtd
+    where id = p_para
+    returning saldo_creditos into v_saldo_para;
+  if not found then raise exception 'DESTINO_INVALIDO'; end if;
+
+  insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota) values
+    (p_de,   'transferido_saida',   -p_qtd, v_saldo_de,   p_por, p_nota_saida),
+    (p_para, 'transferido_entrada',  p_qtd, v_saldo_para, p_por, p_nota_entrada);
+
+  return v_saldo_de;
+end $$;
+
+-- Ativa um dispositivo consumindo 1 crédito do revendedor, atômico. Se o device
+-- já está 'ativo', NÃO cobra de novo (retorna cobrado=false). Levanta exceção se
+-- saldo insuficiente. Faz o débito, o lançamento e a atualização do device juntos.
+create or replace function public.rpc_ativar_dispositivo(
+  p_dispositivo_id uuid, p_cliente_id uuid, p_rev uuid, p_mac text
+) returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ja_ativo boolean;
+  v_saldo    int;
+begin
+  select (status = 'ativo') into v_ja_ativo from dispositivos where id = p_dispositivo_id for update;
+  if not found then raise exception 'DEVICE_INEXISTENTE'; end if;
+
+  if not v_ja_ativo then
+    update revendedores set saldo_creditos = saldo_creditos - 1
+      where id = p_rev and saldo_creditos >= 1
+      returning saldo_creditos into v_saldo;
+    if not found then raise exception 'SALDO_INSUFICIENTE'; end if;
+
+    insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
+      values (p_rev, 'consumido', -1, v_saldo, p_rev, 'Ativação do dispositivo ' || coalesce(p_mac, ''));
+  else
+    select saldo_creditos into v_saldo from revendedores where id = p_rev;
+  end if;
+
+  update dispositivos
+     set cliente_id = p_cliente_id, status = 'ativo', ativado_por = 'reseller', atualizado_em = now()
+   where id = p_dispositivo_id;
+
+  return json_build_object('cobrado', not v_ja_ativo, 'saldo', v_saldo);
+end $$;
+
+revoke all on function public.rpc_transferir_creditos(uuid, uuid, int, uuid, text, text) from anon, authenticated;
+revoke all on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text) from anon, authenticated;
+grant execute on function public.rpc_transferir_creditos(uuid, uuid, int, uuid, text, text) to service_role;
+grant execute on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text) to service_role;
+
 notify pgrst, 'reload schema';

@@ -539,7 +539,7 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 
 .tv-lista { display: flex; flex-direction: column; gap: 6px; padding: 0 16px; }
 .tv-lista-cab {
-  font-size: 22px; font-weight: 800; padding: 0 14px 16px;
+  font-size: 27px; font-weight: 800; padding: 0 14px 16px;
   display: flex; align-items: center; gap: 10px; color: #fff;
 }
 .tv-lista-cab .tv-chev { width: 22px; height: 22px; color: var(--accent-bright); }
@@ -552,17 +552,17 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 .tv-canal-item { display: flex; align-items: stretch; gap: 10px; }
 .tv-canal-main { flex: 1; min-width: 0; }
 .tv-cat-item { justify-content: space-between; }
-.tv-cat-nome { font-size: 19px; font-weight: 700; }
+.tv-cat-nome { font-size: 25px; font-weight: 700; }
 .tv-cat-item .tv-chev { width: 20px; height: 20px; opacity: .5; }
 .tv-canal-logo { width: 56px; height: 56px; border-radius: 11px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
-.tv-canal-logo span { font-size: 18px; font-weight: 800; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.tv-canal-logo span { font-size: 22px; font-weight: 800; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
 /* Logo REAL do canal (tvg-logo): cobre a caixa; ao carregar, esconde as iniciais. */
 .tv-canal-logo, .tv-prev-logo, .live-logo { position: relative; overflow: hidden; }
 .canal-logo-img { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #12100e; }
 .tem-img > span { display: none; }
 .tv-canal-txt { min-width: 0; }
-.tv-canal-nome { font-size: 18px; font-weight: 700; color: #fff; }
-.tv-canal-agora { display: flex; align-items: center; font-size: 14px; color: var(--text-secondary); margin-top: 4px; }
+.tv-canal-nome { font-size: 24px; font-weight: 700; color: #fff; }
+.tv-canal-agora { display: flex; align-items: center; font-size: 18px; color: var(--text-secondary); margin-top: 4px; }
 .tv-canal-prog { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tv-agora-lbl { color: var(--text-primary); font-weight: 800; }
 /* Bolinha vermelha neon pulsante (ao vivo) — fora do span com overflow, p/ não cortar o glow/pulso */
@@ -599,18 +599,18 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 .tv-prev-logo { width: 60px; height: 60px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .tv-prev-logo span { font-size: 20px; font-weight: 800; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
 .tv-prev-titulos { flex: 1; min-width: 0; }
-.tv-prev-canal { font-size: 22px; font-weight: 800; }
-.tv-prev-agora { font-size: 16px; color: var(--text-secondary); margin-top: 3px; }
+.tv-prev-canal { font-size: 28px; font-weight: 800; }
+.tv-prev-agora { font-size: 20px; color: var(--text-secondary); margin-top: 4px; }
 .tv-fav-btn { width: 54px; height: 54px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; background: var(--surface2); border: 1px solid var(--outline); transition: transform .15s, background .15s, box-shadow .15s; }
 .tv-fav-btn svg { width: 26px; height: 26px; }
 .tv-fav-btn.ativo svg { fill: var(--accent-bright); }
 .tv-fav-btn.is-focused { transform: scale(1.08); box-shadow: 0 0 0 3px #fff; }
 
-.tv-prog-titulo { font-size: 18px; font-weight: 800; margin: 6px 0 10px; display: flex; align-items: center; gap: 9px; }
-.tv-prog-titulo::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: var(--accent); }
+.tv-prog-titulo { font-size: 23px; font-weight: 800; margin: 8px 0 12px; display: flex; align-items: center; gap: 9px; }
+.tv-prog-titulo::before { content: ''; width: 5px; height: 23px; border-radius: 2px; background: var(--accent); }
 .tv-prog-lista { display: flex; flex-direction: column; }
-.tv-prog-row { display: flex; gap: 18px; padding: 13px 4px; border-bottom: 1px solid var(--divider); font-size: 16px; }
-.tv-prog-hora { width: 66px; flex-shrink: 0; color: var(--text-secondary); font-weight: 700; }
+.tv-prog-row { display: flex; gap: 20px; padding: 15px 4px; border-bottom: 1px solid var(--divider); font-size: 21px; }
+.tv-prog-hora { width: 82px; flex-shrink: 0; color: var(--text-secondary); font-weight: 700; }
 .tv-prog-row.atual .tv-prog-hora { color: var(--accent-bright); }
 .tv-prog-row.atual .tv-prog-nome { color: #fff; font-weight: 700; }
 .tv-prog-nome { color: var(--text-secondary); }
@@ -650,10 +650,10 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 }
 .live-bar-esq { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .live-num { font-size: 26px; font-weight: 800; color: var(--accent-bright); }
-.live-canal-nome { font-size: 20px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-canal-nome { font-size: 26px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .live-bar-centro { text-align: center; }
 .live-prog-atual { font-size: 32px; font-weight: 800; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.85); }
-.live-prog-prox { font-size: 17px; color: var(--text-secondary); margin-top: 6px; }
+.live-prog-prox { font-size: 21px; color: var(--text-secondary); margin-top: 6px; }
 .live-prog-prox b { color: #fff; font-weight: 700; }
 .live-bar-dir { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
 .live-relogio { font-size: 24px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }

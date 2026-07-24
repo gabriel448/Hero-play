@@ -166,6 +166,9 @@ const SpatialNav = (() => {
   // "Voltar": sobe UM nível — modal aberto fecha; dentro do conteúdo de uma seção
   // volta à SELEÇÃO de seção (não à sidebar); na seleção de seção, aí sim vai à
   // sidebar. Vale p/ Configurações e p/ TV ao vivo (categorias/canais/preview).
+  // NA RAIZ (sidebar, seção Início) o Voltar pergunta se quer SAIR do app — as
+  // lojas LG/Samsung exigem que o Back na raiz devolva ao launcher (ver
+  // confirmarSairApp em app.js). Fora do Início, o Voltar leva ao Início 1º.
   function voltar() {
     const modal = modalTopo();
     if (modal && typeof modal._onVoltar === 'function') { modal._onVoltar(); return; }
@@ -185,6 +188,17 @@ const SpatialNav = (() => {
         if (typeof mostrarCategorias === 'function') { mostrarCategorias(); return; }
       }
     }
+    // Foco no CONTEÚDO (não na sidebar) → recolhe p/ a sidebar (1º nível).
+    const naSidebar = atual && atual.closest && atual.closest('#sidebar');
+    if (!naSidebar) { focarMenu(); return; }
+    // Já na sidebar. Se NÃO está no Início → vai p/ o Início.
+    const secao = document.querySelector('.nav-item.ativo');
+    const ehInicio = secao && secao.dataset && secao.dataset.secao === 'inicio';
+    if (!ehInicio) {
+      if (typeof navegar === 'function') { navegar('inicio'); focarMenu(); return; }
+    }
+    // Raiz de verdade (sidebar + Início) → pergunta se quer sair do app.
+    if (typeof confirmarSairApp === 'function') { confirmarSairApp(); return; }
     focarMenu();
   }
 

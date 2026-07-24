@@ -89,16 +89,23 @@ Deno.serve(async (req: Request) => {
       const u = new URL(req.url)
       const mac = (u.searchParams.get('mac') || '').trim()
       const key = (u.searchParams.get('key') || '').trim()
+      const modelo = (u.searchParams.get('modelo') || '').trim() || null
       if (!mac) return erro('mac obrigatorio')
 
       let { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
       if (!d) {
         // 1º contato: REGISTRA o device (sem cliente/lista) p/ ficar "claimable" no
         // painel — o revendedor reivindica pela Key antes mesmo de ter lista (GTV).
+        // Grava o `modelo` (plataforma real: webos/tizen/roku) já aqui.
         if (!key) return json({ status: 'sem_lista', lista_url: '', epg_url: '' })
-        const ins = await sb.from('dispositivos').insert({ mac, device_key: key, status: 'sem_lista' }).select().single()
+        const ins = await sb.from('dispositivos').insert({ mac, device_key: key, modelo, status: 'sem_lista' }).select().single()
         if (ins.error) return json({ status: 'sem_lista', lista_url: '', epg_url: '' })
         d = ins.data
+      } else if (modelo && d.modelo !== modelo) {
+        // Device já existia (ex.: registrado sem modelo) → preenche/atualiza a
+        // plataforma detectada agora. Best-effort: não bloqueia a resposta.
+        await sb.from('dispositivos').update({ modelo }).eq('id', d.id)
+        d.modelo = modelo
       }
       if (key && d.device_key !== key) return erro('key invalida', 403)
 

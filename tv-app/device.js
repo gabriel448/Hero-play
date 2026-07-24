@@ -14,8 +14,8 @@
 const Dispositivo = (() => {
   // Endpoint da Edge Function de ativacao (projeto Supabase do TV).
   // Vazio = ainda nao configurado (protótipo) -> usa só o cache local.
-  const ATIVACAO_API = 'https://mlafyphpntjssmxagyhc.supabase.co/functions/v1/ativacao';
-  const ANON = 'sb_publishable_MlxtdbBT4UJWhBVJ5Krtww_AvZHXa3I'; // chave publica
+  const ATIVACAO_API = 'https://cfwmeeksnwampfdkicye.supabase.co/functions/v1/ativacao';
+  const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmd21lZWtzbndhbXBmZGtpY3llIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDIwMjksImV4cCI6MjEwMDQ3ODAyOX0.oFd0yNhE4I0uqrGzkmetVQllZs6loUrpsoXzvY9C2Tg'; // chave publica (anon)
   // Pagina web onde o cliente adiciona a lista / ativa (alvo do QR Code).
   const PAGINA_ATIVACAO = 'https://heroplaytv.com/upload.html';
 
@@ -92,6 +92,18 @@ const Dispositivo = (() => {
   const mac = () => _macFixo || persistente(LS.mac, geraMac);
   const key = () => _keyFixo || persistente(LS.key, geraKey);
 
+  // Plataforma do aparelho (p/ o painel mostrar "LG / Samsung / Roku"). Deriva do
+  // userAgent: webOS (LG), Tizen (Samsung), Roku. 'web' = navegador/dev. Futuro:
+  // Android TV / TV Box entram aqui. O painel traduz o código p/ nome amigável.
+  function plataforma() {
+    const ua = (navigator.userAgent || '').toLowerCase();
+    if (/web[0o]s|webos/.test(ua)) return 'webos';
+    if (/tizen/.test(ua)) return 'tizen';
+    if (/roku/.test(ua)) return 'roku';
+    if (/android\s*tv|googletv|aft[a-z]|bravia/.test(ua)) return 'androidtv';
+    return 'web';
+  }
+
   // Snapshot local do que a nuvem retornou (lista + status).
   function registro() {
     try { return JSON.parse(localStorage.getItem(LS.reg) || 'null'); } catch (_) { return null; }
@@ -118,7 +130,7 @@ const Dispositivo = (() => {
     if (!ATIVACAO_API) return registro();
     let to = null;
     try {
-      const u = `${ATIVACAO_API}?mac=${encodeURIComponent(mac())}&key=${encodeURIComponent(key())}`;
+      const u = `${ATIVACAO_API}?mac=${encodeURIComponent(mac())}&key=${encodeURIComponent(key())}&modelo=${encodeURIComponent(plataforma())}`;
       // TIMEOUT (8s): o boot ESPERA por isso. Na TV a rede pode pendurar e, sem
       // cortar, o app trava antes de renderizar (tela vazia). Offline-first: no
       // estouro, seguimos com o cache local.
@@ -160,7 +172,7 @@ const Dispositivo = (() => {
       status: 'trial', lista_url, epg_url,
       trial_expira_em: new Date(Date.now() + 7 * 864e5).toISOString(),
     };
-    const j = await _post({ acao: 'adicionar', lista_url, epg_url, nome: nome || '', modelo: 'web' });
+    const j = await _post({ acao: 'adicionar', lista_url, epg_url, nome: nome || '', modelo: plataforma() });
     if (j && j.ok !== false) {
       local.status = j.status || local.status;
       local.trial_expira_em = j.trial_expira_em || local.trial_expira_em;
@@ -185,7 +197,7 @@ const Dispositivo = (() => {
     return !!(j && j.ok !== false);
   }
 
-  return { init, mac, key, temLista, status, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, urlAtivacao };
+  return { init, mac, key, plataforma, temLista, status, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, urlAtivacao };
 })();
 
 // Utilitarios de lista: montar a URL a partir do Xtream e DERIVAR o EPG da M3U.

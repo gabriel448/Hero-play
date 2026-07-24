@@ -1,7 +1,7 @@
 // Cadastro público de revendedor por LINK DE INDICAÇÃO (?ref=CODIGO).
 // Chama a ação pública `registrar_indicacao` da Edge Function `painel`.
-const SUPABASE_URL = 'https://mlafyphpntjssmxagyhc.supabase.co'
-const ANON = 'sb_publishable_MlxtdbBT4UJWhBVJ5Krtww_AvZHXa3I'
+const SUPABASE_URL = 'https://cfwmeeksnwampfdkicye.supabase.co'
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmd21lZWtzbndhbXBmZGtpY3llIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDIwMjksImV4cCI6MjEwMDQ3ODAyOX0.oFd0yNhE4I0uqrGzkmetVQllZs6loUrpsoXzvY9C2Tg'
 const FN = SUPABASE_URL + '/functions/v1/painel'
 
 const app = document.getElementById('app')
@@ -24,7 +24,7 @@ function render(msg) {
       <p class="form-sub">${ref ? 'Convite válido — preencha seus dados' : 'Link de convite inválido ou ausente'}</p>
       ${ref ? `
         <label>Nome</label><input id="nome" placeholder="Seu nome" autocomplete="name">
-        <label>E-mail (login)</label><input id="email" type="email" placeholder="seu@email.com" autocomplete="username">
+        <label>Usuário (login)</label><input id="usuario" type="text" placeholder="ex: revenda_joao" autocomplete="username" autocapitalize="none" spellcheck="false">
         <label>Senha (mín. 6)</label><input id="senha" type="password" placeholder="••••••••" autocomplete="new-password">
         <button class="btn" id="criar">Criar conta</button>
         <div class="erro" id="erro">${msg ? esc(msg) : ''}</div>
@@ -35,15 +35,16 @@ function render(msg) {
   const err = (m) => { document.getElementById('erro').textContent = m }
   const criar = async () => {
     const nome = document.getElementById('nome').value.trim()
-    const email = document.getElementById('email').value.trim()
+    const usuario = document.getElementById('usuario').value.trim().toLowerCase()
     const senha = document.getElementById('senha').value
-    if (!email || senha.length < 6) return err('Informe e-mail e senha (mín. 6).')
+    if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) return err('Usuário: 3-30 letras/números . _ - (sem espaços).')
+    if (senha.length < 6) return err('Senha de no mínimo 6 caracteres.')
     const btn = document.getElementById('criar'); btn.disabled = true; err('')
     try {
       const r = await fetch(FN, {
         method: 'POST',
         headers: { 'content-type': 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON },
-        body: JSON.stringify({ acao: 'registrar_indicacao', ref, nome, email, senha }),
+        body: JSON.stringify({ acao: 'registrar_indicacao', ref, nome, usuario, senha }),
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.ok === false || j.erro) throw new Error(j.erro || ('erro ' + r.status))
@@ -56,7 +57,7 @@ function render(msg) {
 
 function sucesso() {
   app.innerHTML = `<div class="login2">
-    ${brand('Conta <b>criada</b>!', 'Agora é só entrar no painel com seu e-mail e senha.')}
+    ${brand('Conta <b>criada</b>!', 'Agora é só entrar no painel com seu usuário e senha.')}
     <div class="login2-form"><div class="form-inner">
       <h2>Tudo pronto ✅</h2>
       <p class="form-sub">Sua conta de revendedor foi criada e já está vinculada a quem te indicou.</p>

@@ -1,18 +1,37 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 // ── Config (projeto Supabase ATUAL — temporário; trocar ao migrar) ───────────
-const SUPABASE_URL = 'https://mlafyphpntjssmxagyhc.supabase.co'
-const ANON = 'sb_publishable_MlxtdbBT4UJWhBVJ5Krtww_AvZHXa3I'
+const SUPABASE_URL = 'https://cfwmeeksnwampfdkicye.supabase.co'
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmd21lZWtzbndhbXBmZGtpY3llIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDIwMjksImV4cCI6MjEwMDQ3ODAyOX0.oFd0yNhE4I0uqrGzkmetVQllZs6loUrpsoXzvY9C2Tg'
 const FN = SUPABASE_URL + '/functions/v1/painel'
 const sb = createClient(SUPABASE_URL, ANON)
 const RANK = { reseller: 1, master: 2, admin: 3 }
 const PAPEL_PT = { admin: 'Admin', master: 'Master', reseller: 'Revendedor' }
 
+// Plataforma do device (código gravado pelo tv-app) → nome amigável + ícone.
+// 'web' = provavelmente teste no navegador. Futuro: androidtv/tvbox entram aqui.
+const MODELO_INFO = {
+  webos:    { nome: 'LG (webOS)',        icone: '📺' },
+  tizen:    { nome: 'Samsung (Tizen)',   icone: '📺' },
+  roku:     { nome: 'Roku',              icone: '🟣' },
+  androidtv:{ nome: 'Android TV / Box',  icone: '🤖' },
+  web:      { nome: 'Navegador (teste)', icone: '🌐' },
+}
+const modeloNome = (m) => (MODELO_INFO[m] && MODELO_INFO[m].nome) || (m || '—')
+const modeloIcone = (m) => (MODELO_INFO[m] && MODELO_INFO[m].icone) || '❓'
+const ATIVADO_POR_PT = { reseller: 'Revendedor', qr: 'QR (auto)', codigo: 'Código', admin: 'Admin' }
+
 const app = document.getElementById('app')
-let me = null // { id, nome, email, papel, saldo_creditos }
+let me = null // { id, nome, usuario, papel, saldo_creditos }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const fmtData = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—'
+// Login por usuário → e-mail sintético (o Supabase Auth exige e-mail). MESMO
+// derivador da Edge Function `painel` (USUARIO_DOMINIO). Nunca é enviado e-mail.
+const USUARIO_DOMINIO = 'u.heroplaytv.com'
+const usuarioParaEmail = (u) => String(u || '').trim().toLowerCase() + '@' + USUARIO_DOMINIO
+// Data + hora (p/ "quando foi adicionado" com precisão no detalhe do device).
+const fmtDataHora = (d) => d ? new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
 function toast(msg, err) {
   const t = document.getElementById('toast')
   t.textContent = msg; t.className = 'on' + (err ? ' erro' : '')
@@ -91,7 +110,7 @@ function renderShell() {
     return `${g.grupo ? `<div class="nav-grp-label">${esc(g.grupo)}</div>` : ''}
       ${itens.map((i) => `<button class="nav-item" data-view="${i.id}">${svg(i.ic)}<span>${esc(i.rotulo)}</span></button>`).join('')}`
   }).join('')
-  const inicial = (me.nome || me.email || '?').trim().charAt(0).toUpperCase()
+  const inicial = (me.nome || me.usuario || '?').trim().charAt(0).toUpperCase()
   app.innerHTML = `<div class="shell">
     <aside class="side">
       <div class="side-top"><img class="side-logo" src="heroplay-icon.svg" alt="Hero Play"></div>
@@ -99,7 +118,7 @@ function renderShell() {
       <div class="side-user">
         <div class="user-card">
           <div class="user-av">${esc(inicial)}</div>
-          <div class="user-meta"><div class="user-nome">${esc(me.nome || me.email)}</div><div class="user-papel">${esc(PAPEL_PT[me.papel] || me.papel)}</div></div>
+          <div class="user-meta"><div class="user-nome">${esc(me.nome || me.usuario)}</div><div class="user-papel">${esc(PAPEL_PT[me.papel] || me.papel)}</div></div>
           <div class="user-cr"><b id="u-saldo">${me.saldo_creditos ?? 0}</b><span>cr</span></div>
         </div>
         <button class="side-sair" id="sair">${svg('logout')}<span>Sair</span></button>
@@ -141,8 +160,8 @@ function viewLogin(msg) {
       <div class="form-inner">
         <h2>Bem-vindo de volta</h2>
         <p class="form-sub">Entre no painel Hero Play</p>
-        <label>E-mail</label>
-        <input id="email" type="email" placeholder="seu@email.com" autocomplete="username">
+        <label>Usuário</label>
+        <input id="usuario" type="text" placeholder="seu_usuario" autocomplete="username" autocapitalize="none" spellcheck="false">
         <label>Senha</label>
         <input id="senha" type="password" placeholder="••••••••" autocomplete="current-password">
         <button class="btn" id="entrar">Entrar</button>
@@ -154,13 +173,17 @@ function viewLogin(msg) {
   const entrar = async () => {
     document.getElementById('erro').textContent = ''
     const btn = document.getElementById('entrar'); btn.disabled = true
-    const { error } = await sb.auth.signInWithPassword({ email: document.getElementById('email').value.trim(), password: document.getElementById('senha').value })
-    if (error) { document.getElementById('erro').textContent = 'Login inválido.'; btn.disabled = false; return }
+    // Login por USUÁRIO → e-mail sintético (o mesmo derivador da Edge Function).
+    // Se digitar algo com "@" (ex.: admin com e-mail real de legado), usa literal.
+    const entrada = document.getElementById('usuario').value.trim()
+    const email = entrada.includes('@') ? entrada.toLowerCase() : usuarioParaEmail(entrada)
+    const { error } = await sb.auth.signInWithPassword({ email, password: document.getElementById('senha').value })
+    if (error) { document.getElementById('erro').textContent = 'Usuário ou senha inválidos.'; btn.disabled = false; return }
     iniciar()
   }
   document.getElementById('entrar').onclick = entrar
   document.getElementById('senha').onkeydown = (e) => { if (e.key === 'Enter') entrar() }
-  document.getElementById('email').focus()
+  document.getElementById('usuario').focus()
 }
 async function sair() { await sb.auth.signOut(); me = null; cache.clear(); viewLogin() }
 
@@ -216,12 +239,17 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
   ov.className = 'modal'
   ov.innerHTML = `<div class="modal-card modal-dev">
     <div class="mdev-head">
-      <div><div class="mdev-mac mono">${esc(d.mac)}</div><div class="mdev-key">Key ${esc(d.device_key)}</div></div>
+      <div class="mdev-id">
+        <span class="mdev-icone" title="${esc(modeloNome(d.modelo))}">${modeloIcone(d.modelo)}</span>
+        <div><div class="mdev-mac mono">${esc(d.mac)}</div><div class="mdev-key">Key ${esc(d.device_key)}</div></div>
+      </div>
       <span class="badge badge-${esc(d.status)}">${esc(d.status)}</span>
     </div>
     <div class="mdev-info">
-      <div><span>Modelo</span><b>${esc(d.modelo || '—')}</b></div>
-      <div><span>Criado</span><b>${fmtData(d.criado_em)}</b></div>
+      <div><span>Aparelho</span><b>${esc(modeloNome(d.modelo))}</b></div>
+      <div><span>Adicionado</span><b>${fmtDataHora(d.criado_em)}</b></div>
+      <div><span>Ativado por</span><b>${esc(ATIVADO_POR_PT[d.ativado_por] || d.ativado_por || '—')}</b></div>
+      <div><span>Última atividade</span><b>${d.atualizado_em ? fmtDataHora(d.atualizado_em) : '—'}</b></div>
       <div><span>Expira</span><b>${d.expira_em ? fmtData(d.expira_em) : '—'}</b></div>
       <div><span>Trial até</span><b>${d.trial_expira_em ? fmtData(d.trial_expira_em) : '—'}</b></div>
     </div>
@@ -322,8 +350,8 @@ async function vCliente(cliente_id) {
         <div class="bloco-head"><h2>Dispositivos</h2><button class="btn" id="vincular">${svg('plus')} Vincular</button></div>
         ${dispositivos.length ? dispositivos.map((d) => `
           <button class="dev" data-id="${esc(d.id)}">
-            <div class="dev-top"><b class="mono">${esc(d.mac)}</b> <span class="badge badge-${esc(d.status)}">${esc(d.status)}</span></div>
-            <div class="dev-sub">Key ${esc(d.device_key)} · ${esc(d.modelo || '—')}</div>
+            <div class="dev-top"><span class="dev-icone">${modeloIcone(d.modelo)}</span><b class="mono">${esc(d.mac)}</b> <span class="badge badge-${esc(d.status)}">${esc(d.status)}</span></div>
+            <div class="dev-sub">${esc(modeloNome(d.modelo))} · Key ${esc(d.device_key)} · <span title="${fmtDataHora(d.criado_em)}">adic. ${fmtData(d.criado_em)}</span></div>
             <div class="dev-sel">Ativa: ${ativaDe(d.id) ? esc(nomePl(ativaDe(d.id))) : '<i>nenhuma</i>'}<span class="dev-arrow">›</span></div>
           </button>`).join('') : '<div class="vazio">Nenhum dispositivo. Vincule pela Key mostrada na TV.</div>'}
       </section>
@@ -362,12 +390,12 @@ async function vRevendedores() {
     if (!revendedores.length) { el.innerHTML = '<div class="vazio">Ninguém se cadastrou pelo seu link ainda. Compartilhe seu link em <b>Indicação</b>.</div>'; return }
     el.innerHTML = `<table><thead><tr><th>Nome</th><th>Tier</th><th>Créditos</th><th>Status</th><th></th></tr></thead><tbody>
       ${revendedores.map((r) => `<tr>
-        <td><b>${esc(r.nome || '—')}</b><div class="row-sub">${esc(r.email)}</div></td>
+        <td><b>${esc(r.nome || '—')}</b><div class="row-sub">@${esc(r.usuario || "—")}</div></td>
         <td><span class="badge badge-${r.papel === 'master' ? 'master' : 'reseller'}">${r.papel === 'master' ? 'Master' : 'Comum'}</span></td>
         <td class="tnum">${r.saldo_creditos ?? 0}</td>
         <td><span class="badge badge-${r.ativo ? 'ativo' : 'expirado'}">${r.ativo ? 'ativo' : 'inativo'}</span></td>
         <td class="acoes-dl">
-          <button class="btn-sec" data-acao="transferir" data-id="${esc(r.id)}" data-nome="${esc(r.nome || r.email)}">${svg('send')} Transferir</button>
+          <button class="btn-sec" data-acao="transferir" data-id="${esc(r.id)}" data-nome="${esc(r.nome || r.usuario)}">${svg('send')} Transferir</button>
           ${ehAdmin ? `<button class="btn-sec" data-acao="tier" data-id="${esc(r.id)}" data-tier="${r.papel === 'master' ? 'reseller' : 'master'}">${r.papel === 'master' ? 'Rebaixar' : 'Promover a Master'}</button>` : ''}
         </td>
       </tr>`).join('')}</tbody></table>`
@@ -453,7 +481,7 @@ async function vDispositivos() {
   const render = () => {
     const f = dados.filter((d) => {
       if (st.status && (d.status || '') !== st.status) return false
-      if (st.q && !`${d.mac} ${d.device_key} ${d.modelo || ''} ${d.cliente || ''}`.toLowerCase().includes(st.q.toLowerCase())) return false
+      if (st.q && !`${d.mac} ${d.device_key} ${d.modelo || ''} ${modeloNome(d.modelo)} ${d.cliente || ''}`.toLowerCase().includes(st.q.toLowerCase())) return false
       return true
     })
     const el = document.getElementById('dv-tbl')
@@ -461,7 +489,7 @@ async function vDispositivos() {
     el.innerHTML = `<table><thead><tr><th>MAC</th><th>Key</th><th>Modelo</th><th>Cliente</th><th>Status</th><th>Expira</th><th>Trial</th><th>Criado</th></tr></thead><tbody>
       ${f.map((d) => `<tr>
         <td class="mono">${esc(d.mac)}</td><td class="mono">${esc(d.device_key)}</td>
-        <td>${esc(d.modelo || '—')}</td><td>${esc(d.cliente || '—')}</td>
+        <td><span class="mdl-ico">${modeloIcone(d.modelo)}</span> ${esc(modeloNome(d.modelo))}</td><td>${esc(d.cliente || '—')}</td>
         <td><span class="badge badge-${esc(d.status)}">${esc(d.status)}</span></td>
         <td class="tnum">${d.expira_em ? fmtData(d.expira_em) : '—'}</td>
         <td class="tnum">${d.trial_expira_em ? fmtData(d.trial_expira_em) : '—'}</td>

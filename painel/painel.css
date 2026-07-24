@@ -210,6 +210,10 @@ tbody tr:first-child td { border-top: none; }
 /* Modal do DISPOSITIVO */
 .modal-dev { width: min(520px, 94vw); }
 .mdev-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mdev-id { display: flex; align-items: center; gap: 12px; }
+.mdev-icone { font-size: 30px; line-height: 1; }
+.dev-icone { font-size: 18px; }
+.mdl-ico { font-size: 15px; }
 .mdev-mac { font-size: 22px; font-weight: 800; letter-spacing: .5px; }
 .mdev-key { color: var(--muted); font-size: 13px; margin-top: 3px; }
 .mdev-info { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin: 18px 0 4px; }

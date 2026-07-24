@@ -284,7 +284,9 @@ function abrirOndeAssistir(j) {
   ov._onVoltar = () => { ov.remove(); if (anterior && document.contains(anterior)) SpatialNav.setFocus(anterior); };
   ov.querySelectorAll('.jg-modal-canal').forEach((b) => b.addEventListener('click', () => {
     const c = LISTA.canais.find((x) => x.id === b.dataset.canal);
-    if (c) { ov.remove(); abrirLive(c); }
+    // Redireciona p/ a seção "TV ao vivo" no canal — abrirLive só maximiza a
+    // preview que existe LÁ; chamá-lo daqui dava tela transparente.
+    if (c) { ov.remove(); abrirTvNoCanal(c); }
   }));
   const primeiro = ov.querySelector('.jg-modal-canal') || ov.querySelector('.jg-modal-card');
   if (primeiro && primeiro.classList.contains('focusable')) SpatialNav.setFocus(primeiro);

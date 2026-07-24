@@ -1090,7 +1090,7 @@ async function abrirMenuLegendas(v) {
   let fx = faixasLegenda(v);
   if (!fx.length) {
     toast(t('Procurando legendas…'));
-    await _esperarFaixas(v, () => faixasLegenda(v).length, 6000);
+    await _esperarFaixas(v, () => faixasLegenda(v).length, 12000);
     fx = faixasLegenda(v);
   }
   if (!fx.length) { toast(t('Este conteúdo não oferece legendas')); return; }
@@ -1107,7 +1107,7 @@ async function abrirMenuAudio(v) {
   let fx = faixasAudio(v);
   if (fx.length < 2) {
     toast(t('Procurando faixas de áudio…'));
-    await _esperarFaixas(v, () => faixasAudio(v).length > 1, 6000);
+    await _esperarFaixas(v, () => faixasAudio(v).length > 1, 12000);
     fx = faixasAudio(v);
   }
   if (fx.length < 2) { toast(t('Este conteúdo tem apenas uma faixa de áudio')); return; }
@@ -1971,15 +1971,19 @@ function abrirPlayer(item, ctx, reiniciar) {
   const fonte = item.url || TEST_HLS;     // URL real do item (fallback: teste)
   const ehHls = /\.m3u8(\?|$)/i.test(fonte);
   spinner(true);
-  if (!ehHls || video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = fonte;                    // arquivo (mp4/ts) ou HLS nativo
-  } else if (window.Hls && Hls.isSupported()) {
+  // VOD HLS → PREFERE hls.js quando ele é suportado. O player nativo do webOS
+  // frequentemente NÃO expõe as faixas de áudio/legenda embutidas via
+  // video.audioTracks/textTracks; o hls.js as entrega de forma confiável
+  // (hls.audioTracks/subtitleTracks). Para arquivo direto (mp4/mkv/ts) não há
+  // escolha: vai no nativo (hls.js não demuxa .ts/HEVC) e aí as faixas dependem
+  // do que a TV expõe. (No live mantemos nativo-first por causa de .ts/HEVC.)
+  if (ehHls && window.Hls && Hls.isSupported()) {
     _hls = new Hls();
     _hls.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal) erroPlayer(t('Não foi possível reproduzir este conteúdo.')); });
     _hls.loadSource(fonte);
     _hls.attachMedia(video);
   } else {
-    video.src = fonte;
+    video.src = fonte;                    // arquivo (mp4/ts) ou HLS nativo (sem hls.js)
   }
   video.play().catch(() => {});
   // Retomar de onde parou (mesmo item/URL) — "continuar assistindo" por perfil.
@@ -2189,6 +2193,51 @@ function fecharPlayer() {
   if (ov) ov.remove();
   const f = document.querySelector('#conteudo .focusable');
   if (f) SpatialNav.setFocus(f);
+}
+
+// Sair do app (exigência de QA da LG/Samsung: Back na raiz devolve ao launcher).
+// Pergunta antes — evita saída acidental — e chama a API nativa da plataforma.
+function sairDoApp() {
+  try { pararPreview(); } catch (_) {}                 // solta conexão/vídeo do live
+  try { liberarVideo(document.getElementById('player-video')); } catch (_) {}
+  try { salvarMetaTmdb(); } catch (_) {}               // best-effort: persiste o cache
+  // Samsung Tizen
+  if (window.tizen && tizen.application) {
+    try { tizen.application.getCurrentApplication().exit(); return; } catch (_) {}
+  }
+  // LG webOS (e navegador): window.close encerra o app empacotado.
+  try { window.close(); } catch (_) {}
+  // Fallback webOS antigo.
+  if (window.webOS && webOS.platformBack) { try { webOS.platformBack(); } catch (_) {} }
+}
+function confirmarSairApp() {
+  if (typeof confirmarAcao === 'function') {
+    confirmarAcao(t('Sair do Hero Play?'), t('Você voltará à tela inicial da TV.'), sairDoApp);
+  } else {
+    sairDoApp();
+  }
+}
+
+// Abre a seção "TV ao vivo" JÁ no canal indicado (usado pelo modal de Jogos).
+// Antes o modal chamava abrirLive() direto, mas abrirLive só MAXIMIZA a preview
+// que já existe na seção ao vivo — fora dela não há <video>, então dava só o
+// layout transparente. Aqui entramos na seção, abrimos a categoria do canal e o
+// selecionamos como preview (o usuário vai p/ a direita e maximiza se quiser).
+function abrirTvNoCanal(canal) {
+  if (!canal) return;
+  navegar('tvaovivo');
+  // navegar() monta a UI de forma síncrona; abrimos a categoria do canal.
+  const cat = canal.categoria;
+  const catBloqueada = typeof canalCatBloqueada === 'function' && canalCatBloqueada(cat);
+  const seguir = () => {
+    mostrarCanais(cat, true);
+    // Seleciona o canal na lista (preview começa a tocar) e foca nele.
+    const cel = document.querySelector(`#tv-pane-canais .tv-canal-main[data-canal="${canal.id}"]`);
+    selecionarPreview(canal);
+    if (cel) SpatialNav.setFocus(cel);
+  };
+  if (catBloqueada) { pedirPin(seguir); return; }
+  seguir();
 }
 
 // ── Player de TV AO VIVO (full-screen estilo TV a cabo) ─────────────────────

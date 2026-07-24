@@ -255,7 +255,14 @@ function paneParental(pane) {
     paneParental(pane); refocarToggle();
   });
   const btnPin = pane.querySelector('#cfg-parental-pin');
-  if (btnPin) btnPin.addEventListener('click', () => definirPin(() => { paneParental(pane); const a = pane.querySelector('#cfg-parental-pin'); if (a) SpatialNav.setFocus(a); }));
+  if (btnPin) btnPin.addEventListener('click', () => {
+    const refoca = () => { paneParental(pane); const a = pane.querySelector('#cfg-parental-pin'); if (a) SpatialNav.setFocus(a); };
+    const atual = lerParental();
+    // ALTERAR PIN exige o PIN ATUAL antes (senão qualquer um trocava o bloqueio).
+    // DEFINIR (1ª vez, sem PIN) vai direto.
+    if (atual.pin) pedirPin(() => definirPin(refoca), t('Digite o PIN atual'));
+    else definirPin(refoca);
+  });
   pane.querySelectorAll('.cfg-linha[data-tipo]').forEach((b) =>
     b.addEventListener('click', () => abrirBloqueios(pane, b.dataset.tipo)));
 }
@@ -336,7 +343,8 @@ function definirPin(onOk) {
 }
 
 // Pede o PIN p/ liberar conteúdo bloqueado. onOk() se acertar. Sem PIN definido → libera.
-function pedirPin(onOk) {
+// `titulo` opcional troca o texto (ex.: "Digite o PIN atual" ao alterar o PIN).
+function pedirPin(onOk, titulo) {
   const p = lerParental();
   if (!p.on || !p.pin) { onOk(); return; }
   let val = '';
@@ -344,7 +352,7 @@ function pedirPin(onOk) {
   ov.className = 'nav-modal cfg-pin';
   const teclas = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'];
   ov.innerHTML = `<div class="cfg-pin-card">
-    <div class="cfg-pin-tit">${escapar(t('Conteúdo bloqueado — digite o PIN'))}</div>
+    <div class="cfg-pin-tit">${escapar(titulo || t('Conteúdo bloqueado — digite o PIN'))}</div>
     <div class="cfg-pin-dots" id="cfg-pin-dots"></div>
     <div class="cfg-pin-grade">
       ${teclas.map((k) => `<button class="cfg-pin-key focusable${k === 'ok' ? ' cfg-pin-ok' : ''}${k === 'del' ? ' cfg-pin-del' : ''}" data-k="${k}">${k === 'del' ? '⌫' : k === 'ok' ? 'OK' : k}</button>`).join('')}

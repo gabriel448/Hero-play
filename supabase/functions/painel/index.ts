@@ -7,8 +7,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // aqui validamos a identidade e usamos o SERVICE ROLE p/ as operações. URLs de
 // playlist são CIFRADAS (AES-256-CBC) antes de gravar — mesma chave da `ativacao`.
 // Contas NÃO têm signup público: só um master cria revendedor/master (admin API).
-//   POST { acao:'me' }                                   -> { id,nome,email,papel,pode_criar_master }
-//   POST { acao:'criar_revendedor', email,senha,nome,papel?,pode_criar_master? }  (só master)
+//   POST { acao:'me' }                                   -> { id,nome,usuario,papel,saldo_creditos,codigo_indicacao }
+//   POST { acao:'criar_revendedor', usuario,senha,nome }  (login por usuário; e-mail sintético)
+//   POST { acao:'registrar_indicacao', ref,usuario,senha,nome }  (público, por link)
 //   POST { acao:'listar_revendedores' }                  (só master) -> downline
 //   POST { acao:'criar_cliente', nome }                  -> { cliente }
 //   POST { acao:'listar_clientes' }                      -> { clientes }
@@ -71,6 +72,14 @@ function gerarCodigo(): string {
   return s
 }
 
+// ── Login por USUÁRIO (sem e-mail) ───────────────────────────────────────────
+// O Supabase Auth exige e-mail; usamos um SINTÉTICO derivado do usuário. Nunca é
+// enviado (contas nascem confirmadas). O mesmo derivador roda no frontend.
+const USUARIO_DOMINIO = 'u.heroplaytv.com'
+const normUsuario = (u: string) => String(u || '').trim().toLowerCase()
+const usuarioValido = (u: string) => /^[a-z0-9._-]{3,30}$/.test(u)
+const emailDeUsuario = (u: string) => normUsuario(u) + '@' + USUARIO_DOMINIO
+
 const SB_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -87,17 +96,21 @@ Deno.serve(async (req: Request) => {
     // ── PÚBLICO (sem login): cadastro de revendedor por LINK DE INDICAÇÃO ──────
     if (acao === 'registrar_indicacao') {
       const ref = (body.ref || '').trim()
-      const email = (body.email || '').trim().toLowerCase()
+      const usuario = normUsuario(body.usuario)
       const senha = String(body.senha || '')
       const nome = (body.nome || '').trim()
       if (!ref) return erro('link de indicação inválido')
-      if (!email || senha.length < 6) return erro('email e senha (min. 6) obrigatorios')
+      if (!usuarioValido(usuario)) return erro('usuário inválido (3-30 letras/números . _ -)')
+      if (senha.length < 6) return erro('senha de no mínimo 6 caracteres')
       const { data: dono } = await sb.from('revendedores').select('id').eq('codigo_indicacao', ref).eq('ativo', true).maybeSingle()
       if (!dono) return erro('código de indicação inválido', 404)
-      const { data: novo, error: e1 } = await sb.auth.admin.createUser({ email, password: senha, email_confirm: true })
-      if (e1 || !novo?.user) return erro(e1?.message || 'falha ao criar conta')
+      // usuário único (pré-checagem amigável; o Auth ainda barra o e-mail duplicado)
+      const { data: ja } = await sb.from('revendedores').select('id').ilike('usuario', usuario).maybeSingle()
+      if (ja) return erro('esse usuário já existe', 409)
+      const { data: novo, error: e1 } = await sb.auth.admin.createUser({ email: emailDeUsuario(usuario), password: senha, email_confirm: true })
+      if (e1 || !novo?.user) return erro((e1?.message || '').includes('registered') ? 'esse usuário já existe' : (e1?.message || 'falha ao criar conta'))
       const { error: e2 } = await sb.from('revendedores').insert({
-        id: novo.user.id, nome, email, papel: 'reseller', criado_por: dono.id, codigo_indicacao: gerarCodigo(),
+        id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: dono.id, codigo_indicacao: gerarCodigo(),
       })
       if (e2) { await sb.auth.admin.deleteUser(novo.user.id).catch(() => {}); return erro(e2.message) }
       return json({ ok: true })
@@ -123,22 +136,25 @@ Deno.serve(async (req: Request) => {
       // garante o código de indicação (gera na 1ª vez p/ contas antigas)
       let codigo = rev.codigo_indicacao
       if (!codigo) { codigo = gerarCodigo(); await sb.from('revendedores').update({ codigo_indicacao: codigo }).eq('id', rev.id) }
-      return json({ id: rev.id, nome: rev.nome, email: rev.email, papel: rev.papel, saldo_creditos: rev.saldo_creditos ?? 0, codigo_indicacao: codigo })
+      return json({ id: rev.id, nome: rev.nome, usuario: rev.usuario, papel: rev.papel, saldo_creditos: rev.saldo_creditos ?? 0, codigo_indicacao: codigo })
     }
 
     // Qualquer operador cria um REVENDEDOR (papel 'reseller'), sem limite de
     // profundidade. "Master" é um TIER dado pelo admin (ação `promover`) — não se
     // cria direto. (`admin` só existe via bootstrap/promote manual no banco.)
     if (acao === 'criar_revendedor') {
-      const email = (body.email || '').trim().toLowerCase()
+      const usuario = normUsuario(body.usuario)
       const senha = String(body.senha || '')
       const nome = (body.nome || '').trim()
-      if (!email || senha.length < 6) return erro('email e senha (min. 6) obrigatorios')
+      if (!usuarioValido(usuario)) return erro('usuário inválido (3-30 letras/números . _ -)')
+      if (senha.length < 6) return erro('senha de no mínimo 6 caracteres')
+      const { data: ja } = await sb.from('revendedores').select('id').ilike('usuario', usuario).maybeSingle()
+      if (ja) return erro('esse usuário já existe', 409)
 
-      const { data: novo, error: e1 } = await sb.auth.admin.createUser({ email, password: senha, email_confirm: true })
-      if (e1 || !novo?.user) return erro(e1?.message || 'falha ao criar usuario')
+      const { data: novo, error: e1 } = await sb.auth.admin.createUser({ email: emailDeUsuario(usuario), password: senha, email_confirm: true })
+      if (e1 || !novo?.user) return erro((e1?.message || '').includes('registered') ? 'esse usuário já existe' : (e1?.message || 'falha ao criar usuario'))
       const { error: e2 } = await sb.from('revendedores').insert({
-        id: novo.user.id, nome, email, papel: 'reseller', criado_por: rev.id,
+        id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: rev.id,
       })
       if (e2) { await sb.auth.admin.deleteUser(novo.user.id).catch(() => {}); return erro(e2.message) }
       return json({ ok: true, id: novo.user.id })
@@ -147,7 +163,7 @@ Deno.serve(async (req: Request) => {
     // Downline DIRETO (contas que EU criei). Todos têm downline (revendedor cria revendedor).
     if (acao === 'listar_revendedores') {
       const { data } = await sb.from('revendedores')
-        .select('id, nome, email, papel, ativo, saldo_creditos, criado_em').eq('criado_por', rev.id)
+        .select('id, nome, usuario, papel, ativo, saldo_creditos, criado_em').eq('criado_por', rev.id)
         .order('criado_em', { ascending: false })
       return json({ revendedores: data || [] })
     }
@@ -168,19 +184,21 @@ Deno.serve(async (req: Request) => {
       const alvo_id = (body.revendedor_id || '').trim()
       const qtd = Math.floor(Number(body.quantidade) || 0)
       if (!alvo_id || qtd <= 0) return erro('informe destinatario e quantidade > 0')
-      const { data: alvo } = await sb.from('revendedores').select('*').eq('id', alvo_id).maybeSingle()
-      if (!alvo || alvo.criado_por !== rev.id) return erro('destinatario nao esta no seu downline', 404)
-      if ((rev.saldo_creditos ?? 0) < qtd) return erro('saldo insuficiente')
-
-      const meuNovo = (rev.saldo_creditos ?? 0) - qtd
-      const alvoNovo = (alvo.saldo_creditos ?? 0) + qtd
-      await sb.from('revendedores').update({ saldo_creditos: meuNovo }).eq('id', rev.id)
-      await sb.from('revendedores').update({ saldo_creditos: alvoNovo }).eq('id', alvo_id)
-      await sb.from('creditos_transacoes').insert([
-        { revendedor_id: rev.id, tipo: 'transferido_saida', quantidade: -qtd, saldo_apos: meuNovo, por: rev.id, nota: 'Para ' + (alvo.nome || alvo.email || alvo_id) },
-        { revendedor_id: alvo_id, tipo: 'transferido_entrada', quantidade: qtd, saldo_apos: alvoNovo, por: rev.id, nota: 'De ' + (rev.nome || rev.email || rev.id) },
-      ])
-      return json({ ok: true, saldo: meuNovo })
+      const { data: alvo } = await sb.from('revendedores').select('id, nome, usuario').eq('id', alvo_id).maybeSingle()
+      if (!alvo) return erro('destinatario nao encontrado', 404)
+      // A transferência (débito+crédito+extrato) é ATÔMICA via RPC — evita o
+      // double-spend do read-modify-write anterior. A checagem de downline
+      // continua aqui (regra de negócio), mas o dinheiro só se move na função.
+      const { data: novoSaldo, error: eT } = await sb.rpc('rpc_transferir_creditos', {
+        p_de: rev.id, p_para: alvo_id, p_qtd: qtd, p_por: rev.id,
+        p_nota_saida: 'Para ' + (alvo.nome || alvo.usuario || alvo_id),
+        p_nota_entrada: 'De ' + (rev.nome || rev.usuario || rev.id),
+      })
+      if (eT) {
+        if ((eT.message || '').includes('SALDO_INSUFICIENTE')) return erro('saldo insuficiente')
+        return erro('falha na transferencia')
+      }
+      return json({ ok: true, saldo: novoSaldo })
     }
 
     // Extrato do próprio saldo.
@@ -210,7 +228,7 @@ Deno.serve(async (req: Request) => {
       if (!(await clienteDoRev(cliente_id))) return erro('cliente nao encontrado', 404)
       const { data: cliente } = await sb.from('clientes').select('id, nome').eq('id', cliente_id).maybeSingle()
       const { data: dispositivos } = await sb.from('dispositivos')
-        .select('id, mac, device_key, modelo, status, trial_expira_em, expira_em')
+        .select('id, mac, device_key, modelo, status, trial_expira_em, expira_em, ativado_por, criado_em, atualizado_em')
         .eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
       const { data: playlists } = await sb.from('playlists')
         .select('id, nome, tipo, criado_em').eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
@@ -235,24 +253,19 @@ Deno.serve(async (req: Request) => {
       const { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
       if (!d || d.device_key !== key) return erro('dispositivo nao encontrado (confira MAC e Key)', 404)
 
-      // Consumo de 1 crédito na ATIVAÇÃO (irreversível). Só cobra quando o device
-      // PASSA a 'ativo' — re-vincular um device já ativo NÃO cobra de novo.
-      const jaAtivo = d.status === 'ativo'
-      let saldoApos = rev.saldo_creditos ?? 0
-      if (!jaAtivo) {
-        if (saldoApos < 1) return erro('Saldo insuficiente: a ativação de um dispositivo consome 1 crédito.')
-        saldoApos = saldoApos - 1
-        await sb.from('revendedores').update({ saldo_creditos: saldoApos }).eq('id', rev.id)
-        await sb.from('creditos_transacoes').insert({
-          revendedor_id: rev.id, tipo: 'consumido', quantidade: -1, saldo_apos: saldoApos, por: rev.id,
-          nota: 'Ativação do dispositivo ' + mac,
-        })
+      // Consumo de 1 crédito + ativação são ATÔMICOS (RPC). Antes eram 3 statements
+      // separados: duas ativações simultâneas gastavam 1 crédito por 2 devices.
+      // Re-vincular um device já 'ativo' NÃO cobra de novo (a RPC decide isso).
+      const { data: res, error: eA } = await sb.rpc('rpc_ativar_dispositivo', {
+        p_dispositivo_id: d.id, p_cliente_id: cliente_id, p_rev: rev.id, p_mac: mac,
+      })
+      if (eA) {
+        if ((eA.message || '').includes('SALDO_INSUFICIENTE')) {
+          return erro('Saldo insuficiente: a ativação de um dispositivo consome 1 crédito.')
+        }
+        return erro('falha ao ativar o dispositivo')
       }
-
-      await sb.from('dispositivos').update({
-        cliente_id, status: 'ativo', ativado_por: 'reseller', atualizado_em: new Date().toISOString(),
-      }).eq('id', d.id)
-      return json({ ok: true, dispositivo: { id: d.id, mac: d.mac }, saldo: saldoApos, cobrado: !jaAtivo })
+      return json({ ok: true, dispositivo: { id: d.id, mac: d.mac }, saldo: res?.saldo, cobrado: !!res?.cobrado })
     }
 
     // ── Playlists do cliente (cifra) + vínculo aos dispositivos ───────────────
@@ -335,7 +348,7 @@ Deno.serve(async (req: Request) => {
       const cids = (clis || []).map((c) => c.id)
       if (!cids.length) return json({ dispositivos: [] })
       const { data: disp } = await sb.from('dispositivos')
-        .select('id, mac, device_key, modelo, status, trial_expira_em, expira_em, cliente_id, criado_em')
+        .select('id, mac, device_key, modelo, status, trial_expira_em, expira_em, cliente_id, criado_em, ativado_por, atualizado_em')
         .in('cliente_id', cids).order('criado_em', { ascending: false })
       // deno-lint-ignore no-explicit-any
       const nomeCli = new Map((clis || []).map((c: any) => [c.id, c.nome]))
