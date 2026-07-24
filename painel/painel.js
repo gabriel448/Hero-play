@@ -617,7 +617,9 @@ const vParceiros = () => placeholder('Parceiros', 'Domínios parceiros (Free DNS
 // ── Indicação (código + link; novos revendedores se cadastram por aqui) ──────
 async function vIndicacao() {
   const codigo = me.codigo_indicacao || '—'
-  const link = `${location.origin}/register.html?ref=${encodeURIComponent(codigo)}`
+  // Link RELATIVO à página atual → funciona em qualquer caminho de deploy
+  // (raiz, /painel/, /pasta-secreta/…) sem precisar saber o domínio/prefixo.
+  const link = new URL('register.html?ref=' + encodeURIComponent(codigo), location.href).href
   view().innerHTML = `<div class="pg">
     <div class="pg-head"><div><h1>Indicação</h1><p>Seu link de indicação para novos revendedores</p></div></div>
     <div class="ind-cards">

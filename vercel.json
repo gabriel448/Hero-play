@@ -1,3 +1,12 @@
 {
-  "outputDirectory": "website"
+  "outputDirectory": "website",
+  "buildCommand": "rm -rf website/painel && cp -r painel website/painel",
+  "headers": [
+    {
+      "source": "/painel/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    }
+  ]
 }
