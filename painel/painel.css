@@ -251,3 +251,65 @@ tbody tr:first-child td { border-top: none; }
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); background: var(--surface2); border: 1px solid var(--outline); color: var(--text); padding: 14px 24px; border-radius: 11px; font-size: 15px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; box-shadow: 0 20px 50px -20px #000; z-index: 300; }
 #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.erro { border-color: var(--accent); color: var(--accent2); }
+/* ═══ MOBILE / TELEFONE ═══════════════════════════════════════════════════════
+   A sidebar de 250px vira uma BARRA SUPERIOR com nav em rolagem horizontal; o
+   conteúdo ocupa a largura toda; tabelas largas rolam na horizontal (sem quebrar
+   a página). Alvo: telas de telefone (<= 720px). */
+@media (max-width: 720px) {
+  .shell { flex-direction: column; height: 100dvh; }
+
+  /* Sidebar → barra superior (logo | nav rolável | usuário) */
+  .side { width: 100%; height: auto; flex-direction: row; align-items: center;
+    border-right: none; border-bottom: 1px solid var(--divider); flex-shrink: 0; }
+  .side-top { padding: 10px 14px; border-bottom: none; flex-shrink: 0; }
+  .side-logo { width: 34px; height: 34px; }
+  .side-nav { flex: 1; flex-direction: row; gap: 6px; padding: 8px; overflow-x: auto;
+    overflow-y: hidden; scrollbar-width: none; }
+  .side-nav::-webkit-scrollbar { display: none; }
+  .nav-grp-label { display: none; }                 /* grupos não fazem sentido em linha */
+  .nav-item { flex-shrink: 0; white-space: nowrap; padding: 9px 13px; font-size: 14px; }
+  .nav-item.on::before { left: 12px; right: 12px; top: auto; bottom: 0;
+    width: auto; height: 3px; transform: none; }    /* realce embaixo, não à esquerda */
+
+  /* Bloco do usuário → compacto à direita (esconde nome/cargo, mantém saldo + sair) */
+  .side-user { border-top: none; padding: 8px 10px; margin-left: auto; display: flex;
+    align-items: center; gap: 8px; flex-shrink: 0; }
+  .user-card { padding: 6px 8px; gap: 8px; }
+  .user-meta { display: none; }
+  .side-sair { width: auto; margin: 0; padding: 9px 11px; }
+  .side-sair span { display: none; }                /* só o ícone de sair */
+
+  /* Conteúdo */
+  .main { flex: 1; }
+  .pg { padding: 20px 15px; }
+  .pg-head { flex-wrap: wrap; align-items: flex-start; gap: 10px; padding-bottom: 16px; margin-bottom: 18px; }
+  .pg-head h1 { font-size: 23px; }
+  .pg-head p { font-size: 14px; }
+  .dash-greet { font-size: 11px; }
+
+  /* Grades → coluna única / mais estreitas */
+  .stats { grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+  .quick { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ind-cards { grid-template-columns: 1fr; }
+  .ind-link-row { flex-direction: column; }
+
+  /* Filtros empilhados */
+  .filtros { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; }
+  .busca { min-width: 0; width: 100%; }
+
+  /* Tabelas: rolam na horizontal dentro do card (não empurram a página) */
+  .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { min-width: 620px; }
+  th { padding: 11px 14px; }
+  td { padding: 13px 14px; font-size: 14px; }
+  .url-cel { max-width: 160px; }
+  .acoes-dl { flex-wrap: wrap; justify-content: flex-start; }
+
+  /* Detalhe do cliente: as 2 colunas já viram 1 em <=900px (.grid2) */
+  .row { padding: 16px 18px; }
+  .row-nome { font-size: 17px; }
+
+  /* Modais ocupam quase a largura toda */
+  .modal-card { width: min(460px, 94vw); padding: 24px 20px; }
+  .mdev-info { grid-template-columns: 1fr; }
+}
