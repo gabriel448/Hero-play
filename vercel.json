@@ -1,6 +1,9 @@
 {
   "outputDirectory": "website",
   "buildCommand": "rm -rf website/painel && cp -r painel website/painel",
+  "redirects": [
+    { "source": "/painel", "destination": "/painel/", "permanent": false }
+  ],
   "headers": [
     {
       "source": "/painel/(.*)",
