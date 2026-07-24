@@ -71,6 +71,18 @@ function gerarCodigo(): string {
   for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)]
   return s
 }
+// Código de indicação ÚNICO: gera aleatório e confere na tabela (o índice único
+// impede duplicata; aqui evitamos o erro tentando de novo). Colisão em ~1,1 tri
+// de combinações é raríssima, mas em produção não pode quebrar um cadastro.
+async function gerarCodigoUnico(): Promise<string> {
+  for (let i = 0; i < 8; i++) {
+    const c = gerarCodigo()
+    const { data } = await sb.from('revendedores').select('id').eq('codigo_indicacao', c).maybeSingle()
+    if (!data) return c
+  }
+  // Fallback praticamente impossível de colidir (sufixo temporal).
+  return gerarCodigo().slice(0, 5) + Date.now().toString(36).slice(-3).toUpperCase()
+}
 
 // ── Login por USUÁRIO (sem e-mail) ───────────────────────────────────────────
 // O Supabase Auth exige e-mail; usamos um SINTÉTICO derivado do usuário. Nunca é
@@ -110,7 +122,7 @@ Deno.serve(async (req: Request) => {
       const { data: novo, error: e1 } = await sb.auth.admin.createUser({ email: emailDeUsuario(usuario), password: senha, email_confirm: true })
       if (e1 || !novo?.user) return erro((e1?.message || '').includes('registered') ? 'esse usuário já existe' : (e1?.message || 'falha ao criar conta'))
       const { error: e2 } = await sb.from('revendedores').insert({
-        id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: dono.id, codigo_indicacao: gerarCodigo(),
+        id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: dono.id, codigo_indicacao: await gerarCodigoUnico(),
       })
       if (e2) { await sb.auth.admin.deleteUser(novo.user.id).catch(() => {}); return erro(e2.message) }
       return json({ ok: true })
@@ -135,7 +147,7 @@ Deno.serve(async (req: Request) => {
     if (acao === 'me') {
       // garante o código de indicação (gera na 1ª vez p/ contas antigas)
       let codigo = rev.codigo_indicacao
-      if (!codigo) { codigo = gerarCodigo(); await sb.from('revendedores').update({ codigo_indicacao: codigo }).eq('id', rev.id) }
+      if (!codigo) { codigo = await gerarCodigoUnico(); await sb.from('revendedores').update({ codigo_indicacao: codigo }).eq('id', rev.id) }
       return json({ id: rev.id, nome: rev.nome, usuario: rev.usuario, papel: rev.papel, saldo_creditos: rev.saldo_creditos ?? 0, codigo_indicacao: codigo })
     }
 
@@ -154,7 +166,7 @@ Deno.serve(async (req: Request) => {
       const { data: novo, error: e1 } = await sb.auth.admin.createUser({ email: emailDeUsuario(usuario), password: senha, email_confirm: true })
       if (e1 || !novo?.user) return erro((e1?.message || '').includes('registered') ? 'esse usuário já existe' : (e1?.message || 'falha ao criar usuario'))
       const { error: e2 } = await sb.from('revendedores').insert({
-        id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: rev.id,
+        id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: rev.id, codigo_indicacao: await gerarCodigoUnico(),
       })
       if (e2) { await sb.auth.admin.deleteUser(novo.user.id).catch(() => {}); return erro(e2.message) }
       return json({ ok: true, id: novo.user.id })
