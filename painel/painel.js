@@ -159,7 +159,14 @@ function marcarNav(v) {
 }
 const view = () => document.getElementById('view')
 
+// Sequência de view: cada troca incrementa. As views assíncronas capturam o valor
+// ao renderizar e ABANDONAM as escritas no DOM se a view mudou durante um await
+// (senão dá "Cannot set innerHTML of null" ao escrever num #elemento já removido).
+let _viewSeq = 0
+const viewAtual = () => _viewSeq
+
 function irPara(v, param) {
+  _viewSeq++
   marcarNav(v)
   const fn = { dashboard: vDashboard, suporte: vSuporte, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros }[v]
   if (fn) fn(param)
@@ -326,6 +333,7 @@ async function vDashboard() {
     </div>
   </div>`
   view().querySelectorAll('.qbtn').forEach((b) => { b.onclick = () => irPara(b.dataset.go) })
+  const meu = viewAtual()
   try {
     const card = (ic, cor, val, lbl) => `<div class="stat"><div class="stat-ic" style="background:${cor}1f;color:${cor}">${svg(ic)}</div><div><b>${val}</b><span>${lbl}</span></div></div>`
     let html = card('coins', '#E53935', me.saldo_creditos ?? 0, 'Créditos')
@@ -334,8 +342,12 @@ async function vDashboard() {
     const { revendedores } = await pega('downline', () => api('listar_revendedores'))
     html += card('userplus', '#9b7bff', revendedores.length, 'Revendedores')
     if (me.papel === 'admin') html += card('shield', '#7c5cff', revendedores.filter((r) => r.papel === 'master').length, 'Masters')
+    if (meu !== viewAtual()) return
     document.getElementById('dash-stats').innerHTML = html
-  } catch (e) { document.getElementById('dash-stats').innerHTML = `<div class="vazio">${esc(e.message)}</div>` }
+  } catch (e) {
+    if (meu !== viewAtual()) return
+    const el = document.getElementById('dash-stats'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
 }
 
 // ── Clientes ─────────────────────────────────────────────────────────────────
@@ -347,8 +359,10 @@ async function vClientes() {
     titulo: 'Novo cliente', okLabel: 'Criar', campos: [{ id: 'nome', label: 'Nome do cliente', placeholder: 'Ex.: Gabriel' }],
     onOk: async (v) => { if (!v.nome) return 'Informe o nome'; await api('criar_cliente', { nome: v.nome }); invalidar('clientes'); toast('Cliente criado'); vClientes(); return null },
   })
+  const meu = viewAtual()
   try {
     const { clientes } = await pega('clientes', () => api('listar_clientes'))
+    if (meu !== viewAtual()) return
     document.getElementById('cli-sub').textContent = `${clientes.length} cliente${clientes.length !== 1 ? 's' : ''}`
     const el = document.getElementById('cli-lista')
     if (!clientes.length) { el.innerHTML = '<div class="vazio">Nenhum cliente ainda. Crie o primeiro.</div>'; return }
@@ -361,8 +375,10 @@ async function vCliente(cliente_id) {
   const chaveCache = 'cliente:' + cliente_id
   view().innerHTML = `<div class="pg"><button class="btn-sec pg-back" id="voltar">← Clientes</button><div id="cli-det"><div class="vazio">Carregando…</div></div></div>`
   document.getElementById('voltar').onclick = () => irPara('clientes')
+  const meu = viewAtual()
   let det
   try { det = await pega(chaveCache, () => api('cliente_detalhe', { cliente_id })) } catch (e) { toast(e.message, true); return }
+  if (meu !== viewAtual()) return
   const { cliente, dispositivos, playlists, vinculos } = det
   const ativaDe = (did) => { const v = vinculos.find((x) => x.dispositivo_id === did && x.selecionada); return v ? v.playlist_id : null }
   const nomePl = (pid) => { const p = playlists.find((x) => x.id === pid); return p ? p.nome : null }
@@ -406,8 +422,10 @@ async function vRevendedores() {
     <button class="btn-sec" id="ir-indicacao">${svg('link')} Meu link de indicação</button></div>
     <div class="tbl-wrap" id="dl-tbl"><div class="vazio">Carregando…</div></div></div>`
   document.getElementById('ir-indicacao').onclick = () => irPara('indicacao')
+  const meu = viewAtual()
   try {
     const { revendedores } = await pega('downline', () => api('listar_revendedores'))
+    if (meu !== viewAtual()) return
     document.getElementById('dl-sub').textContent = `${revendedores.length} revendedor(es) direto(s)`
     const el = document.getElementById('dl-tbl')
     if (!revendedores.length) { el.innerHTML = '<div class="vazio">Ninguém se cadastrou pelo seu link ainda. Compartilhe seu link em <b>Indicação</b>.</div>'; return }
@@ -436,8 +454,10 @@ async function vCreditos() {
   view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Créditos</h1><p>Seu saldo e histórico de movimentos</p></div></div>
     <div class="stats"><div class="stat"><div class="stat-ic" style="background:#E539351f;color:#E53935">${svg('coins')}</div><div><b id="cr-saldo">${me.saldo_creditos ?? 0}</b><span>Saldo atual</span></div></div></div>
     <div class="tbl-wrap" id="cr-tbl"><div class="vazio">Carregando…</div></div></div>`
+  const meu = viewAtual()
   try {
     const { saldo, transacoes } = await pega('creditos', () => api('listar_creditos'))
+    if (meu !== viewAtual()) return
     me.saldo_creditos = saldo; document.getElementById('cr-saldo').textContent = saldo
     const su = document.getElementById('u-saldo'); if (su) su.textContent = saldo
     const el = document.getElementById('cr-tbl')
@@ -499,6 +519,7 @@ async function vDispositivos() {
     <div class="tbl-wrap" id="dv-tbl"><div class="vazio">Carregando…</div></div>
   </div>`
   document.getElementById('dv-vinc').onclick = modalVincularGlobal
+  const meu = viewAtual()
   let dados = []
   const st = { q: '', status: '' }
   const render = () => {
@@ -523,6 +544,7 @@ async function vDispositivos() {
   wirePills(document.getElementById('dv-fst'), (v) => { st.status = v; render() })
   try {
     const r = await pega('dispositivos', () => api('listar_dispositivos'))
+    if (meu !== viewAtual()) return
     dados = r.dispositivos || []
     document.getElementById('dv-sub').textContent = `${dados.length} dispositivo(s)`
     const c = (s) => dados.filter((d) => d.status === s).length
@@ -530,7 +552,10 @@ async function vDispositivos() {
       statCard('monitor', '#4f8ef7', dados.length, 'Total') + statCard('shield', '#34c759', c('ativo'), 'Ativos') +
       statCard('coins', '#e8b23a', c('trial'), 'Trial') + statCard('globe', '#ff5b54', c('expirado'), 'Expirados')
     render()
-  } catch (e) { document.getElementById('dv-tbl').innerHTML = `<div class="vazio">${esc(e.message)}</div>` }
+  } catch (e) {
+    if (meu !== viewAtual()) return
+    const el = document.getElementById('dv-tbl'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
 }
 
 async function modalVincularGlobal() {
@@ -563,6 +588,7 @@ async function vPlaylists() {
     <div class="tbl-wrap" id="pl-tbl"><div class="vazio">Carregando…</div></div>
   </div>`
   document.getElementById('pl-migrar').onclick = modalMigrarUrl
+  const meu = viewAtual()
   let dados = []
   const st = { q: '', sel: '', pin: '' }
   const ck = (b) => b ? '<span class="ck-s">✓</span>' : '<span class="ck-n">✗</span>'
@@ -595,6 +621,7 @@ async function vPlaylists() {
   wirePills(document.getElementById('pl-fpin'), (v) => { st.pin = v; render() })
   try {
     const r = await pega('playlists', () => api('listar_playlists'))
+    if (meu !== viewAtual()) return                 // trocou de aba durante o fetch
     dados = r.playlists || []
     document.getElementById('pl-sub').textContent = `${dados.length} playlist(s)`
     const c = (t) => dados.filter((p) => p.tipo === t).length
@@ -602,7 +629,10 @@ async function vPlaylists() {
       statCard('listv', '#4f8ef7', dados.length, 'Total') + statCard('monitor', '#9b7bff', c('xtream'), 'Xtream') +
       statCard('coins', '#34c759', c('m3u'), 'M3U') + statCard('globe', '#8b8f98', dados.filter((p) => p.free_dns).length, 'Free DNS')
     render()
-  } catch (e) { document.getElementById('pl-tbl').innerHTML = `<div class="vazio">${esc(e.message)}</div>` }
+  } catch (e) {
+    if (meu !== viewAtual()) return
+    const el = document.getElementById('pl-tbl'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
 }
 
 // Migrar URL em massa: pré-visualiza (dry-run) → confirma → aplica.
