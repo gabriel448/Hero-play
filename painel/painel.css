@@ -251,36 +251,43 @@ tbody tr:first-child td { border-top: none; }
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); background: var(--surface2); border: 1px solid var(--outline); color: var(--text); padding: 14px 24px; border-radius: 11px; font-size: 15px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; box-shadow: 0 20px 50px -20px #000; z-index: 300; }
 #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.erro { border-color: var(--accent); color: var(--accent2); }
+/* Barra superior mobile (hambúrguer) + backdrop do drawer — escondidos no desktop */
+.mtop { display: none; }
+.side-bd { display: none; }
+
 /* ═══ MOBILE / TELEFONE ═══════════════════════════════════════════════════════
-   A sidebar de 250px vira uma BARRA SUPERIOR com nav em rolagem horizontal; o
-   conteúdo ocupa a largura toda; tabelas largas rolam na horizontal (sem quebrar
-   a página). Alvo: telas de telefone (<= 720px). */
+   A sidebar de 250px vira um MENU LATERAL HAMBÚRGUER (drawer que desliza da
+   esquerda, sobre um backdrop). O conteúdo ocupa a largura toda; tabelas largas
+   rolam na horizontal (sem quebrar a página). Alvo: telefones (<= 720px). */
 @media (max-width: 720px) {
   .shell { flex-direction: column; height: 100dvh; }
 
-  /* Sidebar → barra superior (logo | nav rolável | usuário) */
-  .side { width: 100%; height: auto; flex-direction: row; align-items: center;
-    border-right: none; border-bottom: 1px solid var(--divider); flex-shrink: 0; }
-  .side-top { padding: 10px 14px; border-bottom: none; flex-shrink: 0; }
-  .side-logo { width: 34px; height: 34px; }
-  .side-nav { flex: 1; flex-direction: row; gap: 6px; padding: 8px; overflow-x: auto;
-    overflow-y: hidden; scrollbar-width: none; }
-  .side-nav::-webkit-scrollbar { display: none; }
-  .nav-grp-label { display: none; }                 /* grupos não fazem sentido em linha */
-  .nav-item { flex-shrink: 0; white-space: nowrap; padding: 9px 13px; font-size: 14px; }
-  .nav-item.on::before { left: 12px; right: 12px; top: auto; bottom: 0;
-    width: auto; height: 3px; transform: none; }    /* realce embaixo, não à esquerda */
+  /* Barra superior fixa com o botão hambúrguer */
+  .mtop { display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    padding: 10px 14px; background: var(--side); border-bottom: 1px solid var(--divider);
+    position: sticky; top: 0; z-index: 60; }
+  .hamb { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+    background: var(--surface2); border: 1px solid var(--divider); border-radius: 11px; color: var(--text); }
+  .hamb svg { width: 22px; height: 22px; }
+  .mtop-logo { width: 30px; height: 30px; border-radius: 9px; }
+  .mtop-nome { font-size: 16px; font-weight: 800; }
+  .mtop-cr { margin-left: auto; display: flex; align-items: baseline; gap: 4px; }
+  .mtop-cr b { font-size: 18px; font-weight: 800; color: var(--accent2); }
+  .mtop-cr span { font-size: 12px; color: var(--muted); }
 
-  /* Bloco do usuário → compacto à direita (esconde nome/cargo, mantém saldo + sair) */
-  .side-user { border-top: none; padding: 8px 10px; margin-left: auto; display: flex;
-    align-items: center; gap: 8px; flex-shrink: 0; }
-  .user-card { padding: 6px 8px; gap: 8px; }
-  .user-meta { display: none; }
-  .side-sair { width: auto; margin: 0; padding: 9px 11px; }
-  .side-sair span { display: none; }                /* só o ícone de sair */
+  /* Sidebar → drawer off-canvas (desliza da esquerda) */
+  .side { position: fixed; top: 0; left: 0; height: 100dvh; width: 264px; z-index: 200;
+    transform: translateX(-100%); transition: transform .22s ease;
+    box-shadow: 24px 0 60px -20px rgba(0,0,0,.7); }
+  .shell.nav-open .side { transform: translateX(0); }
+
+  /* Backdrop escuro atrás do drawer aberto */
+  .side-bd { display: block; position: fixed; inset: 0; z-index: 150;
+    background: rgba(0,0,0,.55); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .shell.nav-open .side-bd { opacity: 1; pointer-events: auto; }
 
   /* Conteúdo */
-  .main { flex: 1; }
+  .main { flex: 1; width: 100%; }
   .pg { padding: 20px 15px; }
   .pg-head { flex-wrap: wrap; align-items: flex-start; gap: 10px; padding-bottom: 16px; margin-bottom: 18px; }
   .pg-head h1 { font-size: 23px; }

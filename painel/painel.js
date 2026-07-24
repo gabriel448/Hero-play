@@ -79,6 +79,7 @@ const IC = {
   ticket: '<path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
   lifebuoy: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
+  menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff: '<path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.1 6.1A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 3.4-.66"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="2" x2="22" y1="2" y2="22"/>',
 }
@@ -134,6 +135,12 @@ function renderShell() {
   }).join('')
   const inicial = (me.nome || me.usuario || '?').trim().charAt(0).toUpperCase()
   app.innerHTML = `<div class="shell">
+    <header class="mtop">
+      <button class="hamb" id="hamb" aria-label="Menu">${svg('menu')}</button>
+      <img class="mtop-logo" src="heroplay-icon.svg" alt="Hero Play"><b class="mtop-nome">Hero Play</b>
+      <div class="mtop-cr"><b>${me.saldo_creditos ?? 0}</b><span>cr</span></div>
+    </header>
+    <div class="side-bd" id="side-bd"></div>
     <aside class="side">
       <div class="side-top"><img class="side-logo" src="heroplay-icon.svg" alt="Hero Play"></div>
       <nav class="side-nav">${nav}</nav>
@@ -148,7 +155,11 @@ function renderShell() {
     </aside>
     <main class="main"><div id="view"></div></main>
   </div>`
-  app.querySelectorAll('.nav-item').forEach((b) => { b.onclick = () => irPara(b.dataset.view) })
+  const shell = app.querySelector('.shell')
+  const fecharMenu = () => shell.classList.remove('nav-open')
+  document.getElementById('hamb').onclick = () => shell.classList.toggle('nav-open')
+  document.getElementById('side-bd').onclick = fecharMenu
+  app.querySelectorAll('.nav-item').forEach((b) => { b.onclick = () => { fecharMenu(); irPara(b.dataset.view) } })
   document.getElementById('sair').onclick = sair
   irPara('dashboard')
 }
