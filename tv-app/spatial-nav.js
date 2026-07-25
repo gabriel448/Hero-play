@@ -169,7 +169,13 @@ const SpatialNav = (() => {
   // NA RAIZ (sidebar, seção Início) o Voltar pergunta se quer SAIR do app — as
   // lojas LG/Samsung exigem que o Back na raiz devolva ao launcher (ver
   // confirmarSairApp em app.js). Fora do Início, o Voltar leva ao Início 1º.
+  let _ultimoVoltar = 0;
   function voltar() {
+    // Anti-duplo: no webOS o Back pode chegar por keydown E por popstate quase ao
+    // mesmo tempo — sem isto o "voltar" pularia 2 níveis / fecharia o modal de sair.
+    const agora = Date.now();
+    if (agora - _ultimoVoltar < 250) return;
+    _ultimoVoltar = agora;
     const modal = modalTopo();
     if (modal && typeof modal._onVoltar === 'function') { modal._onVoltar(); return; }
     if (atual && atual.closest) {

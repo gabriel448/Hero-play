@@ -67,15 +67,34 @@ function posterHTML(item) {
   const ehSerie = item.tipo === 'serie';
   const usarLogo = !!item.logo && !ehSerie;
   const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}"` : '';
+  // Filme com logo da lista: se o logo NÃO carregar (host do provedor bloqueado/
+  // http na TV), cai para o pôster do TMDB pelo título — senão ficava só o nome.
   const img = usarLogo
-    ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" loading="lazy"
-         onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="this.remove()">`
+    ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" data-tmdb="${escapar(item.titulo)}"
+         onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="_logoParaTmdb(this)">`
     : '';
   return `<div class="poster focusable" data-id="${item.id}"${lazy}>
     <div class="poster-arte">
       ${img}<span>${escapar(item.titulo)}</span>
     </div>
   </div>`;
+}
+
+// Fallback do pôster de FILME: o logo da lista falhou → busca o pôster no TMDB
+// pelo título e usa no lugar. Cobre provedores cujos logos não abrem na TV.
+function _logoParaTmdb(img) {
+  const arte = img.closest('.poster-arte');
+  const titulo = img.dataset.tmdb;
+  img.remove();
+  if (!arte || !titulo || arte.classList.contains('tem-img')) return;
+  TMDB.poster(titulo).then((u) => {
+    if (!u || arte.classList.contains('tem-img') || !arte.isConnected) return;
+    const n = new Image();
+    n.className = 'poster-img';
+    n.onload = () => arte.classList.add('tem-img');
+    n.src = u;
+    arte.appendChild(n);
+  });
 }
 
 // ── Render: trilho ──────────────────────────────────────────────────────────
@@ -1085,15 +1104,36 @@ function _esperarFaixas(v, contar, ms) {
   });
 }
 
+// DIAGNÓSTICO: o que a plataforma REALMENTE expõe de faixas, para cada fonte.
+// Serve p/ sabermos, na TV real, por que legenda/áudio não aparece (sem DevTools).
+let _fonteVodDiag = null;   // { ehHls, ext } do último VOD aberto
+function _diagFaixas(v) {
+  const hls = _hlsDoVideo(v);
+  const n = (x) => (x && x.length != null) ? String(x.length) : (x == null ? 'n/d' : '0');
+  const fmt = _fonteVodDiag ? ((_fonteVodDiag.ehHls ? 'HLS' : 'arquivo') + ' .' + _fonteVodDiag.ext) : '?';
+  return [
+    'formato: ' + fmt,
+    'player: ' + (hls ? 'hls.js' : 'nativo TV'),
+    'sub via hls: ' + n(hls && hls.subtitleTracks),
+    'sub nativo (textTracks): ' + n(v.textTracks),
+    'audio via hls: ' + n(hls && hls.audioTracks),
+    'audio nativo (audioTracks): ' + (v.audioTracks ? String(v.audioTracks.length) : 'n/d (nao exposto)'),
+  ];
+}
+
 async function abrirMenuLegendas(v) {
   if (!v) return;
   let fx = faixasLegenda(v);
   if (!fx.length) {
     toast(t('Procurando legendas…'));
-    await _esperarFaixas(v, () => faixasLegenda(v).length, 12000);
+    await _esperarFaixas(v, () => faixasLegenda(v).length, 8000);
     fx = faixasLegenda(v);
   }
-  if (!fx.length) { toast(t('Este conteúdo não oferece legendas')); return; }
+  if (!fx.length) {
+    // Em vez do toast que some, mostra o diagnóstico na tela (p/ fotografar).
+    abrirMenu(t('Legendas — nada encontrado (diagnóstico)'), _diagFaixas(v), () => {});
+    return;
+  }
   const at = legendaAtual(v);
   const rotulos = [_marca(t('Desativadas'), at < 0)].concat(fx.map((f) => _marca(f.rotulo, f.i === at)));
   abrirMenu(t('Legendas'), rotulos, (k) => {
@@ -1107,10 +1147,13 @@ async function abrirMenuAudio(v) {
   let fx = faixasAudio(v);
   if (fx.length < 2) {
     toast(t('Procurando faixas de áudio…'));
-    await _esperarFaixas(v, () => faixasAudio(v).length > 1, 12000);
+    await _esperarFaixas(v, () => faixasAudio(v).length > 1, 8000);
     fx = faixasAudio(v);
   }
-  if (fx.length < 2) { toast(t('Este conteúdo tem apenas uma faixa de áudio')); return; }
+  if (fx.length < 2) {
+    abrirMenu(t('Áudio — só uma faixa (diagnóstico)'), _diagFaixas(v), () => {});
+    return;
+  }
   const at = audioAtual(v);
   abrirMenu(t('Áudio'), fx.map((f) => _marca(f.rotulo, f.i === at)), (k) => {
     selecionarAudio(v, fx[k].i);
@@ -1970,6 +2013,8 @@ function abrirPlayer(item, ctx, reiniciar) {
 
   const fonte = item.url || TEST_HLS;     // URL real do item (fallback: teste)
   const ehHls = /\.m3u8(\?|$)/i.test(fonte);
+  // Guarda formato/fonte p/ o diagnóstico de faixas (o usuário não vê a URL na UI).
+  _fonteVodDiag = { ehHls, ext: ((fonte.split('?')[0].split('.').pop() || '').toLowerCase().slice(0, 5)) || '?' };
   spinner(true);
   // VOD HLS → PREFERE hls.js quando ele é suportado. O player nativo do webOS
   // frequentemente NÃO expõe as faixas de áudio/legenda embutidas via
@@ -2987,7 +3032,23 @@ function aplicarPerfilAtivo() {
   montarSidebar();
 }
 
+// Botão VOLTAR do controle no webOS/Tizen: interceptar por keydown NÃO basta —
+// a TV dispara o "voltar do histórico" e FECHA o app antes/independente do
+// preventDefault. A forma confiável é prender no history: empilhamos um estado e,
+// a cada `popstate` (Back), re-empilhamos e tratamos como "voltar". Assim a TV
+// nunca sai sozinha; só saímos quando confirmarSairApp() chama window.close().
+function ligarVoltarSistema() {
+  try {
+    history.pushState({ hp: 1 }, '');
+    window.addEventListener('popstate', () => {
+      history.pushState({ hp: 1 }, '');   // re-arma o histórico (não deixa esvaziar)
+      try { SpatialNav.voltar(); } catch (_) {}
+    });
+  } catch (_) { /* sem history (dev): fica só o keydown do spatial-nav */ }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
+  ligarVoltarSistema();
   montarSidebar();
   // Hero reage ao item em foco (Início/Filmes/Séries).
   SpatialNav.aoFocar((el) => {
