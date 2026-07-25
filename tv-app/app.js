@@ -59,13 +59,16 @@ const iniciais = (nome) => {
 const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 
 // ── Render: poster ──────────────────────────────────────────────────────────
-function posterHTML(item) {
+function posterHTML(item, forcarTmdb) {
   // Filme: usa o logo/poster da própria lista. Série: o "logo" é o thumbnail do
   // 1º episódio (feio/pixelado) — então busca o PÔSTER no TMDB (lazy). Se o TMDB
   // não tiver pôster, fica SÓ o nome (gradiente) — NÃO usa o thumb do episódio.
   // Filme sem logo também cai no TMDB.
+  // `forcarTmdb`: ignora o logo da lista e vai direto pro TMDB via observer — usado
+  // na BUSCA, onde os logos do provedor às vezes PENDURAM (sem load nem error) e o
+  // pôster do filme não aparecia. O TMDB (image.tmdb.org) carrega firme na TV.
   const ehSerie = item.tipo === 'serie';
-  const usarLogo = !!item.logo && !ehSerie;
+  const usarLogo = !!item.logo && !ehSerie && !forcarTmdb;
   const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}"` : '';
   // Filme com logo da lista: se o logo NÃO carregar (host do provedor bloqueado/
   // http na TV), cai para o pôster do TMDB pelo título — senão ficava só o nome.
@@ -1404,6 +1407,9 @@ function atualizarBusca() {
   const nqSemEsp = nq.replace(/\s+/g, '');
   const matched = [...(LISTA.filmes || []), ...(LISTA.series || [])].filter((it) => casaBusca(it, nq, nqSemEsp));
   aplicarResultados(dir, matched.slice(0, 60), q);
+  // Indexa apelidos (TMDB) só dos RESULTADOS na tela — não dos 165k (isso travava
+  // a busca no início). Progressivo: casa por referência conforme o usuário navega.
+  indexar(matched.slice(0, 60), atualizarBusca, () => !!document.getElementById('bsc-dir'));
   if (sug) {
     // Prioriza quem COMEÇA com o texto (autocomplete de verdade); depois contém no
     // título; por último os que casaram só por referência/tradução (rank 3).
@@ -1449,7 +1455,7 @@ function aplicarResultados(dir, itens, q) {
   let anterior = null;
   for (const it of itens) {
     let el = existentes[it.id];
-    if (!el) { const tmp = document.createElement('div'); tmp.innerHTML = posterHTML(it); el = tmp.firstElementChild; }
+    if (!el) { const tmp = document.createElement('div'); tmp.innerHTML = posterHTML(it, true); el = tmp.firstElementChild; }
     const ref = anterior ? anterior.nextElementSibling : grid.firstElementChild;
     if (el !== ref) grid.insertBefore(el, ref);   // só move se preciso (não recria → não pisca)
     anterior = el;
@@ -1491,8 +1497,8 @@ function ligarBuscar(raiz) {
     else _buscaQuery += k.dataset.k;
     atualizarBusca();
   }));
-  atualizarBusca(); // sugestões iniciais (populares) já ao abrir
-  indexar([...(LISTA.series || []), ...(LISTA.filmes || [])], atualizarBusca, () => !!document.getElementById('bsc-dir'));
+  atualizarBusca(); // sugestões iniciais (populares) já ao abrir — a indexação de
+  // apelidos agora é POR RESULTADO (dentro de atualizarBusca), não dos 165k itens.
 }
 
 // Busca DENTRO de uma seção (Filmes ou Séries): mesma tela da busca, mas só com os
@@ -1561,7 +1567,9 @@ function abrirBuscaSecao(escopo, btn) {
     let itens = itensEscopo;
     if (catSel) itens = itens.filter((it) => (it.generos && it.generos[0]) === catSel);
     if (nq) itens = itens.filter((it) => casaBusca(it, nq, nqSemEsp));
-    aplicarResultados(dir, itens.slice(0, 60), query);
+    const vis = itens.slice(0, 60);
+    aplicarResultados(dir, vis, query);
+    indexar(vis, render, () => document.body.contains(ov)); // apelidos só do que está na tela
   }
   ov.querySelectorAll('.bsc-key').forEach((k) => k.addEventListener('click', () => {
     const a = k.dataset.acao;
@@ -1580,8 +1588,7 @@ function abrirBuscaSecao(escopo, btn) {
   }));
 
   requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('aberto'))); // anima a entrada
-  render();
-  indexar(itensEscopo, render, () => document.body.contains(ov)); // apelidos da seção (re-filtra ao chegar)
+  render();  // a indexação de apelidos é por resultado (dentro de render), não da seção toda
   SpatialNav.setFocus(ov.querySelector('.bsc-key'));
 }
 
