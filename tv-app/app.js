@@ -1104,6 +1104,96 @@ function _esperarFaixas(v, contar, ms) {
   });
 }
 
+// ── LEGENDA EXTERNA (.srt/.vtt) — render próprio ────────────────────────────
+// No webOS a legenda EMBUTIDA de MP4/MKV não é acessível por web app (a LG só
+// suporta .vtt externa). Então, quando existe legenda externa (via Xtream
+// get_vod_info), baixamos, convertemos p/ cues e renderizamos NÓS MESMOS num
+// overlay sincronizado ao vídeo — funciona em qualquer plataforma, sem depender
+// do render nativo de <track>.
+let _playerItem = null;              // item do VOD atual (tem a URL p/ get_vod_info)
+let _legCues = [];                   // [{ini, fim, txt}] em segundos
+let _legIdx = -1;                    // índice do cue exibido agora (evita repintar)
+let _legExternasCache = {};          // url do VOD -> lista de legendas externas
+function _legendaReset() { _legCues = []; _legIdx = -1; const el = document.getElementById('player-legenda'); if (el) { el.textContent = ''; el.classList.remove('on'); } }
+
+// Converte "HH:MM:SS,mmm" ou "MM:SS.mmm" em segundos.
+function _tempoLeg(s) {
+  const m = s.trim().replace(',', '.').match(/(?:(\d+):)?(\d{1,2}):(\d{2}(?:\.\d+)?)/);
+  if (!m) return 0;
+  return (parseInt(m[1] || '0') * 3600) + (parseInt(m[2]) * 60) + parseFloat(m[3]);
+}
+// Parser SRT E WebVTT → cues. Aceita os dois (a maioria dos provedores serve SRT).
+function parseLegenda(txt) {
+  const cues = [];
+  txt = txt.replace(/^﻿/, '').replace(/\r/g, '').replace(/^WEBVTT.*$/m, '');
+  for (const bloco of txt.split(/\n\n+/)) {
+    const linhas = bloco.split('\n').filter((l) => l.trim() !== '');
+    if (!linhas.length) continue;
+    let i = 0;
+    if (/^\d+$/.test(linhas[0].trim())) i = 1;           // número do cue (SRT)
+    const tempo = linhas[i] && linhas[i].match(/(.+?)\s*-->\s*(.+)/);
+    if (!tempo) continue;
+    const ini = _tempoLeg(tempo[1]), fim = _tempoLeg(tempo[2]);
+    const texto = linhas.slice(i + 1).join('\n')
+      .replace(/<[^>]+>/g, '').replace(/\{[^}]+\}/g, '').trim();   // tira tags
+    if (texto) cues.push({ ini, fim, txt: texto });
+  }
+  cues.sort((a, b) => a.ini - b.ini);
+  return cues;
+}
+// Liga a atualização do overlay ao tempo do vídeo (1x por player).
+function _ligarLegendaTick(v) {
+  if (v._legTick) return;
+  v._legTick = true;
+  v.addEventListener('timeupdate', () => {
+    const el = document.getElementById('player-legenda');
+    if (!el || !_legCues.length) return;
+    const t = v.currentTime;
+    // cue atual ainda vale? (barato)
+    if (_legIdx >= 0 && _legCues[_legIdx] && t >= _legCues[_legIdx].ini && t <= _legCues[_legIdx].fim) return;
+    let achou = -1;
+    for (let i = 0; i < _legCues.length; i++) { if (t >= _legCues[i].ini && t <= _legCues[i].fim) { achou = i; break; } if (_legCues[i].ini > t) break; }
+    if (achou === _legIdx) return;
+    _legIdx = achou;
+    if (achou < 0) { el.classList.remove('on'); el.textContent = ''; }
+    else { el.innerHTML = escapar(_legCues[achou].txt).replace(/\n/g, '<br>'); el.classList.add('on'); }
+  });
+}
+async function aplicarLegendaExterna(v, url) {
+  try {
+    const r = await fetch(url);
+    const txt = await r.text();
+    _legCues = parseLegenda(txt); _legIdx = -1;
+    _ligarLegendaTick(v);
+    return _legCues.length;
+  } catch (_) { return 0; }
+}
+function desativarLegenda() { _legCues = []; _legIdx = -1; const el = document.getElementById('player-legenda'); if (el) { el.classList.remove('on'); el.textContent = ''; } }
+
+// Descobre legendas EXTERNAS do VOD atual via Xtream get_vod_info. A URL do M3U
+// costuma ser http://host:port/movie/USER/PASS/VODID.ext → dá p/ montar a chamada.
+async function legendasExternas(item) {
+  const url = item && item.url; if (!url) return [];
+  if (_legExternasCache[url]) return _legExternasCache[url];
+  let out = [];
+  try {
+    const m = url.match(/^(https?:\/\/[^/]+)\/(?:movie|series)\/([^/]+)\/([^/]+)\/(\d+)\./i);
+    if (m) {
+      const [, base, user, pass, vodId] = m;
+      const api = `${base}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_vod_info&vod_id=${vodId}`;
+      const j = await (await fetch(api)).json();
+      const subs = (j && j.info && (j.info.subtitles || j.info.subtitle)) || [];
+      out = (Array.isArray(subs) ? subs : []).map((s, i) => {
+        const u = typeof s === 'string' ? s : (s.url || s.file || s.src || '');
+        const lang = (typeof s === 'object' && (s.language || s.lang || s.label)) || ('Legenda ' + (i + 1));
+        return u ? { rotulo: String(lang), url: u } : null;
+      }).filter(Boolean);
+    }
+  } catch (_) { /* provedor sem get_vod_info / CORS */ }
+  _legExternasCache[url] = out;
+  return out;
+}
+
 // DIAGNÓSTICO: o que a plataforma REALMENTE expõe de faixas, para cada fonte.
 // Serve p/ sabermos, na TV real, por que legenda/áudio não aparece (sem DevTools).
 let _fonteVodDiag = null;   // { ehHls, ext } do último VOD aberto
@@ -1123,23 +1213,40 @@ function _diagFaixas(v) {
 
 async function abrirMenuLegendas(v) {
   if (!v) return;
+  // 1) Faixas IN-BAND (HLS com VTT/CEA via hls.js — quando existirem).
   let fx = faixasLegenda(v);
-  if (!fx.length) {
+  // 2) Legendas EXTERNAS do provedor (Xtream get_vod_info) — a ÚNICA via no webOS
+  //    p/ arquivo MP4/MKV. Busca só p/ VOD (tem _playerItem).
+  let ext = [];
+  if (_playerItem) {
     toast(t('Procurando legendas…'));
-    await _esperarFaixas(v, () => faixasLegenda(v).length, 8000);
-    fx = faixasLegenda(v);
+    ext = await legendasExternas(_playerItem);
+    if (!fx.length && !ext.length) {
+      // dá uma última chance às in-band tardias (HLS)
+      await _esperarFaixas(v, () => faixasLegenda(v).length, 4000);
+      fx = faixasLegenda(v);
+    }
   }
-  if (!fx.length) {
-    // Em vez do toast que some, mostra o diagnóstico na tela (p/ fotografar).
+  if (!fx.length && !ext.length) {
     abrirMenu(t('Legendas — nada encontrado (diagnóstico)'), _diagFaixas(v), () => {});
     return;
   }
   const at = legendaAtual(v);
-  const rotulos = [_marca(t('Desativadas'), at < 0)].concat(fx.map((f) => _marca(f.rotulo, f.i === at)));
-  abrirMenu(t('Legendas'), rotulos, (k) => {
-    if (k === 0) { selecionarLegenda(v, -1); toast(t('Legendas desativadas')); return; }
-    selecionarLegenda(v, fx[k - 1].i);
-    toast(t('Legenda') + ': ' + fx[k - 1].rotulo);
+  const externaOn = _legCues.length > 0;
+  // Monta a lista: Desativar + in-band + externas.
+  const itens = [{ tipo: 'off', rotulo: _marca(t('Desativadas'), at < 0 && !externaOn) }];
+  fx.forEach((f) => itens.push({ tipo: 'hls', i: f.i, rotulo: _marca(f.rotulo, f.i === at) }));
+  ext.forEach((e) => itens.push({ tipo: 'ext', url: e.url, rotulo: _marca(e.rotulo + '  ·  externa', false) }));
+  abrirMenu(t('Legendas'), itens.map((x) => x.rotulo), async (k) => {
+    const sel = itens[k];
+    if (sel.tipo === 'off') { desativarLegenda(); if (fx.length) selecionarLegenda(v, -1); toast(t('Legendas desativadas')); return; }
+    if (sel.tipo === 'hls') { desativarLegenda(); selecionarLegenda(v, sel.i); toast(t('Legenda') + ': ' + fx.find((f) => f.i === sel.i).rotulo); return; }
+    if (sel.tipo === 'ext') {
+      if (fx.length) selecionarLegenda(v, -1);           // desliga in-band se houver
+      toast(t('Carregando legenda…'));
+      const n = await aplicarLegendaExterna(v, sel.url);
+      toast(n ? (t('Legenda ativada')) : t('Não foi possível carregar a legenda'));
+    }
   });
 }
 async function abrirMenuAudio(v) {
@@ -1962,11 +2069,14 @@ function fmtTempo(s) {
 let _playerCtx = null, _lastProgSave = 0;   // contexto p/ "continuar assistindo"
 function abrirPlayer(item, ctx, reiniciar) {
   _playerCtx = ctx || null; _lastProgSave = 0;
+  _playerItem = item;                 // p/ buscar legenda externa (Xtream get_vod_info)
+  _legendaReset();
   const ov = document.createElement('div');
   ov.id = 'player-overlay';
   ov.className = 'nav-modal player-modal';
   ov.innerHTML = `
     <video id="player-video" playsinline></video>
+    <div class="player-legenda" id="player-legenda"></div>
     <div class="pc-spinner" id="pc-spinner"></div>
     <div class="pc-erro oculto" id="pc-erro"></div>
     <div class="player-fade"></div>
@@ -2218,7 +2328,7 @@ function fecharPlayer() {
   // Salva o ponto final ao sair (continuar assistindo / concluir → recomendação).
   const vf = document.getElementById('player-video');
   if (_playerCtx && vf && vf.duration) Biblioteca.salvarProgresso(_playerCtx, vf.currentTime, vf.duration);
-  _playerCtx = null;
+  _playerCtx = null; _playerItem = null; _legendaReset();
   if (_hls) { _hls.destroy(); _hls = null; }
   // Encerra de fato a conexão. Só destruir o hls.js / remover o overlay NÃO basta:
   // um <video> com `src` mantém o socket aberto mesmo fora do DOM, e o servidor
