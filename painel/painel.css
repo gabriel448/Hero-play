@@ -190,6 +190,9 @@ tbody tr:first-child td { border-top: none; }
 .badge-admin { color: var(--violet); border-color: rgba(155,123,255,.4); }
 .badge-master { color: var(--info); border-color: rgba(79,142,247,.4); }
 .badge-reseller { color: var(--text2); }
+.badge-tk-aberto { color: var(--warn); border-color: rgba(232,178,58,.4); background: rgba(232,178,58,.08); }
+.badge-tk-respondido { color: var(--info); border-color: rgba(79,142,247,.4); background: rgba(79,142,247,.08); }
+.badge-tk-fechado { color: var(--muted); }
 .pos { color: var(--ok); font-weight: 700; }
 .neg { color: var(--danger); font-weight: 700; }
 
@@ -240,6 +243,22 @@ tbody tr:first-child td { border-top: none; }
 .mdev-acoes { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 22px; }
 .btn-danger { background: rgba(255,91,84,.10); border: 1px solid rgba(255,91,84,.4); color: var(--danger); border-radius: 10px; padding: 11px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
 .btn-danger:hover { background: rgba(255,91,84,.18); }
+
+/* Ticket (thread de suporte) */
+.modal-tk { width: min(640px, 96vw); }
+.tk-head { margin-bottom: 14px; }
+.tk-assunto { font-size: 20px; font-weight: 800; }
+.tk-de { font-size: 13px; color: var(--muted); margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+.tk-thread { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px; background: var(--surface2); border: 1px solid var(--divider); border-radius: 12px; padding: 12px; }
+.tk-msg { max-width: 82%; border-radius: 12px; padding: 10px 14px; }
+.tk-cli { align-self: flex-start; background: var(--surface1); border: 1px solid var(--divider); }
+.tk-adm { align-self: flex-end; background: rgba(79,142,247,.12); border: 1px solid rgba(79,142,247,.35); }
+.tk-msg-quem { font-size: 11px; color: var(--muted); font-weight: 700; margin-bottom: 4px; }
+.tk-msg-corpo { font-size: 15px; color: var(--text); line-height: 1.45; word-break: break-word; }
+.tk-resp { width: 100%; margin-top: 14px; background: var(--surface2); border: 1px solid var(--divider); border-radius: 11px; padding: 12px 14px; color: var(--text); font-size: 15px; font-family: inherit; min-height: 84px; resize: vertical; }
+.tk-resp:focus { outline: none; border-color: var(--accent); }
+.tk-resp:disabled { opacity: .6; }
+.tk-acoes { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; }
 .btn-danger:disabled { opacity: .6; cursor: default; }
 
 /* Botão em carregamento: spinner + estado ocupado */

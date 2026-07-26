@@ -485,27 +485,102 @@ async function vCreditos() {
   } catch (e) { toast(e.message, true) }
 }
 
-// ── Suporte (tickets) — só a tela; o envio ainda não vai a lugar nenhum ──────
-function vSuporte() {
+// ── Suporte (tickets) — real: revendedor abre; admin vê todos, responde e encerra
+const TICKET_ST = { aberto: 'Aberto', respondido: 'Respondido', fechado: 'Fechado' }
+async function vSuporte() {
+  const admin = me.papel === 'admin'
   view().innerHTML = `<div class="pg">
-    <div class="pg-head"><div><h1>Suporte</h1><p>Seus tickets de suporte</p></div></div>
-    <div class="sup-bar">
-      <div class="sup-filtros"><span class="sup-fl">Status:</span>
-        <button class="pill on">Todos</button><button class="pill">Abertos</button><button class="pill">Respondidos</button><button class="pill">Fechados</button></div>
-      <div class="sup-dir"><input class="sup-busca" placeholder="Buscar…"><button class="btn" id="novo-ticket">${svg('plus')} Novo ticket</button></div>
-    </div>
-    <div class="sup-vazio">
-      <div class="sup-ic">${svg('ticket', ' width="30" height="30"')}</div>
-      <div class="sup-t">Nenhum ticket</div>
-      <div class="sup-s">Você ainda não abriu nenhum ticket.</div>
-    </div>
+    <div class="pg-head"><div><h1>Suporte</h1><p id="sup-sub">${admin ? 'Todos os tickets — responda e encerre' : 'Seus tickets de suporte'}</p></div>
+      <button class="btn" id="novo-ticket">${svg('plus')} Novo ticket</button></div>
+    <div class="filtros"><div class="pills" id="sup-fst">${pills('Status', [['', 'Todos'], ['aberto', 'Abertos'], ['respondido', 'Respondidos'], ['fechado', 'Fechados']])}</div></div>
+    <div class="lista" id="sup-lista"><div class="vazio">Carregando…</div></div>
   </div>`
-  view().querySelectorAll('.pill').forEach((p) => { p.onclick = () => { view().querySelectorAll('.pill').forEach((x) => x.classList.remove('on')); p.classList.add('on') } })
-  document.getElementById('novo-ticket').onclick = () => abrirModal({
+  document.getElementById('novo-ticket').onclick = novoTicket
+  const st = { status: '' }
+  const meu = viewAtual()
+  const carregar = async () => {
+    const el = document.getElementById('sup-lista'); if (el) el.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const { tickets } = await api('listar_tickets', { status: st.status })
+      if (meu !== viewAtual()) return
+      const l = document.getElementById('sup-lista'); if (!l) return
+      if (!tickets.length) { l.innerHTML = '<div class="vazio">Nenhum ticket aqui.</div>'; return }
+      l.innerHTML = tickets.map((t) => `
+        <button class="row sup-row" data-id="${esc(t.id)}">
+          <div style="min-width:0">
+            <div class="row-nome">${esc(t.assunto)}</div>
+            <div class="row-sub">${admin ? 'de ' + esc(t.de) + ' · ' : ''}atualizado ${fmtDataHora(t.atualizado_em)}</div>
+          </div>
+          <span class="badge badge-tk-${esc(t.status)}">${esc(TICKET_ST[t.status] || t.status)}</span>
+        </button>`).join('')
+      l.querySelectorAll('.sup-row').forEach((b) => { b.onclick = () => abrirTicket(b.dataset.id, carregar) })
+    } catch (e) { if (meu !== viewAtual()) return; const l = document.getElementById('sup-lista'); if (l) l.innerHTML = `<div class="vazio">${esc(e.message)}</div>` }
+  }
+  wirePills(document.getElementById('sup-fst'), (v) => { st.status = v; carregar() })
+  carregar()
+}
+
+function novoTicket() {
+  abrirModal({
     titulo: 'Novo ticket', okLabel: 'Abrir ticket',
     campos: [{ id: 'assunto', label: 'Assunto', placeholder: 'Resumo do problema' }, { id: 'msg', label: 'Mensagem', type: 'textarea', placeholder: 'Descreva sua dúvida ou problema…' }],
-    onOk: async (v) => { if (!v.assunto) return 'Informe o assunto'; toast('Ticket registrado — suporte em breve'); return null },
+    onOk: async (v) => {
+      if (!v.assunto || !v.msg) return 'Informe assunto e mensagem'
+      await api('criar_ticket', { assunto: v.assunto, mensagem: v.msg })
+      toast('Ticket aberto'); vSuporte(); return null
+    },
   })
+}
+
+// Modal da thread do ticket: histórico + responder + encerrar/reabrir.
+async function abrirTicket(id, recarregar) {
+  let det
+  try { det = await api('ticket_detalhe', { ticket_id: id }) } catch (e) { toast(e.message, true); return }
+  const { ticket, mensagens, admin } = det
+  const ov = document.createElement('div'); ov.className = 'modal'
+  const bolhas = (msgs) => msgs.map((m) => `
+    <div class="tk-msg ${m.do_admin ? 'tk-adm' : 'tk-cli'}">
+      <div class="tk-msg-quem">${m.do_admin ? 'Suporte' : esc(ticket.de)} · ${fmtDataHora(m.criado_em)}</div>
+      <div class="tk-msg-corpo">${esc(m.corpo).replace(/\n/g, '<br>')}</div>
+    </div>`).join('')
+  const fechado = ticket.status === 'fechado'
+  ov.innerHTML = `<div class="modal-card modal-tk">
+    <div class="tk-head">
+      <div><div class="tk-assunto">${esc(ticket.assunto)}</div><div class="tk-de">${admin ? 'de ' + esc(ticket.de) + ' · ' : ''}<span class="badge badge-tk-${esc(ticket.status)}">${esc(TICKET_ST[ticket.status] || ticket.status)}</span></div></div>
+    </div>
+    <div class="tk-thread" id="tk-thread">${bolhas(mensagens)}</div>
+    <div class="modal-erro" id="tk-erro"></div>
+    <textarea id="tk-resp" class="tk-resp" placeholder="${fechado ? 'Ticket fechado — reabra para responder' : 'Escreva sua resposta…'}"${fechado ? ' disabled' : ''}></textarea>
+    <div class="tk-acoes">
+      <button class="btn-sec" id="tk-fechar-modal">Fechar janela</button>
+      <div style="display:flex;gap:10px">
+        ${fechado
+          ? `<button class="btn-sec" id="tk-reabrir">Reabrir</button>`
+          : `<button class="btn-sec" id="tk-encerrar">Encerrar ticket</button><button class="btn" id="tk-enviar">Responder</button>`}
+      </div>
+    </div>
+  </div>`
+  document.body.appendChild(ov)
+  const fechar = () => { ov.remove(); if (recarregar) recarregar() }
+  const err = (m) => { ov.querySelector('#tk-erro').textContent = m || '' }
+  ov.onclick = (e) => { if (e.target === ov) fechar() }
+  ov.querySelector('#tk-fechar-modal').onclick = fechar
+  const thread = ov.querySelector('#tk-thread'); thread.scrollTop = thread.scrollHeight
+  const enviar = ov.querySelector('#tk-enviar')
+  if (enviar) enviar.onclick = async () => {
+    const msg = ov.querySelector('#tk-resp').value.trim(); if (!msg) return err('Escreva uma resposta')
+    enviar.disabled = true; err('')
+    try {
+      await api('responder_ticket', { ticket_id: id, mensagem: msg })
+      const d = await api('ticket_detalhe', { ticket_id: id })
+      thread.innerHTML = bolhas(d.mensagens); thread.scrollTop = thread.scrollHeight
+      ov.querySelector('#tk-resp').value = ''; toast('Resposta enviada')
+    } catch (e) { err(e.message) } finally { enviar.disabled = false }
+  }
+  const enc = ov.querySelector('#tk-encerrar')
+  if (enc) enc.onclick = async () => { try { await api('fechar_ticket', { ticket_id: id }); toast('Ticket encerrado'); fechar() } catch (e) { err(e.message) } }
+  const reab = ov.querySelector('#tk-reabrir')
+  if (reab) reab.onclick = async () => { try { await api('fechar_ticket', { ticket_id: id, reabrir: true }); toast('Ticket reaberto'); fechar() } catch (e) { err(e.message) } }
 }
 
 // ── Helpers de filtro (pílulas) ──────────────────────────────────────────────

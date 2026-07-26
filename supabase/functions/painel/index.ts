@@ -18,6 +18,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 //   POST { acao:'add_playlist', cliente_id, nome, lista_url, epg_url?, dispositivo_ids? }
 //   POST { acao:'selecionar_playlist', dispositivo_id, playlist_id }
 //   POST { acao:'excluir_playlist', cliente_id, playlist_id }
+//   SUPORTE: criar_ticket{assunto,mensagem} · listar_tickets{status?} (admin=todos)
+//     · ticket_detalhe{ticket_id} · responder_ticket{ticket_id,mensagem} ·
+//     fechar_ticket{ticket_id,reabrir?}
 // ⚠️ Reuso temporário do projeto atual — migrar p/ projeto próprio (ver checklist).
 // ============================================================================
 
@@ -424,6 +427,72 @@ Deno.serve(async (req: Request) => {
         }
       }
       return json({ ok: true, afetadas, aplicado: !preview })
+    }
+
+    // ── SUPORTE (tickets) ──────────────────────────────────────────────────────
+    // Revendedor abre; ADMIN vê TODOS, responde e encerra. Owner vê/responde os seus.
+    const ehAdmin = rev.papel === 'admin'
+
+    if (acao === 'criar_ticket') {
+      const assunto = (body.assunto || '').trim()
+      const mensagem = (body.mensagem || '').trim()
+      if (!assunto || !mensagem) return erro('informe assunto e mensagem')
+      const { data: tk, error } = await sb.from('tickets').insert({ revendedor_id: rev.id, assunto }).select('id').single()
+      if (error) return erro(error.message)
+      await sb.from('ticket_mensagens').insert({ ticket_id: tk.id, autor_id: rev.id, do_admin: ehAdmin, corpo: mensagem })
+      return json({ ok: true, id: tk.id })
+    }
+
+    if (acao === 'listar_tickets') {
+      const status = (body.status || '').trim()
+      let q = sb.from('tickets').select('id, revendedor_id, assunto, status, criado_em, atualizado_em')
+        .order('atualizado_em', { ascending: false }).limit(300)
+      if (!ehAdmin) q = q.eq('revendedor_id', rev.id)   // revendedor só vê os seus
+      if (status) q = q.eq('status', status)
+      const { data: tks } = await q
+      // deno-lint-ignore no-explicit-any
+      const ids = [...new Set((tks || []).map((t: any) => t.revendedor_id))]
+      // deno-lint-ignore no-explicit-any
+      const autor = new Map<string, any>()
+      if (ids.length) { const { data } = await sb.from('revendedores').select('id, nome, usuario').in('id', ids); (data || []).forEach((r: any) => autor.set(r.id, r)) }
+      // deno-lint-ignore no-explicit-any
+      const tickets = (tks || []).map((t: any) => { const a = autor.get(t.revendedor_id) || {}; return { ...t, de: a.nome || a.usuario || '—' } })
+      return json({ tickets, admin: ehAdmin })
+    }
+
+    if (acao === 'ticket_detalhe') {
+      const id = (body.ticket_id || '').trim()
+      const { data: tk } = await sb.from('tickets').select('*').eq('id', id).maybeSingle()
+      if (!tk) return erro('ticket nao encontrado', 404)
+      if (!ehAdmin && tk.revendedor_id !== rev.id) return erro('sem acesso', 403)
+      const { data: msgs } = await sb.from('ticket_mensagens').select('id, autor_id, do_admin, corpo, criado_em')
+        .eq('ticket_id', id).order('criado_em', { ascending: true })
+      const { data: dono } = await sb.from('revendedores').select('nome, usuario').eq('id', tk.revendedor_id).maybeSingle()
+      return json({ ticket: { ...tk, de: (dono && (dono.nome || dono.usuario)) || '—' }, mensagens: msgs || [], admin: ehAdmin })
+    }
+
+    if (acao === 'responder_ticket') {
+      const id = (body.ticket_id || '').trim()
+      const mensagem = (body.mensagem || '').trim()
+      if (!mensagem) return erro('mensagem vazia')
+      const { data: tk } = await sb.from('tickets').select('id, revendedor_id').eq('id', id).maybeSingle()
+      if (!tk) return erro('ticket nao encontrado', 404)
+      if (!ehAdmin && tk.revendedor_id !== rev.id) return erro('sem acesso', 403)
+      await sb.from('ticket_mensagens').insert({ ticket_id: id, autor_id: rev.id, do_admin: ehAdmin, corpo: mensagem })
+      // admin responde → 'respondido'; dono responde → 'aberto' (volta pra fila do admin)
+      const novo = ehAdmin ? 'respondido' : 'aberto'
+      await sb.from('tickets').update({ status: novo, atualizado_em: new Date().toISOString() }).eq('id', id)
+      return json({ ok: true, status: novo })
+    }
+
+    if (acao === 'fechar_ticket') {
+      const id = (body.ticket_id || '').trim()
+      const reabrir = !!body.reabrir
+      const { data: tk } = await sb.from('tickets').select('id, revendedor_id').eq('id', id).maybeSingle()
+      if (!tk) return erro('ticket nao encontrado', 404)
+      if (!ehAdmin && tk.revendedor_id !== rev.id) return erro('sem acesso', 403)
+      await sb.from('tickets').update({ status: reabrir ? 'aberto' : 'fechado', atualizado_em: new Date().toISOString() }).eq('id', id)
+      return json({ ok: true })
     }
 
     return erro('acao desconhecida')

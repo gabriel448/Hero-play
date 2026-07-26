@@ -150,6 +150,36 @@ alter table public.codigos_ativacao_tv enable row level security;
 revoke all on public.codigos_ativacao_tv from anon, authenticated;
 grant all on public.codigos_ativacao_tv to service_role;
 
+-- ── SUPORTE (tickets) ───────────────────────────────────────────────────────
+-- Um ticket é aberto por um revendedor; o ADMIN vê TODOS e responde/encerra. As
+-- mensagens (thread) ficam em ticket_mensagens. status: aberto|respondido|fechado.
+create table if not exists public.tickets (
+  id            uuid primary key default gen_random_uuid(),
+  revendedor_id uuid not null references public.revendedores(id) on delete cascade,
+  assunto       text not null,
+  status        text not null default 'aberto',      -- aberto | respondido | fechado
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists idx_tickets_rev on public.tickets(revendedor_id, atualizado_em desc);
+create index if not exists idx_tickets_status on public.tickets(status, atualizado_em desc);
+alter table public.tickets enable row level security;
+revoke all on public.tickets from anon, authenticated;
+grant all on public.tickets to service_role;
+
+create table if not exists public.ticket_mensagens (
+  id         uuid primary key default gen_random_uuid(),
+  ticket_id  uuid not null references public.tickets(id) on delete cascade,
+  autor_id   uuid references public.revendedores(id) on delete set null,
+  do_admin   boolean not null default false,           -- true = resposta do suporte/admin
+  corpo      text not null,
+  criado_em  timestamptz not null default now()
+);
+create index if not exists idx_ticket_msg on public.ticket_mensagens(ticket_id, criado_em);
+alter table public.ticket_mensagens enable row level security;
+revoke all on public.ticket_mensagens from anon, authenticated;
+grant all on public.ticket_mensagens to service_role;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  RPCs de CRÉDITO — transacionais (evitam o double-spend).
 --  O débito é um único UPDATE com guarda `saldo >= qtd`, que serializa no lock
