@@ -395,7 +395,8 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 /* padding generoso: o pôster em foco escala 1.10 e a coluna corta (overflow) —
    sem essa folga, a fila de cima ficava cortada. scroll-margin dá respiro ao rolar. */
 .bsc-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; padding: 30px 24px 70px; }
-.bsc-grid .poster { width: 100%; height: auto; aspect-ratio: 184 / 276; scroll-margin: 30px 0; }
+/* aspect-ratio NAO existe no Chromium 68 (webOS 5) -> height:auto colapsava o poster p/ altura ZERO (grade da busca invisivel). Truque antigo: height:0 + padding-bottom = proporcao (276/184 = 150%). */
+.bsc-grid .poster { width: 100%; height: 0; padding-bottom: 150%; scroll-margin: 30px 0; }
 .bsc-vazio { height: 76vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--text-tertiary); padding: 0 40px; }
 .bsc-vazio-ico { opacity: .45; }
 .bsc-vazio-ico svg { width: 92px; height: 92px; }
