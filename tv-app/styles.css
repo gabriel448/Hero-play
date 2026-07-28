@@ -452,6 +452,21 @@ video::-webkit-media-controls-start-playback-button {
   opacity: 0;
 }
 video { background: #000; }
+
+/* ── Vídeo NATIVO por baixo (casca Android: Fire TV / TV Box) ───────────────
+   No Android o vídeo não é o <video>: é o ExoPlayer, que fica ATRÁS do WebView
+   (ver PlayerNativo em app.js e MainActivity.kt). Para ele aparecer, a página
+   precisa ficar transparente enquanto toca — senão o fundo do app cobre a
+   imagem. Os controles continuam visíveis porque têm fundo próprio.
+   A classe entra e sai junto com a reprodução; nas TVs ela nunca existe. */
+html.video-nativo, html.video-nativo body { background: transparent !important; }
+html.video-nativo #app { background: transparent !important; }
+html.video-nativo #player-overlay { background: transparent !important; }
+/* Coluna direita da TV ao vivo: a moldura da preview também tem fundo próprio. */
+html.video-nativo .tv-tela { background: transparent !important; }
+/* O <video> vira só um "buraco" que marca onde a superfície nativa deve ficar. */
+html.video-nativo #player-video,
+html.video-nativo #tv-prev-video { visibility: hidden; }
 .player-fade {
   position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; transition: opacity .3s;
   background:

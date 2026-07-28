@@ -913,6 +913,7 @@ function liberarVideo(v) {
 
 function pararPreview() {
   if (_hlsPrev) { _hlsPrev.destroy(); _hlsPrev = null; }
+  if (TEM_PLAYER_NATIVO) PlayerNativo.parar();
   liberarVideo(document.getElementById('tv-prev-video'));
 }
 
@@ -922,6 +923,99 @@ function pararPreview() {
 // Casca Android (Fire TV / TV Box): a ponte nativa só existe lá. Serve para
 // separar o WebView do Chromium das TVs de verdade — nas TVs NADA muda.
 const EH_ANDROID_TV = (function () { try { return !!window.HeroPlayAndroid; } catch (_) { return false; } })();
+const TEM_PLAYER_NATIVO = (function () {
+  try { return EH_ANDROID_TV && !!HeroPlayAndroid.temPlayer && HeroPlayAndroid.temPlayer(); } catch (_) { return false; }
+})();
+
+// ── Player NATIVO (ExoPlayer) da casca Android ──────────────────────────────
+// O `<video>` do WebView só abre MP4/WebM: filme 4K (MKV) e canal ao vivo
+// (MPEG-TS) não tocam. Na TV isso não acontece porque lá o `<video>` É o player
+// do sistema. Então, no Android, mandamos a reprodução para o ExoPlayer — que
+// fica ATRÁS do WebView — e devolvemos para a interface um objeto com a MESMA
+// cara de um <video> (play/pause/currentTime/duration/addEventListener).
+// Assim `abrirPlayer` e `tocarNoPreview` não precisam saber onde estão rodando.
+const PlayerNativo = (function () {
+  const ouvintes = {};
+  let timer = null, ultimo = { pos: 0, dur: 0, tocando: false, buffering: false };
+  let elDest = null;           // elemento cuja área o vídeo deve ocupar
+  let pausadoManual = false;
+
+  function emitir(nome) {
+    (ouvintes[nome] || []).slice().forEach((fn) => { try { fn({ type: nome }); } catch (_) {} });
+  }
+  function ler() {
+    try { ultimo = JSON.parse(HeroPlayAndroid.estado()); } catch (_) {}
+    return ultimo;
+  }
+  // Acompanha o retângulo do elemento: preview da TV ao vivo e tela cheia usam
+  // áreas diferentes, e a superfície nativa tem que casar com as duas.
+  function sincronizarArea() {
+    if (!elDest) return;
+    const r = elDest.getBoundingClientRect();
+    try { HeroPlayAndroid.area(r.left, r.top, r.width, r.height); } catch (_) {}
+  }
+  function iniciarTick() {
+    if (timer) return;
+    timer = setInterval(() => {
+      const e = ler();
+      sincronizarArea();
+      emitir('timeupdate');
+      if (e.buffering) emitir('waiting');
+    }, 500);
+  }
+  function pararTick() { if (timer) { clearInterval(timer); timer = null; } }
+
+  // Chamado pelo lado Kotlin (MainActivity.aoEvento).
+  window.HeroPlayNativo = {
+    evento(nome) {
+      if (nome === 'playing') { pausadoManual = false; emitir('playing'); emitir('play'); }
+      else if (nome === 'pause') emitir('pause');
+      else if (nome === 'canplay') { emitir('loadedmetadata'); emitir('canplay'); }
+      else emitir(nome);
+    },
+  };
+
+  return {
+    /** Liga o player nativo a um elemento: ele passa a ocupar a área dele. */
+    abrir(el, url, posicaoSeg, mudo) {
+      elDest = el;
+      pausadoManual = false;
+      try { document.documentElement.classList.add('video-nativo'); } catch (_) {}
+      sincronizarArea();
+      try { HeroPlayAndroid.abrir(url, posicaoSeg || 0, !!mudo); } catch (_) {}
+      iniciarTick();
+      emitir('loadstart');
+    },
+    parar() {
+      pararTick();
+      elDest = null;
+      try { HeroPlayAndroid.parar(); } catch (_) {}
+      try { document.documentElement.classList.remove('video-nativo'); } catch (_) {}
+    },
+    /** Objeto com cara de <video> para a interface existente. */
+    fachada(el) {
+      return {
+        _el: el,
+        get currentTime() { return ler().pos; },
+        set currentTime(v) { try { HeroPlayAndroid.buscar(v); } catch (_) {} },
+        get duration() { return ler().dur; },
+        get paused() { return pausadoManual || !ler().tocando; },
+        get muted() { return false; },
+        set muted(v) { try { HeroPlayAndroid.mudo(!!v); } catch (_) {} },
+        get textTracks() { return []; },
+        get audioTracks() { return undefined; },
+        play() { pausadoManual = false; try { HeroPlayAndroid.retomar(); } catch (_) {} return Promise.resolve(); },
+        pause() { pausadoManual = true; try { HeroPlayAndroid.pausar(); } catch (_) {} },
+        addEventListener(nome, fn) { (ouvintes[nome] = ouvintes[nome] || []).push(fn); },
+        removeEventListener(nome, fn) {
+          const l = ouvintes[nome]; if (!l) return;
+          const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1);
+        },
+      };
+    },
+    limparOuvintes() { for (const k in ouvintes) delete ouvintes[k]; },
+  };
+})();
 
 // Canal ao vivo do Xtream costuma vir como MPEG-TS (`.../12345.ts` ou sem
 // extensão). O player nativo da LG/Samsung toca isso; o WebView do Android
@@ -953,8 +1047,14 @@ function tocarNoPreview(url, muted) {
   // PREFERE o player NATIVO da TV: toca .ts/.mkv/HEVC e HLS pela media pipeline do
   // sistema (mais compatível que o hls.js, que é SW e não decoda HEVC/.ts). Só usa
   // hls.js quando o nativo NÃO toca HLS (ex.: Chrome desktop no teste).
-  // No Android o nativo não toca nem HLS nem TS: força hls.js, convertendo a
-  // URL do canal para o equivalente .m3u8 quando ela não for HLS.
+  // Android (Fire TV / TV Box): vai para o ExoPlayer, que toca MPEG-TS e HEVC
+  // — o `<video>` do WebView não toca nenhum dos dois, e era por isso que o
+  // canal ficava em "instável, trocando de fonte" para sempre.
+  if (TEM_PLAYER_NATIVO) {
+    PlayerNativo.abrir(v, url, 0, muted);
+    return;
+  }
+  // Sem player nativo (navegador de teste): hls.js quando a URL for HLS.
   let alvo = url, viaHlsJs = ehHls && !hlsNativo;
   if (EH_ANDROID_TV && window.Hls && Hls.isSupported()) {
     const m3u8 = _urlHlsEquivalente(url);
@@ -2148,6 +2248,10 @@ function fmtTempo(s) {
 }
 
 let _playerCtx = null, _lastProgSave = 0;   // contexto p/ "continuar assistindo"
+// Vídeo ATIVO do VOD: o <video> nas TVs, ou a fachada do ExoPlayer no Android.
+// Quem precisa de currentTime/duration (barra de progresso, busca, salvar o
+// ponto) usa isto — nunca o getElementById direto.
+let _videoVod = null;
 function abrirPlayer(item, ctx, reiniciar) {
   _playerCtx = ctx || null; _lastProgSave = 0;
   _playerItem = item;                 // p/ buscar legenda externa (Xtream get_vod_info)
@@ -2189,7 +2293,12 @@ function abrirPlayer(item, ctx, reiniciar) {
   document.body.appendChild(ov);
   ov._onVoltar = fecharPlayer;
 
-  const video = document.getElementById('player-video');
+  // No Android o vídeo roda no ExoPlayer (atrás do WebView) e a interface fala
+  // com uma FACHADA que imita o <video> — daí todo o resto desta função
+  // continuar igual nas TVs e no TV Box.
+  const elVideo = document.getElementById('player-video');
+  const video = TEM_PLAYER_NATIVO ? PlayerNativo.fachada(elVideo) : elVideo;
+  _videoVod = video;
   const spinner = (mostrar) => { const s = document.getElementById('pc-spinner'); if (s) s.classList.toggle('oculto', !mostrar); };
   const erroPlayer = (msg) => {
     spinner(false);
@@ -2213,18 +2322,29 @@ function abrirPlayer(item, ctx, reiniciar) {
   // (hls.audioTracks/subtitleTracks). Para arquivo direto (mp4/mkv/ts) não há
   // escolha: vai no nativo (hls.js não demuxa .ts/HEVC) e aí as faixas dependem
   // do que a TV expõe. (No live mantemos nativo-first por causa de .ts/HEVC.)
-  if (ehHls && window.Hls && Hls.isSupported()) {
+  if (TEM_PLAYER_NATIVO) {
+    // Retoma de onde parou já na abertura: o ExoPlayer aceita a posição no
+    // prepare, então não precisamos esperar o 'loadedmetadata' para buscar.
+    let inicio = 0;
+    if (!reiniciar && _playerCtx) {
+      const pr = Biblioteca.progressoDe(_playerCtx.id);
+      if (pr && pr.url === fonte && pr.pos > 15 && (!pr.dur || pr.pos < pr.dur - 20)) inicio = pr.pos;
+    }
+    PlayerNativo.abrir(elVideo, fonte, inicio, false);
+  } else if (ehHls && window.Hls && Hls.isSupported()) {
     _hls = new Hls();
     _hls.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal) erroPlayer(t('Não foi possível reproduzir este conteúdo.')); });
     _hls.loadSource(fonte);
     _hls.attachMedia(video);
+    video.play().catch(() => {});
   } else {
     video.src = fonte;                    // arquivo (mp4/ts) ou HLS nativo (sem hls.js)
+    video.play().catch(() => {});
   }
-  video.play().catch(() => {});
   // Retomar de onde parou (mesmo item/URL) — "continuar assistindo" por perfil.
   // Se `reiniciar` (escolheu "Do início"), começa do zero.
   video.addEventListener('loadedmetadata', () => {
+    if (TEM_PLAYER_NATIVO) return;        // no ExoPlayer a posição já foi no abrir
     if (reiniciar || !_playerCtx) return;
     const pr = Biblioteca.progressoDe(_playerCtx.id);
     if (pr && pr.url === fonte && pr.pos > 15 && (!pr.dur || pr.pos < pr.dur - 20)) { try { video.currentTime = pr.pos; } catch (_) {} }
@@ -2261,7 +2381,7 @@ function abrirPlayer(item, ctx, reiniciar) {
 
 // Busca na barra: cada toque avanca/recua; segurar acelera ate 3 niveis.
 function scrub(dir) {
-  const v = document.getElementById('player-video');
+  const v = _videoVod || document.getElementById('player-video');
   if (!v || !v.duration) return;
   const agora = performance.now();
   if (!_scrub || _scrub.dir !== dir) _scrub = { alvo: v.currentTime, holdStart: agora, dir };
@@ -2285,7 +2405,7 @@ function scrub(dir) {
 
 function commitScrub() {
   if (!_scrub) return;
-  const v = document.getElementById('player-video');
+  const v = _videoVod || document.getElementById('player-video');
   if (v) v.currentTime = _scrub.alvo;
   _scrub = null;
   const prev = document.getElementById('pc-preview');
@@ -2407,8 +2527,11 @@ function revelarControles() {
 function fecharPlayer() {
   clearTimeout(_hideTimer);
   // Salva o ponto final ao sair (continuar assistindo / concluir → recomendação).
-  const vf = document.getElementById('player-video');
+  // ANTES de soltar o player nativo — depois de parar não há mais posição.
+  const vf = _videoVod || document.getElementById('player-video');
   if (_playerCtx && vf && vf.duration) Biblioteca.salvarProgresso(_playerCtx, vf.currentTime, vf.duration);
+  if (TEM_PLAYER_NATIVO) { PlayerNativo.parar(); PlayerNativo.limparOuvintes(); }
+  _videoVod = null;
   _playerCtx = null; _playerItem = null; _legendaReset();
   if (_hls) { _hls.destroy(); _hls = null; }
   // Encerra de fato a conexão. Só destruir o hls.js / remover o overlay NÃO basta:

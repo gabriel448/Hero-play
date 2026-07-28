@@ -1,9 +1,12 @@
 package com.heroplay.tv
 
 import android.annotation.SuppressLint
+import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.media3.common.util.UnstableApi
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -22,9 +25,12 @@ import androidx.appcompat.app.AppCompatActivity
  *
  * Alvo: Fire TV Stick, Android TV e TV Box.
  */
+@UnstableApi
 class MainActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
+    private lateinit var raiz: FrameLayout
+    private lateinit var nativo: PlayerNativo
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,7 +69,24 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(Ponte(), "HeroPlayAndroid")
         web.isFocusableInTouchMode = true
 
-        setContentView(web)
+        // O video nativo fica ATRAS e o WebView por cima, transparente: a web
+        // app desenha os controles sobre a imagem. Sem o fundo transparente a
+        // pagina cobriria o video.
+        raiz = FrameLayout(this)
+        raiz.setBackgroundColor(Color.BLACK)
+        web.setBackgroundColor(Color.TRANSPARENT)
+        raiz.addView(web)
+        nativo = PlayerNativo(this, raiz)
+        nativo.aoEvento = { evento ->
+            runOnUiThread {
+                web.evaluateJavascript(
+                    "window.HeroPlayNativo && window.HeroPlayNativo.evento('" + evento + "')",
+                    null,
+                )
+            }
+        }
+
+        setContentView(raiz)
         esconderBarras()
         web.loadUrl("file:///android_asset/www/index.html")
 
@@ -107,16 +130,55 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        nativo.soltar()
         web.destroy()
         super.onDestroy()
     }
 
-    /** Ponte minima para o JS. Ver `sairDoApp()` em `tv-app/app.js`. */
+    /**
+     * Ponte com o JS. Alem de sair do app, expoe o PLAYER NATIVO — e por aqui
+     * que a web app toca MKV/HEVC/MPEG-TS, que o WebView sozinho nao abre.
+     * Todo metodo salta para a UI thread: o ExoPlayer so aceita chamadas dela.
+     */
     inner class Ponte {
         /** `window.close()` nao encerra uma Activity — isto encerra. */
         @JavascriptInterface
         fun sair() {
             runOnUiThread { finish() }
         }
+
+        /** `true` diz ao JS que existe player nativo disponivel. */
+        @JavascriptInterface
+        fun temPlayer(): Boolean = true
+
+        @JavascriptInterface
+        fun abrir(url: String, posicaoSeg: Double, mudo: Boolean) {
+            runOnUiThread { nativo.abrir(url, posicaoSeg, mudo) }
+        }
+
+        @JavascriptInterface
+        fun parar() = runOnUiThread { nativo.parar() }
+
+        @JavascriptInterface
+        fun pausar() = runOnUiThread { nativo.pausar() }
+
+        @JavascriptInterface
+        fun retomar() = runOnUiThread { nativo.retomar() }
+
+        @JavascriptInterface
+        fun buscar(seg: Double) = runOnUiThread { nativo.buscar(seg) }
+
+        @JavascriptInterface
+        fun mudo(on: Boolean) = runOnUiThread { nativo.mudo(on) }
+
+        /** Retangulo onde o video deve aparecer, em CSS px. */
+        @JavascriptInterface
+        fun area(x: Float, y: Float, w: Float, h: Float) {
+            runOnUiThread { nativo.area(x, y, w, h) }
+        }
+
+        /** JSON: posicao, duracao, tocando, buffering. Lido em polling pelo JS. */
+        @JavascriptInterface
+        fun estado(): String = nativo.estado()
     }
 }
