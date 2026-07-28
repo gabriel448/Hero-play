@@ -2380,6 +2380,11 @@ function sairDoApp() {
   try { pararPreview(); } catch (_) {}                 // solta conexão/vídeo do live
   try { liberarVideo(document.getElementById('player-video')); } catch (_) {}
   try { salvarMetaTmdb(); } catch (_) {}               // best-effort: persiste o cache
+  // Android TV / Fire TV (shell WebView do tv-android): window.close() nao
+  // encerra a Activity — a ponte nativa e a unica forma de sair de verdade.
+  if (window.HeroPlayAndroid && window.HeroPlayAndroid.sair) {
+    try { window.HeroPlayAndroid.sair(); return; } catch (_) {}
+  }
   // Samsung Tizen
   if (window.tizen && tizen.application) {
     try { tizen.application.getCurrentApplication().exit(); return; } catch (_) {}

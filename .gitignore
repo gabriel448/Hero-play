@@ -137,7 +137,10 @@ PLANO-TV-E-PAINEIS.md
 PRODUCT.md
 CLAUDE.md
 DESIGN.md
-HeroPlay/
+# Pasta de trabalho antiga na raiz. A barra inicial e importante: sem ela a
+# regra tambem casava com `com/heroplay/` do projeto Android do app de TV (no
+# Windows o Git ignora maiusculas) e engolia o MainActivity.kt.
+/HeroPlay/
 
 # ─── App de TV (webOS/Tizen) ─────────────────────────────────────────────────
 
@@ -147,3 +150,13 @@ HeroPlay/
 
 # Config local do Claude Code
 /.claude/
+
+# Empacotamento do app de TV (gerados por build-ipk.sh / build-wgt.sh / build-apk-tv.sh)
+/dist-build-tizen/
+/dist-build-android/
+/dist-tizen/
+/tv-android/app/build/
+/tv-android/build/
+/tv-android/.gradle/
+/tv-android/local.properties
+/tv-android/app/src/main/assets/www/

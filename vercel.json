@@ -2,13 +2,30 @@
   "outputDirectory": "website",
   "buildCommand": "rm -rf website/painel && cp -r painel website/painel",
   "redirects": [
-    { "source": "/painel", "destination": "/painel/", "permanent": false }
+    {
+      "source": "/painel",
+      "destination": "/painel/",
+      "permanent": false
+    },
+    {
+      "source": "/fire",
+      "destination": "https://github.com/gabriel448/heroplay-downloads/releases/latest/download/HeroPlayTV-androidtv.apk",
+      "permanent": false
+    },
+    {
+      "source": "/tv",
+      "destination": "https://github.com/gabriel448/heroplay-downloads/releases/latest/download/HeroPlayTV-androidtv.apk",
+      "permanent": false
+    }
   ],
   "headers": [
     {
       "source": "/painel/(.*)",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
       ]
     }
   ]
