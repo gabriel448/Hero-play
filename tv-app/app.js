@@ -3430,11 +3430,35 @@ function ligarSalvamentoMeta() {
   window.addEventListener('beforeunload', salvarMetaTmdb);
 }
 
+// App foi para SEGUNDO PLANO (botão Home do controle): solta a conexão.
+//
+// O provedor de IPTV conta SESSÃO, não tela ligada: um preview que continua
+// baixando em background ocupa uma "tela" enquanto o usuário nem está no app —
+// e depois de algumas idas e voltas o servidor recusa com 403. O webOS e o
+// Tizen mandam `visibilitychange` nessa hora (a própria doc da LG recomenda
+// pausar mídia aqui).
+function ligarLiberarEmBackground() {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return;
+    try { pararPreview(); } catch (_) {}      // canal ao vivo: encerra de vez
+    // VOD: guarda o ponto e pausa. (Pausado o socket pode seguir aberto — para
+    // soltar de verdade seria preciso reabrir na volta; fica anotado.)
+    try {
+      const v = _videoVod;
+      if (v && !v.paused) {
+        if (_playerCtx && v.duration) Biblioteca.salvarProgresso(_playerCtx, v.currentTime, v.duration);
+        v.pause();
+      }
+    } catch (_) {}
+  });
+}
+
 async function iniciarApp() {
   document.getElementById('app').classList.remove('oculto');
   const reg = Dispositivo.registro();
   await restaurarMetaTmdb();
   ligarSalvamentoMeta();
+  ligarLiberarEmBackground();
   if (reg && reg.lista_url) {
     mostrarLoading(t('Baixando sua lista…'));
     const ok = await carregarLista(reg.lista_url);
