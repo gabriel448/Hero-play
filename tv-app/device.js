@@ -61,6 +61,39 @@ const Dispositivo = (() => {
   }
   const _keyDe = (id) => String(100000 + (_hash('key|' + id) % 900000));
 
+  // ── Samsung (Tizen) ────────────────────────────────────────────────────────
+  // Sem isto, numa Samsung a identidade caía no sorteio guardado em
+  // localStorage: o MAC/Key MUDAVA ao reinstalar o app ou limpar os dados, e a
+  // ativação se perdia. Duas fontes, em ordem de confiabilidade:
+  //   1. webapis.productinfo.getDuid() — id único do aparelho (API de TV Samsung),
+  //      o equivalente do LGUDID.
+  //   2. tizen.systeminfo -> macAddress da placa de rede (cabo, depois Wi-Fi).
+  // ⚠️ Escrito a partir da doc da Samsung — ainda NÃO testado em TV real.
+  function _tizenDuid() {
+    try {
+      if (typeof webapis !== 'undefined' && webapis.productinfo && webapis.productinfo.getDuid) {
+        const d = webapis.productinfo.getDuid();
+        if (d) return String(d);
+      }
+    } catch (_) {}
+    return null;
+  }
+  function _tizenMac(tipo, ms) {
+    return new Promise((resolve) => {
+      try {
+        if (typeof tizen === 'undefined' || !tizen.systeminfo) return resolve(null);
+        let feito = false;
+        const fim = (v) => { if (!feito) { feito = true; resolve(v); } };
+        tizen.systeminfo.getPropertyValue(
+          tipo,
+          (net) => fim((net && net.macAddress) ? String(net.macAddress) : null),
+          () => fim(null),
+        );
+        setTimeout(() => fim(null), ms || 2000);
+      } catch (_) { resolve(null); }
+    });
+  }
+
   async function _idPlataforma() {
     // LGUDID: UUID único e estável por aparelho (recomendado da LG).
     const r = await _luna('luna://com.webos.service.sm/deviceid/getIDs', { idType: ['LGUDID'] });
@@ -71,6 +104,11 @@ const Dispositivo = (() => {
       const m = (c.wired && c.wired.info && c.wired.info.macAddress) || (c.wifi && c.wifi.info && c.wifi.info.macAddress);
       if (m) return 'mac:' + m;
     }
+    // Samsung (Tizen).
+    const duid = _tizenDuid();
+    if (duid) return 'duid:' + duid;
+    const macT = (await _tizenMac('ETHERNET_NETWORK')) || (await _tizenMac('WIFI_NETWORK'));
+    if (macT) return 'mac:' + macT;
     return null;
   }
 
