@@ -919,6 +919,26 @@ function pararPreview() {
 // (Re)carrega o video do preview (coluna direita). Reusado ao voltar da tela cheia.
 // Toca uma URL no <video> do preview (reusado na tela cheia). Troca de
 // qualidade/fonte chama isto com a URL nova.
+// Casca Android (Fire TV / TV Box): a ponte nativa só existe lá. Serve para
+// separar o WebView do Chromium das TVs de verdade — nas TVs NADA muda.
+const EH_ANDROID_TV = (function () { try { return !!window.HeroPlayAndroid; } catch (_) { return false; } })();
+
+// Canal ao vivo do Xtream costuma vir como MPEG-TS (`.../12345.ts` ou sem
+// extensão). O player nativo da LG/Samsung toca isso; o WebView do Android
+// NÃO — e era por isso que no TV Box o canal ficava "instável, trocando de
+// fonte" para sempre, enquanto filme (.mp4) tocava normal.
+// O mesmo canal existe em HLS no Xtream trocando a extensão para `.m3u8`, e
+// esse o hls.js toca (remuxa o TS em MSE).
+function _urlHlsEquivalente(url) {
+  const i = url.indexOf('?');
+  const caminho = i === -1 ? url : url.slice(0, i);
+  const query = i === -1 ? '' : url.slice(i);
+  if (/\.m3u8$/i.test(caminho)) return url;
+  if (/\.(ts|m3u)$/i.test(caminho)) return caminho.replace(/\.[a-z0-9]+$/i, '.m3u8') + query;
+  if (/\/[^/.]+$/.test(caminho)) return caminho + '.m3u8' + query;   // sem extensão
+  return null;
+}
+
 function tocarNoPreview(url, muted) {
   const v = document.getElementById('tv-prev-video');
   if (!v || !url) return;
@@ -933,15 +953,34 @@ function tocarNoPreview(url, muted) {
   // PREFERE o player NATIVO da TV: toca .ts/.mkv/HEVC e HLS pela media pipeline do
   // sistema (mais compatível que o hls.js, que é SW e não decoda HEVC/.ts). Só usa
   // hls.js quando o nativo NÃO toca HLS (ex.: Chrome desktop no teste).
-  if (!ehHls || hlsNativo) {
+  // No Android o nativo não toca nem HLS nem TS: força hls.js, convertendo a
+  // URL do canal para o equivalente .m3u8 quando ela não for HLS.
+  let alvo = url, viaHlsJs = ehHls && !hlsNativo;
+  if (EH_ANDROID_TV && window.Hls && Hls.isSupported()) {
+    const m3u8 = _urlHlsEquivalente(url);
+    if (m3u8) { alvo = m3u8; viaHlsJs = true; }
+  }
+  if (!viaHlsJs && (!ehHls || hlsNativo)) {
     v.muted = muted; v.src = url;
     v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
   } else if (window.Hls && Hls.isSupported()) {
+    const convertida = alvo !== url;   // trocamos p/ o .m3u8 equivalente
     _hlsPrev = new Hls();
     _hlsPrev.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = muted; v.play().catch(() => {}); });
-    _hlsPrev.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal && autoQualidadeOn() && _qAtual) autoTrocarFonte(); });
+    _hlsPrev.on(Hls.Events.ERROR, (_e, d) => {
+      if (!d || !d.fatal) return;
+      // O provedor pode não servir a variante .m3u8 daquele canal. Antes de
+      // desistir e pular de fonte, tenta a URL ORIGINAL no player nativo.
+      if (convertida) {
+        if (_hlsPrev) { _hlsPrev.destroy(); _hlsPrev = null; }
+        v.muted = muted; v.src = url;
+        v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
+        return;
+      }
+      if (autoQualidadeOn() && _qAtual) autoTrocarFonte();
+    });
     _hlsPrev.attachMedia(v);
-    _hlsPrev.loadSource(url);
+    _hlsPrev.loadSource(alvo);
   } else {
     v.muted = muted; v.src = url;
     v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
@@ -1214,6 +1253,16 @@ async function legendasExternas(item) {
 
 // DIAGNÓSTICO: o que a plataforma REALMENTE expõe de faixas, para cada fonte.
 // Serve p/ sabermos, na TV real, por que legenda/áudio não aparece (sem DevTools).
+//
+// ⚠️ DESLIGADO em produção: o usuário final não pode ver "sub via hls: 0". Quando
+// não há faixa, ele recebe a frase amigável. Para ligar em teste, no console da
+// TV (ares-inspect / DevTools):  localStorage.setItem('hp_diag','1')  e reabrir.
+function _diagLigado() {
+  try {
+    return localStorage.getItem('hp_diag') === '1' ||
+      /[?&]diag=1(&|$)/.test(location.search);
+  } catch (_) { return false; }
+}
 let _fonteVodDiag = null;   // { ehHls, ext } do último VOD aberto
 function _diagFaixas(v) {
   const hls = _hlsDoVideo(v);
@@ -1246,7 +1295,11 @@ async function abrirMenuLegendas(v) {
     }
   }
   if (!fx.length && !ext.length) {
-    abrirMenu(t('Legendas — nada encontrado (diagnóstico)'), _diagFaixas(v), () => {});
+    if (_diagLigado()) {
+      abrirMenu(t('Legendas — nada encontrado (diagnóstico)'), _diagFaixas(v), () => {});
+    } else {
+      toast(t('Este conteúdo não oferece legendas'));
+    }
     return;
   }
   const at = legendaAtual(v);
@@ -1276,7 +1329,11 @@ async function abrirMenuAudio(v) {
     fx = faixasAudio(v);
   }
   if (fx.length < 2) {
-    abrirMenu(t('Áudio — só uma faixa (diagnóstico)'), _diagFaixas(v), () => {});
+    if (_diagLigado()) {
+      abrirMenu(t('Áudio — só uma faixa (diagnóstico)'), _diagFaixas(v), () => {});
+    } else {
+      toast(t('Este conteúdo tem apenas uma faixa de áudio'));
+    }
     return;
   }
   const at = audioAtual(v);

@@ -437,6 +437,21 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 /* ── Player ───────────────────────────────────────────────────────────────── */
 #player-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; background: #000; }
 #player-video { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+/* WebView do Android (TV Box / Fire TV) desenha um BOTÃO DE PLAY gigante por
+   cima do vídeo enquanto ele não começou — na TV o mesmo trecho fica preto.
+   Some com os controles nativos: quem manda na reprodução é o app. */
+video::-webkit-media-controls,
+video::-webkit-media-controls-enclosure,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+  opacity: 0;
+}
+video { background: #000; }
 .player-fade {
   position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; transition: opacity .3s;
   background:
