@@ -215,11 +215,20 @@ const ListaUtil = {
   },
   // Deriva a URL do EPG a partir da M3U. Para Xtream (.../get.php?username&password)
   // o EPG e .../xmltv.php com as mesmas credenciais. M3U avulsa -> sem EPG.
+  // Dois formatos de Xtream sao cobertos:
+  //   .../get.php?username=U&password=P   (querystring, o mais comum)
+  //   .../playlist/U/P/m3u_plus           (caminho, usado por alguns paineis)
+  // Mesma regra do site (website/upload.html) e do app Flutter.
   derivarEpg(m3uUrl) {
     try {
       const u = new URL(m3uUrl.trim());
-      const user = u.searchParams.get('username');
-      const pass = u.searchParams.get('password');
+      let user = u.searchParams.get('username');
+      let pass = u.searchParams.get('password');
+      if (!user || !pass) {
+        const seg = u.pathname.split('/').filter(Boolean);
+        const i = seg.findIndex((x) => /^(playlist|get|m3u)$/i.test(x));
+        if (i !== -1 && seg.length >= i + 3) { user = seg[i + 1]; pass = seg[i + 2]; }
+      }
       if (user && pass) {
         return `${u.protocol}//${u.host}/xmltv.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
       }

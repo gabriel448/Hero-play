@@ -346,11 +346,27 @@ class ListaUtil {
   }
 
   /// Deriva a URL do EPG a partir da M3U (Xtream). Vazio para M3U avulsa.
+  ///
+  /// Dois formatos sao cobertos:
+  ///   `.../get.php?username=U&password=P`  (querystring, o mais comum)
+  ///   `.../playlist/U/P/m3u_plus`          (caminho, usado por alguns paineis)
+  /// Mesma regra do site (`website/upload.html`) e do app de TV.
   static String derivarEpg(String m3uUrl) {
     try {
       final u = Uri.parse(m3uUrl.trim());
-      final user = u.queryParameters['username'];
-      final pass = u.queryParameters['password'];
+      var user = u.queryParameters['username'];
+      var pass = u.queryParameters['password'];
+      if (user == null || pass == null) {
+        final seg = u.pathSegments.where((s) => s.isNotEmpty).toList();
+        final i = seg.indexWhere(
+          (s) => RegExp(r'^(playlist|get|m3u)$', caseSensitive: false)
+              .hasMatch(s),
+        );
+        if (i != -1 && seg.length >= i + 3) {
+          user = seg[i + 1];
+          pass = seg[i + 2];
+        }
+      }
       if (user != null && pass != null) {
         return '${u.scheme}://${u.authority}/xmltv.php'
             '?username=${Uri.encodeComponent(user)}'
