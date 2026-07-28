@@ -3,6 +3,7 @@ package com.heroplay.tv
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -141,6 +142,15 @@ class MainActivity : AppCompatActivity() {
      * Todo metodo salta para a UI thread: o ExoPlayer so aceita chamadas dela.
      */
     inner class Ponte {
+        /**
+         * Toda chamada do player passa por aqui: salta para a UI thread E
+         * engole excecao. Um erro no player NAO pode fechar o app — foi o que
+         * aconteceu quando o `area()` recebia LayoutParams do tipo errado.
+         */
+        private fun naUi(acao: () -> Unit) = runOnUiThread {
+            try { acao() } catch (e: Throwable) { Log.e("HeroPlay", "player", e) }
+        }
+
         /** `window.close()` nao encerra uma Activity — isto encerra. */
         @JavascriptInterface
         fun sair() {
@@ -152,33 +162,31 @@ class MainActivity : AppCompatActivity() {
         fun temPlayer(): Boolean = true
 
         @JavascriptInterface
-        fun abrir(url: String, posicaoSeg: Double, mudo: Boolean) {
-            runOnUiThread { nativo.abrir(url, posicaoSeg, mudo) }
-        }
+        fun abrir(url: String, posicaoSeg: Double, mudo: Boolean) =
+            naUi { nativo.abrir(url, posicaoSeg, mudo) }
 
         @JavascriptInterface
-        fun parar() = runOnUiThread { nativo.parar() }
+        fun parar() = naUi { nativo.parar() }
 
         @JavascriptInterface
-        fun pausar() = runOnUiThread { nativo.pausar() }
+        fun pausar() = naUi { nativo.pausar() }
 
         @JavascriptInterface
-        fun retomar() = runOnUiThread { nativo.retomar() }
+        fun retomar() = naUi { nativo.retomar() }
 
         @JavascriptInterface
-        fun buscar(seg: Double) = runOnUiThread { nativo.buscar(seg) }
+        fun buscar(seg: Double) = naUi { nativo.buscar(seg) }
 
         @JavascriptInterface
-        fun mudo(on: Boolean) = runOnUiThread { nativo.mudo(on) }
+        fun mudo(on: Boolean) = naUi { nativo.mudo(on) }
 
         /** Retangulo onde o video deve aparecer, em CSS px. */
         @JavascriptInterface
-        fun area(x: Float, y: Float, w: Float, h: Float) {
-            runOnUiThread { nativo.area(x, y, w, h) }
-        }
+        fun area(x: Float, y: Float, w: Float, h: Float) = naUi { nativo.area(x, y, w, h) }
 
         /** JSON: posicao, duracao, tocando, buffering. Lido em polling pelo JS. */
         @JavascriptInterface
-        fun estado(): String = nativo.estado()
+        fun estado(): String =
+            try { nativo.estado() } catch (_: Throwable) { """{"pos":0,"dur":0,"tocando":false,"buffering":false}""" }
     }
 }

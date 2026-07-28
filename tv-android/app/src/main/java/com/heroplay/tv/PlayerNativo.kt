@@ -1,7 +1,10 @@
 package com.heroplay.tv
 
 import android.content.Context
+import android.util.Log
+import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -24,7 +27,7 @@ import androidx.media3.ui.PlayerView
  * reproducao pela ponte JS. Ver `PlayerNativo` em `tv-app/app.js`.
  */
 @UnstableApi
-class PlayerNativo(private val ctx: Context, private val raiz: ViewGroup) {
+class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
 
     private var player: ExoPlayer? = null
     private var view: PlayerView? = null
@@ -43,7 +46,7 @@ class PlayerNativo(private val ctx: Context, private val raiz: ViewGroup) {
             this.player = p
         }
         // Indice 0 = atras do WebView.
-        raiz.addView(pv, 0, ViewGroup.LayoutParams(0, 0))
+        raiz.addView(pv, 0, FrameLayout.LayoutParams(0, 0))
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
@@ -100,11 +103,14 @@ class PlayerNativo(private val ctx: Context, private val raiz: ViewGroup) {
     fun area(x: Float, y: Float, w: Float, h: Float) {
         val pv = view ?: return
         val d = ctx.resources.displayMetrics.density
-        val lp = ViewGroup.MarginLayoutParams((w * d).toInt(), (h * d).toInt())
+        // ⚠️ TEM que ser FrameLayout.LayoutParams. Com um MarginLayoutParams
+        // "cru" o FrameLayout estoura ClassCastException no onMeasure e o app
+        // FECHA no instante em que a midia comeca — foi exatamente esse o bug.
+        val lp = FrameLayout.LayoutParams((w * d).toInt(), (h * d).toInt())
         lp.leftMargin = (x * d).toInt()
         lp.topMargin = (y * d).toInt()
         pv.layoutParams = lp
-        pv.visibility = if (w <= 0f || h <= 0f) android.view.View.GONE else android.view.View.VISIBLE
+        pv.visibility = if (w <= 0f || h <= 0f) View.GONE else View.VISIBLE
         pv.requestLayout()
     }
 
