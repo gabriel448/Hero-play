@@ -25,8 +25,8 @@ android {
         // Fire OS 5 (Fire Stick 2a geracao) roda Android 5.1 = API 22.
         minSdk = 22
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 5
+        versionName = "0.2.2"
     }
 
     if (keystorePropertiesFile.exists()) {
@@ -66,4 +66,5 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.media3:media3-datasource:1.5.1")
 }

@@ -939,6 +939,7 @@ const PlayerNativo = (function () {
   let timer = null, ultimo = { pos: 0, dur: 0, tocando: false, buffering: false };
   let elDest = null;           // elemento cuja área o vídeo deve ocupar
   let pausadoManual = false;
+  let ultimoErro = '';         // código do ExoPlayer, p/ a mensagem de erro
 
   function emitir(nome) {
     (ouvintes[nome] || []).slice().forEach((fn) => { try { fn({ type: nome }); } catch (_) {} });
@@ -953,6 +954,10 @@ const PlayerNativo = (function () {
     if (!elDest) return;
     const r = elDest.getBoundingClientRect();
     try { HeroPlayAndroid.area(r.left, r.top, r.width, r.height); } catch (_) {}
+    // Ocupando (quase) a tela toda? Então o resto do app tem que sumir — com a
+    // página transparente ele apareceria POR CIMA do vídeo.
+    const cheio = r.width >= window.innerWidth * 0.92 && r.height >= window.innerHeight * 0.92;
+    try { document.documentElement.classList.toggle('video-nativo-cheio', cheio); } catch (_) {}
   }
   function iniciarTick() {
     if (timer) return;
@@ -968,6 +973,11 @@ const PlayerNativo = (function () {
   // Chamado pelo lado Kotlin (MainActivity.aoEvento).
   window.HeroPlayNativo = {
     evento(nome) {
+      if (nome.indexOf('error') === 0) {          // "error:CODIGO_DO_EXOPLAYER"
+        ultimoErro = nome.slice(6);
+        emitir('error');
+        return;
+      }
       if (nome === 'playing') { pausadoManual = false; emitir('playing'); emitir('play'); }
       else if (nome === 'pause') emitir('pause');
       else if (nome === 'canplay') { emitir('loadedmetadata'); emitir('canplay'); }
@@ -980,6 +990,7 @@ const PlayerNativo = (function () {
     abrir(el, url, posicaoSeg, mudo) {
       elDest = el;
       pausadoManual = false;
+      ultimoErro = '';
       try { document.documentElement.classList.add('video-nativo'); } catch (_) {}
       sincronizarArea();
       try { HeroPlayAndroid.abrir(url, posicaoSeg || 0, !!mudo); } catch (_) {}
@@ -990,8 +1001,13 @@ const PlayerNativo = (function () {
       pararTick();
       elDest = null;
       try { HeroPlayAndroid.parar(); } catch (_) {}
-      try { document.documentElement.classList.remove('video-nativo'); } catch (_) {}
+      try {
+        document.documentElement.classList.remove('video-nativo');
+        document.documentElement.classList.remove('video-nativo-cheio');
+      } catch (_) {}
     },
+    /** Código do último erro do ExoPlayer (ex.: ERROR_CODE_IO_BAD_HTTP_STATUS). */
+    erro() { return ultimoErro; },
     /** Objeto com cara de <video> para a interface existente. */
     fachada(el) {
       return {
@@ -2309,7 +2325,12 @@ function abrirPlayer(item, ctx, reiniciar) {
   video.addEventListener('loadstart', () => spinner(true));
   video.addEventListener('playing', () => spinner(false));
   video.addEventListener('canplay', () => spinner(false));
-  video.addEventListener('error', () => erroPlayer(t('Não foi possível reproduzir. O formato pode exigir o player nativo da TV.')));
+  video.addEventListener('error', () => {
+    // O código do ExoPlayer diz se foi rede, formato ou codec — sem ele, na TV,
+    // qualquer falha vira "não deu" e não há como investigar.
+    const cod = TEM_PLAYER_NATIVO ? PlayerNativo.erro() : '';
+    erroPlayer(t('Não foi possível reproduzir. O formato pode exigir o player nativo da TV.') + (cod ? '  [' + cod + ']' : ''));
+  });
 
   const fonte = item.url || TEST_HLS;     // URL real do item (fallback: teste)
   const ehHls = /\.m3u8(\?|$)/i.test(fonte);

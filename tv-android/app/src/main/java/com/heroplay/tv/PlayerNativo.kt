@@ -9,7 +9,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 
@@ -37,7 +40,18 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
 
     private fun garantir(): ExoPlayer {
         player?.let { return it }
-        val p = ExoPlayer.Builder(ctx).build()
+        // ⚠️ User-Agent: MUITO servidor de IPTV recusa cliente desconhecido, e o
+        // padrao do ExoPlayer e "ExoPlayerLib/...". O app mobile ja tinha
+        // aprendido isso — a 1a estrategia dele e justamente o UA do VLC. Sem
+        // trocar, o servidor devolve 403/404 e vira "erro de formato" na tela.
+        val http = DefaultHttpDataSource.Factory()
+            .setUserAgent("VLC/3.0.20 LibVLC/3.0.20")
+            .setAllowCrossProtocolRedirects(true)   // http -> https no meio do caminho
+            .setConnectTimeoutMs(20000)
+            .setReadTimeoutMs(20000)
+        val p = ExoPlayer.Builder(ctx)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(ctx, http)))
+            .build()
         val pv = PlayerView(ctx).apply {
             useController = false                       // os controles sao da web app
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -59,7 +73,10 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
                 aoEvento?.invoke(if (tocando) "playing" else "pause")
             }
             override fun onPlayerError(error: PlaybackException) {
-                aoEvento?.invoke("error")
+                // O codigo vai junto: e o que permite saber, olhando a TV, se
+                // foi rede, HTTP, container ou codec.
+                Log.e("HeroPlay", "player: " + error.errorCodeName, error)
+                aoEvento?.invoke("error:" + error.errorCodeName)
             }
         })
         player = p

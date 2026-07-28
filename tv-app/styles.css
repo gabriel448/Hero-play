@@ -467,6 +467,18 @@ html.video-nativo .tv-tela { background: transparent !important; }
 /* O <video> vira só um "buraco" que marca onde a superfície nativa deve ficar. */
 html.video-nativo #player-video,
 html.video-nativo #tv-prev-video { visibility: hidden; }
+
+/* ⚠️ TELA CHEIA: com a página transparente, o resto do app deixa de ser coberto
+   pelo fundo preto do player e aparece DESENHADO POR CIMA do vídeo (sidebar,
+   trilhos, listas). Enquanto o vídeo nativo ocupa a tela toda, escondemos tudo
+   o que está atrás — sobram só os controles do player. */
+html.video-nativo-cheio #app > *:not(#player-overlay) { visibility: hidden !important; }
+html.video-nativo-cheio #conteudo,
+html.video-nativo-cheio #sidebar { visibility: hidden !important; }
+/* A moldura maximizada da TV ao vivo fica visível, mas só ela e os seus filhos
+   de controle (o vídeo em si é a superfície nativa, por baixo). */
+html.video-nativo-cheio .tv-tela.cheia { visibility: visible !important; }
+html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
 .player-fade {
   position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; transition: opacity .3s;
   background:
