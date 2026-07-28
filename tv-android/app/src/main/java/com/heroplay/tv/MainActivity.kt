@@ -3,6 +3,7 @@ package com.heroplay.tv
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -168,6 +169,22 @@ class MainActivity : AppCompatActivity() {
         fun sair() {
             runOnUiThread { finish() }
         }
+
+        /**
+         * ID ESTAVEL do aparelho — o MAC/Key da ativacao sao derivados dele.
+         *
+         * Sem isto o app caia num MAC sorteado e guardado em localStorage: o
+         * WebView perde o localStorage ao DESINSTALAR, entao reinstalar gerava
+         * outro MAC e exigia nova ativacao. O ANDROID_ID e amarrado ao
+         * aparelho + chave de assinatura do APK: reinstalar o MESMO app
+         * devolve o MESMO valor. So muda em reset de fabrica, que e o
+         * comportamento esperado ("aparelho novo"). Nao exige permissao.
+         */
+        @JavascriptInterface
+        fun idDispositivo(): String =
+            try {
+                Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+            } catch (_: Throwable) { "" }
 
         /** `true` diz ao JS que existe player nativo disponivel. */
         @JavascriptInterface

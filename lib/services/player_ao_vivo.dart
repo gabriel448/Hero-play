@@ -54,6 +54,20 @@ class PlayerAoVivo {
     if (Platform.isAndroid) native.setProperty('hwdec', 'mediacodec-copy');
   }
 
+  /// Encerra a reprodução ao vivo se houver alguma, SEM destruir o player
+  /// (a próxima abertura reaproveita a mesma superfície).
+  ///
+  /// Existe para o app soltar a conexão quando vai para segundo plano: o
+  /// provedor de IPTV conta SESSÃO, e um canal que continua baixando com o
+  /// celular no bolso ocupa uma "tela" à toa até o servidor recusar a próxima.
+  void pararSeAtivo() {
+    final p = _player;
+    if (p == null) return;
+    // `stop()` encerra o stream e fecha a conexão; o Player em si continua
+    // vivo para o próximo canal.
+    p.stop();
+  }
+
   /// Esquece a instância atual se ela for [p] — usado quando esse player
   /// foi transferido ao mini player. O próximo acesso cria uma nova.
   void liberarSeAtual(Player p) {

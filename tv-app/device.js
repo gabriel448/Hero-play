@@ -95,6 +95,17 @@ const Dispositivo = (() => {
   }
 
   async function _idPlataforma() {
+    // Android TV / Fire TV / TV Box (casca WebView): ANDROID_ID.
+    // Vem PRIMEIRO por ser síncrono e por ser o único caso em que o fallback
+    // (MAC sorteado no localStorage) causava dano de verdade: o WebView perde o
+    // localStorage ao DESINSTALAR, então reinstalar trocava o MAC e obrigava a
+    // reativar. O ANDROID_ID sobrevive a reinstalar o mesmo APK assinado.
+    try {
+      if (window.HeroPlayAndroid && HeroPlayAndroid.idDispositivo) {
+        const aid = HeroPlayAndroid.idDispositivo();
+        if (aid) return 'aid:' + aid;
+      }
+    } catch (_) {}
     // LGUDID: UUID único e estável por aparelho (recomendado da LG).
     const r = await _luna('luna://com.webos.service.sm/deviceid/getIDs', { idType: ['LGUDID'] });
     if (r && r.idList) { const u = r.idList.filter((x) => x && x.idValue)[0]; if (u) return 'udid:' + u.idValue; }

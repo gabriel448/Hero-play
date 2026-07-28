@@ -1,18 +1,64 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'models/canal.dart';
+import 'services/player_ao_vivo.dart';
 import 'screens/tela_ativacao.dart';
 import 'screens/tela_importando_listas.dart';
 import 'screens/tela_inicial.dart';
 import 'screens/tela_perfis.dart';
 import 'state/dispositivo_provider.dart';
 import 'state/iptv_provider.dart';
+import 'state/mini_player_provider.dart';
 import 'state/perfil_provider.dart';
 import 'theme/app_theme.dart';
 import 'utils/nav_keys.dart';
 import 'widgets/mini_player_overlay.dart';
 
-class IptvApp extends StatelessWidget {
+class IptvApp extends StatefulWidget {
   const IptvApp({super.key});
+
+  @override
+  State<IptvApp> createState() => _IptvAppState();
+}
+
+class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// App foi para segundo plano no CELULAR: encerra o canal AO VIVO.
+  ///
+  /// Provedor de IPTV conta SESSAO: um canal que segue baixando com o app
+  /// fechado ocupa uma "tela" a toa, e depois de algumas idas e voltas o
+  /// servidor recusa a proxima conexao (403).
+  ///
+  /// So o AO VIVO para. VOD (filme/episodio) continua — e o que sustenta ouvir
+  /// com a tela desligada pelo mini player. E so no mobile: no desktop,
+  /// minimizar a janela NAO significa que o usuario parou de assistir.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.paused) return;
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    PlayerAoVivo.instancia.pararSeAtivo();
+    // O mini player pode ter ASSUMIDO o player do canal (o singleton "esquece"
+    // a instancia nesse caso — ver liberarSeAtual), entao ele precisa parar
+    // sozinho. So o AO VIVO: filme no mini player continua tocando.
+    final mini = rootNavigatorKey.currentContext?.read<MiniPlayerProvider>();
+    if (mini != null && mini.ativo && mini.canal?.tipo == TipoCanal.aoVivo) {
+      mini.player?.stop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
