@@ -80,15 +80,18 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         val p = ExoPlayer.Builder(ctx)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(ctx, http)))
             .build()
-        val pv = PlayerView(ctx).apply {
+        // A superficie e criada UMA vez e reaproveitada: o player pode ser
+        // solto e recriado (ver `parar`) sem perder o lugar na tela.
+        val pv = view ?: PlayerView(ctx).apply {
             useController = false                       // os controles sao da web app
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             setShutterBackgroundColor(0xFF000000.toInt())
             setBackgroundColor(0xFF000000.toInt())
-            this.player = p
+            // Indice 0 = atras do WebView.
+            raiz.addView(this, 0, FrameLayout.LayoutParams(0, 0))
+            view = this
         }
-        // Indice 0 = atras do WebView.
-        raiz.addView(pv, 0, FrameLayout.LayoutParams(0, 0))
+        pv.player = p
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
@@ -108,12 +111,16 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
             }
         })
         player = p
-        view = pv
         return p
     }
 
     fun abrir(url: String, posicaoSeg: Double, mudo: Boolean) {
         val p = garantir()
+        // Fecha a conexao anterior ANTES de abrir outra. Provedor de IPTV conta
+        // SESSAO: se a antiga continuar de pe, trocar de canal/filme vai
+        // somando "telas" ate o servidor devolver 403 (ERROR_CODE_IO_BAD_HTTP_STATUS).
+        p.stop()
+        p.clearMediaItems()
         p.volume = if (mudo) 0f else 1f
         p.setMediaItem(MediaItem.fromUri(url))
         p.prepare()
@@ -124,19 +131,31 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         aoEvento?.invoke("loadstart")
     }
 
+    /**
+     * Encerra a reproducao E a conexao com o servidor.
+     *
+     * `stop()` sozinho nao basta: o socket pode ficar no pool de keep-alive e o
+     * provedor segue contando a sessao. Aqui soltamos o player inteiro — a
+     * superficie fica, e o proximo `abrir` recria o player em milissegundos.
+     */
     fun parar() {
         ui.removeCallbacks(tick)
         retrato = ESTADO_VAZIO
-        player?.stop()
-        player?.clearMediaItems()
         area(0f, 0f, 0f, 0f)
+        player?.let {
+            it.stop()
+            it.clearMediaItems()
+            it.release()
+        }
+        player = null
+        view?.player = null
     }
 
     fun soltar() {
         ui.removeCallbacks(tick)
-        player?.release()
+        player?.let { it.stop(); it.clearMediaItems(); it.release() }
         player = null
-        view?.let { raiz.removeView(it) }
+        view?.let { it.player = null; raiz.removeView(it) }
         view = null
     }
 

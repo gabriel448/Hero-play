@@ -124,6 +124,18 @@ class MainActivity : AppCompatActivity() {
         web.onPause()
     }
 
+    /**
+     * App saiu da tela (Home do controle, troca de app): ENCERRA a reproducao.
+     *
+     * Sem isto o stream continua aberto em segundo plano e o provedor segue
+     * contando aquela "tela" ocupada — o usuario nao esta nem vendo. Depois de
+     * algumas idas e voltas o servidor recusa com 403.
+     */
+    override fun onStop() {
+        super.onStop()
+        try { nativo.parar() } catch (e: Throwable) { Log.e("HeroPlay", "parar", e) }
+    }
+
     override fun onResume() {
         super.onResume()
         web.onResume()

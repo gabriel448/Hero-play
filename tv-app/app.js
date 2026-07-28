@@ -2579,6 +2579,9 @@ function fecharPlayer() {
 // Pergunta antes — evita saída acidental — e chama a API nativa da plataforma.
 function sairDoApp() {
   try { pararPreview(); } catch (_) {}                 // solta conexão/vídeo do live
+  // Android: garante que o ExoPlayer solte a conexão antes de encerrar — o
+  // provedor conta sessão, e sair com o stream aberto ocupa uma "tela".
+  try { if (TEM_PLAYER_NATIVO) PlayerNativo.parar(); } catch (_) {}
   try { liberarVideo(document.getElementById('player-video')); } catch (_) {}
   try { salvarMetaTmdb(); } catch (_) {}               // best-effort: persiste o cache
   // Android TV / Fire TV (shell WebView do tv-android): window.close() nao
