@@ -50,6 +50,14 @@
                 <div id="campos-m" style="display:none">
                   <div class="campo"><label for="m-url" data-i18n="up.m3u">URL da lista (M3U)</label><input class="in" type="url" id="m-url" placeholder="https://.../lista.m3u" autocomplete="off" spellcheck="false"></div>
                 </div>
+                <div class="campo">
+                  <label for="epg-url">
+                    <span data-i18n="up.epg">URL do EPG (XMLTV)</span>
+                    <span style="color:var(--text-3);font-weight:400" data-i18n="up.epgopt"> — opcional</span>
+                  </label>
+                  <input class="in" type="url" id="epg-url" placeholder="https://.../xmltv.php?username=…" autocomplete="off" spellcheck="false">
+                  <div style="color:var(--text-3);font-size:12px;margin-top:6px" data-i18n="up.epghint">Deixe em branco que a gente monta a partir da sua lista.</div>
+                </div>
                 <div class="derivado" id="derivado">
                   <div class="lin"><span data-i18n="up.dvlista">Lista (M3U)</span><b id="dv-m3u"></b></div>
                   <div class="lin"><span data-i18n="up.dvepg">EPG (XMLTV)</span><b id="dv-epg"></b></div>
@@ -86,21 +94,49 @@
       const q = `username=${encodeURIComponent(user.trim())}&password=${encodeURIComponent(pass.trim())}`;
       return { lista_url: `${base}/get.php?${q}&type=m3u_plus&output=ts`, epg_url: `${base}/xmltv.php?${q}` };
     }
+    // Tenta SEMPRE montar o EPG a partir da M3U — o usuario so precisa digitar
+    // se o provedor usar um endereco fora do padrao. Dois formatos cobertos:
+    //   .../get.php?username=U&password=P      (querystring, o mais comum)
+    //   .../playlist/U/P/m3u_plus              (caminho, usado por alguns paineis)
     function derivarEpg(url) {
-      try { const u = new URL(url.trim()); const us = u.searchParams.get('username'), pw = u.searchParams.get('password');
-        if (us && pw) return `${u.protocol}//${u.host}/xmltv.php?username=${encodeURIComponent(us)}&password=${encodeURIComponent(pw)}`; } catch (_) {}
+      try {
+        const u = new URL(url.trim());
+        let us = u.searchParams.get('username'), pw = u.searchParams.get('password');
+        if (!us || !pw) {
+          const seg = u.pathname.split('/').filter(Boolean);
+          const i = seg.findIndex((x) => /^(playlist|get|m3u)$/i.test(x));
+          if (i !== -1 && seg.length >= i + 3) { us = seg[i + 1]; pw = seg[i + 2]; }
+        }
+        if (us && pw) return `${u.protocol}//${u.host}/xmltv.php?username=${encodeURIComponent(us)}&password=${encodeURIComponent(pw)}`;
+      } catch (_) {}
       return '';
     }
+    const epgInformado = () => ($('epg-url').value || '').trim();
+    const epgValido = (v) => !v || /^https?:\/\//i.test(v);
     function montarAtual() {
-      if (modo === 'xtream') { const h = $('x-host').value, u = $('x-user').value, s = $('x-pass').value;
-        if (!h.trim() || !u.trim() || !s.trim()) return null; return montarXtream(h, u, s); }
-      const url = ($('m-url').value || '').trim(); if (!/^https?:\/\//i.test(url)) return null;
-      return { lista_url: url, epg_url: derivarEpg(url) };
+      let d = null;
+      if (modo === 'xtream') {
+        const h = $('x-host').value, u = $('x-user').value, s = $('x-pass').value;
+        if (!h.trim() || !u.trim() || !s.trim()) return null;
+        d = montarXtream(h, u, s);
+      } else {
+        const url = ($('m-url').value || '').trim();
+        if (!/^https?:\/\//i.test(url)) return null;
+        d = { lista_url: url, epg_url: derivarEpg(url) };
+      }
+      // O que o usuario digitou MANDA; sem isso, fica o derivado da lista.
+      const manual = epgInformado();
+      if (manual) { d.epg_url = manual; d.epgManual = true; }
+      return d;
     }
     function atualizarDerivado() {
       const d = montarAtual(); const box = $('derivado');
       if (!d) { box.classList.remove('show'); return; }
-      $('dv-m3u').textContent = d.lista_url; $('dv-epg').textContent = d.epg_url || t('up.epgsem'); box.classList.add('show');
+      $('dv-m3u').textContent = d.lista_url;
+      $('dv-epg').textContent = d.epg_url
+        ? d.epg_url + (d.epgManual ? '' : '  ' + t('up.epgauto'))
+        : t('up.epgsem');
+      box.classList.add('show');
     }
     function trocarAba(n) {
       modo = n; $('aba-x').classList.toggle('ativo', n === 'xtream'); $('aba-m').classList.toggle('ativo', n === 'm3u');
@@ -116,7 +152,9 @@
     async function adicionar(e) {
       e.preventDefault(); $('erro').classList.remove('show');
       const d = lerDev(); if (!d.mac || !d.key) return erro(t('up.errdev'));
+      if (!epgValido(epgInformado())) return erro(t('up.errepg'));
       const lista = montarAtual(); if (!lista) return erro(modo === 'xtream' ? t('up.errx') : t('up.errm'));
+      delete lista.epgManual;   // flag so da tela, nao vai para a API
       const b = $('btn-add'); b.disabled = true; b.textContent = t('up.adding');
       try { const r = await chamarApi({ acao: 'adicionar', mac: d.mac, key: d.key, ...lista }); mostrarResultado(r); }
       catch (err) { erro(err.message); b.disabled = false; b.textContent = t('up.add'); }
@@ -135,7 +173,7 @@
 
     $('aba-x').addEventListener('click', () => trocarAba('xtream'));
     $('aba-m').addEventListener('click', () => trocarAba('m3u'));
-    ['x-host','x-user','x-pass','m-url'].forEach((id) => $(id).addEventListener('input', atualizarDerivado));
+    ['x-host','x-user','x-pass','m-url','epg-url'].forEach((id) => $(id).addEventListener('input', atualizarDerivado));
     $('form').addEventListener('submit', adicionar);
   </script>
 </body>
