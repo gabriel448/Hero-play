@@ -1,6 +1,8 @@
 package com.heroplay.tv
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -34,6 +36,32 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
 
     private var player: ExoPlayer? = null
     private var view: PlayerView? = null
+
+    // ⚠️ O ExoPlayer SO pode ser lido na thread principal. Os metodos da ponte
+    // JS rodam na thread do JavaBridge do WebView, entao ler `currentPosition`
+    // direto dali lanca IllegalStateException — e era isso que zerava a barra
+    // de progresso e deixava o play/pause sem efeito (o JS recebia sempre
+    // pos=0, dur=0, tocando=false). Solucao: um retrato atualizado NA THREAD
+    // CERTA, que o JS so le.
+    @Volatile
+    private var retrato = ESTADO_VAZIO
+    private val ui = Handler(Looper.getMainLooper())
+    private val tick = object : Runnable {
+        override fun run() {
+            atualizarRetrato()
+            ui.postDelayed(this, 300)
+        }
+    }
+
+    private fun atualizarRetrato() {
+        val p = player
+        val pos = (p?.currentPosition ?: 0L).coerceAtLeast(0L) / 1000.0
+        val durMs = p?.duration ?: 0L
+        val dur = if (durMs > 0) durMs / 1000.0 else 0.0
+        val tocando = p?.isPlaying == true
+        val buff = p?.playbackState == Player.STATE_BUFFERING
+        retrato = """{"pos":$pos,"dur":$dur,"tocando":$tocando,"buffering":$buff}"""
+    }
 
     /** Chamado a cada evento relevante — a MainActivity repassa ao JS. */
     var aoEvento: ((String) -> Unit)? = null
@@ -91,16 +119,21 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         p.prepare()
         if (posicaoSeg > 0) p.seekTo((posicaoSeg * 1000).toLong())
         p.playWhenReady = true
+        ui.removeCallbacks(tick)
+        ui.post(tick)
         aoEvento?.invoke("loadstart")
     }
 
     fun parar() {
+        ui.removeCallbacks(tick)
+        retrato = ESTADO_VAZIO
         player?.stop()
         player?.clearMediaItems()
         area(0f, 0f, 0f, 0f)
     }
 
     fun soltar() {
+        ui.removeCallbacks(tick)
         player?.release()
         player = null
         view?.let { raiz.removeView(it) }
@@ -131,14 +164,15 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         pv.requestLayout()
     }
 
-    /** Estado atual em JSON — a web app le isto para a barra de progresso. */
-    fun estado(): String {
-        val p = player
-        val pos = (p?.currentPosition ?: 0L) / 1000.0
-        val durMs = p?.duration ?: 0L
-        val dur = if (durMs > 0) durMs / 1000.0 else 0.0
-        val tocando = p?.isPlaying == true
-        val buff = p?.playbackState == Player.STATE_BUFFERING
-        return """{"pos":$pos,"dur":$dur,"tocando":$tocando,"buffering":$buff}"""
+    /**
+     * Estado atual em JSON — a web app le isto para a barra de progresso.
+     * Devolve o RETRATO (volatil), nunca o player: esta chamada vem da thread
+     * do JavaBridge, e tocar no ExoPlayer dali estoura.
+     */
+    fun estado(): String = retrato
+
+    companion object {
+        private const val ESTADO_VAZIO =
+            """{"pos":0,"dur":0,"tocando":false,"buffering":false}"""
     }
 }
