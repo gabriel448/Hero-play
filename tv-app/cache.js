@@ -25,10 +25,24 @@ const CacheLista = (() => {
   // Diagnóstico visível no painel (sem DevTools na TV).
   const status = { ler: '—', gravar: '—', msLer: 0, msGravar: 0, meta: '—' };
 
+  // Conexão ÚNICA e reaproveitada. Antes cada operação abria e fechava o banco:
+  // num boot são 3+ aberturas (meta, catálogo, gravação) e, quando o firmware
+  // pendura o open(), cada uma custava os 15s do timeout — o boot inteiro ficava
+  // ~45s parado na tela de loading. Agora abrimos UMA vez; se falhar, marcamos
+  // `_morto` e as chamadas seguintes voltam na hora (o app segue sem cache, em
+  // vez de esperar de novo). Se o open pendurado responder depois, adotamos a
+  // conexão e o cache volta a funcionar sozinho.
+  let _conn = null, _abrindo = null, _morto = null;
   function _abrir() {
-    return new Promise((resolve) => {
+    if (_conn) return Promise.resolve({ db: _conn, err: null });
+    if (_morto) return Promise.resolve({ db: null, err: _morto });
+    if (_abrindo) return _abrindo;
+    _abrindo = new Promise((resolve) => {
       let pronto = false;
-      const fim = (v, err) => { if (!pronto) { pronto = true; resolve({ db: v, err: err || null }); } };
+      const fim = (v, err) => {
+        if (v) { _conn = v; _morto = null; } else if (err) { _morto = err; }
+        if (!pronto) { pronto = true; _abrindo = null; resolve({ db: v, err: err || null }); }
+      };
       try {
         if (!self.indexedDB) return fim(null, 'sem indexedDB');
         const req = indexedDB.open(DB, DB_VERSAO);
@@ -37,7 +51,16 @@ const CacheLista = (() => {
           if (!db.objectStoreNames.contains(LOJA)) db.createObjectStore(LOJA);
           if (!db.objectStoreNames.contains(META)) db.createObjectStore(META);
         };
-        req.onsuccess = () => fim(req.result);
+        req.onsuccess = () => {
+          const db = req.result;
+          // Solta a conexão se o banco for fechado por fora (upgrade de versão em
+          // outra instância) — senão ficaríamos com um handle morto p/ sempre.
+          try {
+            db.onversionchange = () => { try { db.close(); } catch (_) {} if (_conn === db) _conn = null; };
+            db.onclose = () => { if (_conn === db) _conn = null; };
+          } catch (_) {}
+          fim(db);
+        };
         req.onerror = () => fim(null, 'open:' + ((req.error && req.error.name) || 'erro'));
         req.onblocked = () => fim(null, 'open:bloqueado');
         // Alguns firmwares de TV penduram o open() — não travamos o boot por isso.
@@ -45,6 +68,7 @@ const CacheLista = (() => {
         setTimeout(() => fim(null, 'open:timeout'), 15000);
       } catch (e) { fim(null, 'open:' + ((e && e.name) || 'excecao')); }
     });
+    return _abrindo;
   }
 
   // Resolve { ok, v, e } — nunca rejeita.
@@ -70,7 +94,6 @@ const CacheLista = (() => {
     const { db, err } = await _abrir();
     if (!db) { status.ler = err || 'sem db'; return null; }
     const res = await _tx(db, LOJA, 'readonly', (s) => s.get(CHAVE));
-    try { db.close(); } catch (_) {}
     status.msLer = Date.now() - t0;
     if (!res.ok) { status.ler = 'erro:' + res.e; return null; }
     const reg = res.v;
@@ -81,6 +104,9 @@ const CacheLista = (() => {
     const horas = (Date.now() - (reg.quando || 0)) / 3600000;
     if (tam == null && horas > VALIDADE_H) { status.ler = 'expirado'; return null; }
     if (!reg.canais || !reg.filmes || !reg.series) { status.ler = 'incompleto'; return null; }
+    // Catálogo vazio gravado por engano (parse de uma resposta inválida): ignora
+    // e força o download — senão o app abriria vazio p/ sempre.
+    if (!reg.canais.length && !reg.filmes.length && !reg.series.length) { status.ler = 'vazio (ignorado)'; return null; }
     status.ler = 'ok';
     return reg;
   }
@@ -95,7 +121,6 @@ const CacheLista = (() => {
       canais: parsed.canais, filmes: parsed.filmes, series: parsed.series,
     };
     const res = await _tx(db, LOJA, 'readwrite', (s) => s.put(reg, CHAVE));
-    try { db.close(); } catch (_) {}
     status.msGravar = Date.now() - t0;
     status.gravar = res.ok ? 'ok' : ('erro:' + res.e);
     return !!res.ok;
@@ -109,7 +134,6 @@ const CacheLista = (() => {
     const { db, err } = await _abrir();
     if (!db) { status.meta = err || 'sem db'; return null; }
     const res = await _tx(db, META, 'readonly', (s) => s.get('tmdb'));
-    try { db.close(); } catch (_) {}
     if (!res.ok) { status.meta = 'erro:' + res.e; return null; }
     const reg = res.v;
     if (!reg) { status.meta = 'vazio'; return null; }
@@ -122,7 +146,6 @@ const CacheLista = (() => {
     const { db } = await _abrir();
     if (!db) return false;
     const res = await _tx(db, META, 'readwrite', (s) => s.put(dump, 'tmdb'));
-    try { db.close(); } catch (_) {}
     if (!res.ok) status.meta = 'gravar:' + res.e;
     return !!res.ok;
   }
@@ -131,7 +154,6 @@ const CacheLista = (() => {
     const { db } = await _abrir(); if (!db) return;
     await _tx(db, LOJA, 'readwrite', (s) => s.delete(CHAVE));
     await _tx(db, META, 'readwrite', (s) => s.delete('tmdb'));
-    try { db.close(); } catch (_) {}
   }
 
   return { ler, gravar, lerMeta, gravarMeta, limpar, status };

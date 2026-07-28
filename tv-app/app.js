@@ -59,21 +59,20 @@ const iniciais = (nome) => {
 const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 
 // ── Render: poster ──────────────────────────────────────────────────────────
-function posterHTML(item, forcarTmdb) {
-  // Filme: usa o logo/poster da própria lista. Série: o "logo" é o thumbnail do
-  // 1º episódio (feio/pixelado) — então busca o PÔSTER no TMDB (lazy). Se o TMDB
-  // não tiver pôster, fica SÓ o nome (gradiente) — NÃO usa o thumb do episódio.
-  // Filme sem logo também cai no TMDB.
-  // `forcarTmdb`: ignora o logo da lista e vai direto pro TMDB via observer — usado
-  // na BUSCA, onde os logos do provedor às vezes PENDURAM (sem load nem error) e o
-  // pôster do filme não aparecia. O TMDB (image.tmdb.org) carrega firme na TV.
+function posterHTML(item, vigiar) {
+  // Filme: usa o logo/poster da PRÓPRIA LISTA (a lista já traz a capa certa — o
+  // TMDB aqui é só fallback). Série: o "logo" é o thumbnail do 1º episódio (feio/
+  // pixelado) — então busca o PÔSTER no TMDB (lazy). Se o TMDB não tiver pôster,
+  // fica SÓ o nome (gradiente) — NÃO usa o thumb do episódio.
+  // `vigiar`: usado na BUSCA — mantém a capa da lista, mas se ela PENDURAR (sem
+  // load nem error, comum em alguns provedores na TV) cai pro TMDB depois de N ms.
   const ehSerie = item.tipo === 'serie';
-  const usarLogo = !!item.logo && !ehSerie && !forcarTmdb;
-  const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}"` : '';
+  const usarLogo = !!item.logo && !ehSerie;
+  const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}" data-serie="${ehSerie ? 1 : 0}"` : '';
   // Filme com logo da lista: se o logo NÃO carregar (host do provedor bloqueado/
   // http na TV), cai para o pôster do TMDB pelo título — senão ficava só o nome.
   const img = usarLogo
-    ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" data-tmdb="${escapar(item.titulo)}"
+    ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" data-tmdb="${escapar(item.titulo)}"${vigiar ? ' data-vigiar="1"' : ''}
          onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="_logoParaTmdb(this)">`
     : '';
   return `<div class="poster focusable" data-id="${item.id}"${lazy}>
@@ -83,6 +82,21 @@ function posterHTML(item, forcarTmdb) {
   </div>`;
 }
 
+// Logo da lista que "pendura" (nem load nem error): depois de LOGO_TIMEOUT sem
+// carregar, cai pro pôster do TMDB — mesmo caminho do onerror. Só na busca, onde
+// o item aparece sozinho e um pôster vazio é gritante.
+const LOGO_TIMEOUT = 5000;
+function vigiarLogo(el) {
+  const img = el.querySelector('img.poster-img[data-vigiar]');
+  if (!img) return;
+  setTimeout(() => {
+    const arte = img.closest('.poster-arte');
+    if (!arte || !arte.isConnected || arte.classList.contains('tem-img')) return;
+    if (img.complete && img.naturalWidth > 0) return;   // carregou (só o onload não veio)
+    _logoParaTmdb(img);
+  }, LOGO_TIMEOUT);
+}
+
 // Fallback do pôster de FILME: o logo da lista falhou → busca o pôster no TMDB
 // pelo título e usa no lugar. Cobre provedores cujos logos não abrem na TV.
 function _logoParaTmdb(img) {
@@ -90,7 +104,7 @@ function _logoParaTmdb(img) {
   const titulo = img.dataset.tmdb;
   img.remove();
   if (!arte || !titulo || arte.classList.contains('tem-img')) return;
-  TMDB.poster(titulo).then((u) => {
+  TMDB.poster(titulo, false).then((u) => {
     if (!u || arte.classList.contains('tem-img') || !arte.isConnected) return;
     const n = new Image();
     n.className = 'poster-img';
@@ -104,7 +118,7 @@ function _logoParaTmdb(img) {
 function trilhoHTML(t) {
   return `<section class="trilho">
     <h2 class="trilho-titulo">${escapar(t.titulo)}</h2>
-    <div class="trilho-fila">${t.itens.map(posterHTML).join('')}</div>
+    <div class="trilho-fila">${t.itens.map((it) => posterHTML(it)).join('')}</div>
   </section>`;
 }
 
@@ -112,7 +126,7 @@ function trilhoHTML(t) {
 function posterContHTML(item, prog) {
   const ehSerie = item.tipo === 'serie';
   const usarLogo = !!item.logo && !ehSerie;
-  const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}"` : '';
+  const lazy = !usarLogo ? ` data-tmdb="${escapar(item.titulo)}" data-serie="${ehSerie ? 1 : 0}"` : '';
   const img = usarLogo
     ? `<img class="poster-img" src="${escapar(item.logo)}" alt="" loading="lazy" onload="this.closest('.poster-arte').classList.add('tem-img')" onerror="this.remove()">`
     : '';
@@ -485,7 +499,7 @@ const _focoOcupado = () => !!document.querySelector('#detalhe-overlay, .player-m
 // logo → pôster do TMDB. Cobre TUDO (filmes E séries), não só séries.
 function _precarregarPoster(it) {
   if (it.tipo !== 'serie' && it.logo) { _aquece(it.logo); return Promise.resolve(); }
-  return TMDB.poster(it.titulo).then(_aquece);
+  return TMDB.poster(it.titulo, it.tipo === 'serie').then(_aquece);
 }
 
 // ── MODO TV (webOS/Tizen) — leve p/ pouca RAM ───────────────────────────────
@@ -617,14 +631,15 @@ function ligarPostersSerie(raiz) {
       if (!e.isIntersecting) continue;   // TV: quem descarrega é o LRU (tocar)
       if (EH_TV) tocar(el);
       if (+(el.dataset.tent || 0) >= MAX_TENT) { _obsPoster.unobserve(el); continue; }  // desistiu (3 falhas)
-      const cache = TMDB.posterCache(el.dataset.tmdb);   // pré-carregado → instantâneo
+      const ehSerie = el.dataset.serie === '1';
+      const cache = TMDB.posterCache(el.dataset.tmdb, ehSerie);   // pré-carregado → instantâneo
       if (cache !== null) { if (!EH_TV) _obsPoster.unobserve(el); aplicar(el, cache); continue; }
       if (!EH_TV) _obsPoster.unobserve(el);              // desktop: busca 1x; TV: mantém p/ virtualizar
       const obs = _obsPoster;
-      TMDB.poster(el.dataset.tmdb).then((u) => {
+      TMDB.poster(el.dataset.tmdb, ehSerie).then((u) => {
         aplicar(el, u);
         // Falha de REDE/rate-limit (não cacheada) → conta tentativa; re-tenta até 3x.
-        if (!u && obs === _obsPoster && el.isConnected && TMDB.posterCache(el.dataset.tmdb) === null) {
+        if (!u && obs === _obsPoster && el.isConnected && TMDB.posterCache(el.dataset.tmdb, ehSerie) === null) {
           el.dataset.tent = (+(el.dataset.tent || 0)) + 1;
           if (!EH_TV && +(el.dataset.tent || 0) < MAX_TENT) obs.observe(el);
         }
@@ -1455,9 +1470,11 @@ function aplicarResultados(dir, itens, q) {
   let anterior = null;
   for (const it of itens) {
     let el = existentes[it.id];
-    if (!el) { const tmp = document.createElement('div'); tmp.innerHTML = posterHTML(it, true); el = tmp.firstElementChild; }
+    let novo = false;
+    if (!el) { const tmp = document.createElement('div'); tmp.innerHTML = posterHTML(it, true); el = tmp.firstElementChild; novo = true; }
     const ref = anterior ? anterior.nextElementSibling : grid.firstElementChild;
     if (el !== ref) grid.insertBefore(el, ref);   // só move se preciso (não recria → não pisca)
+    if (novo) vigiarLogo(el);                     // capa da lista pendurou → TMDB depois de 5s
     anterior = el;
   }
   ligarPostersSerie(dir);   // observa os NOVOS (os já com imagem são ignorados)
@@ -1715,7 +1732,7 @@ function montarRec(cont, itens) {
     el.addEventListener('click', () => { fecharDetalhe(); abrirDetalhe(it); });
     cont.appendChild(el);
     const setImg = (u) => { if (!u) return; const im = new Image(); im.className = 'rec-img'; im.onload = () => { const a = el.querySelector('.rec-arte'); if (a) { a.classList.add('tem-img'); a.appendChild(im); } }; im.src = u; };
-    if (it.tipo !== 'serie' && it.logo) setImg(it.logo); else TMDB.poster(it.titulo).then(setImg);
+    if (it.tipo !== 'serie' && it.logo) setImg(it.logo); else TMDB.poster(it.titulo, it.tipo === 'serie').then(setImg);
   }
 }
 function montarElenco(cont, elenco) {
@@ -3006,20 +3023,63 @@ function mostrarLoading(msg) {
       <div class="ld-msg" id="ld-msg">${escapar(msg || t('Carregando…'))}</div>
     </div>`;
   el.style.display = 'grid';
+  _ldRearmar();
 }
-function loadingMsg(m) { const e = document.getElementById('ld-msg'); if (e) e.textContent = m; }
+function loadingMsg(m) { const e = document.getElementById('ld-msg'); if (e) e.textContent = m; _ldRearmar(); }
 // Progresso REAL (0..100): troca a barra indeterminada por uma determinada.
-// Só chamada durante o parse fatiado, que reporta o avanço de verdade.
-function loadingProgresso(pct) {
+// Chamada durante o download e o parse fatiado, que reportam o avanço de verdade.
+function loadingProgresso(pct, rotulo) {
   const b = document.querySelector('#loading .ld-barra');
   if (!b) return;
   b.classList.add('determinada');
   const s = b.querySelector('span');
   if (s) s.style.width = Math.max(0, Math.min(100, Math.round(pct))) + '%';
   const m = document.getElementById('ld-msg');
-  if (m) m.textContent = t('Organizando seus canais…') + ' ' + Math.round(pct) + '%';
+  if (m) m.textContent = (rotulo || t('Organizando seus canais…')) + ' ' + Math.round(pct) + '%';
+  _ldRearmar();
 }
-function esconderLoading() { const el = document.getElementById('loading'); if (el) el.remove(); }
+function esconderLoading() { clearTimeout(_ldWatch); _ldWatch = null; const el = document.getElementById('loading'); if (el) el.remove(); }
+
+// ── Saída de emergência da tela de loading ──────────────────────────────────
+// Sem isto, qualquer passo que pendure (rede, IndexedDB) deixa o app preso em
+// "Baixando sua lista…" PARA SEMPRE — e, como o webOS RESUME o app em vez de
+// reiniciá-lo, reabrir volta pra mesma tela travada: só reinstalar resolvia.
+// Depois de LD_TRAVADO_MS SEM nenhum avanço (msg/progresso), oferecemos sair.
+const LD_TRAVADO_MS = 75000;
+let _ldWatch = null;
+function _ldRearmar() {
+  if (!document.getElementById('loading')) return;
+  clearTimeout(_ldWatch);
+  _ldWatch = setTimeout(_ldTravado, LD_TRAVADO_MS);
+}
+function _ldTravado() {
+  const card = document.querySelector('#loading .ld-card');
+  if (!card || card.querySelector('.ld-saida')) return;
+  const div = document.createElement('div');
+  div.className = 'ld-saida';
+  div.innerHTML = `<div class="ld-saida-msg">${escapar(t('Está demorando mais que o normal.'))}</div>
+    <div class="ld-saida-btns">
+      <button class="btn btn-primario focusable" data-acao="ld-retry">${escapar(t('Tentar de novo'))}</button>
+      <button class="btn btn-secundario focusable" data-acao="ld-pular">${escapar(t('Continuar sem a lista'))}</button>
+    </div>`;
+  card.appendChild(div);
+  // Prende o D-pad nestes dois botões (.nav-modal é só marcador de escopo do
+  // SpatialNav, sem estilo) — senão o foco vaza pra sidebar atrás do loading.
+  const ld = document.getElementById('loading');
+  if (ld) { ld.classList.add('nav-modal'); ld._onVoltar = () => {}; }
+  div.querySelector('[data-acao="ld-retry"]').addEventListener('click', () => { try { location.reload(); } catch (_) {} });
+  div.querySelector('[data-acao="ld-pular"]').addEventListener('click', () => {
+    _bootDesistiu = true;            // o carregamento que ficou pendurado não aplica nada
+    esconderLoading();
+    // No boot, entra com catálogo vazio (app neutro). Se o app JÁ está aberto
+    // (ex.: "Recarregar" que travou), só dispensa o loading — não apaga o que
+    // já estava carregado.
+    if (!_appIniciado) { aplicarLista(_listaVazia()); abrirGatePerfis(entrarNoApp); }
+    toast(t('Sua lista não carregou. Tente Recarregar em Configurações.'));
+  });
+  try { SpatialNav.setFocus(div.querySelector('[data-acao="ld-retry"]')); } catch (_) {}
+}
+let _bootDesistiu = false;
 
 // Baixa + parseia a lista do dispositivo e aplica ao catálogo. O parse roda
 // após um frame (a barra continua animando). Retorna true se carregou.
@@ -3031,15 +3091,60 @@ const _heap = () => { try { return (performance.memory || {}).usedJSHeapSize || 
 const _heapLimite = () => { try { return (performance.memory || {}).jsHeapSizeLimit || 0; } catch (_) { return 0; } };
 const _mb = (b) => (b ? (b / 1048576).toFixed(1) + ' MB' : '—');
 
+// Download da lista com WATCHDOG. `fetch()` NÃO tem timeout: quando o servidor
+// do provedor aceita a conexão e não manda byte nenhum (comum na TV, em rede
+// ruim ou host fora do ar), a promise NUNCA resolve nem rejeita — o boot ficava
+// preso em "Baixando sua lista…" e, como o webOS RESUME o app em vez de
+// reiniciar, reabrir caía na mesma tela: só reinstalar destravava.
+// XHR resolve os dois problemas: dá progresso REAL (bytes) e permite abortar
+// quando o fluxo PARA de andar. Só abortamos por INATIVIDADE — download lento
+// mas progredindo continua (uma lista de 46 MB leva minutos em Wi-Fi fraco).
+const DL_PARADO_MS = 40000;        // 40s sem chegar 1 byte → desiste
+const DL_TETO_MS = 15 * 60000;     // teto absoluto de segurança
+function baixarTexto(url, onProgresso) {
+  return new Promise((resolve, reject) => {
+    let x;
+    try { x = new XMLHttpRequest(); } catch (e) { return reject(e); }
+    const inicio = Date.now();
+    let ultimo = inicio, vigia = null, motivo = '';
+    const parar = () => { clearInterval(vigia); vigia = null; };
+    vigia = setInterval(() => {
+      const parado = Date.now() - ultimo > DL_PARADO_MS;
+      const estourou = Date.now() - inicio > DL_TETO_MS;
+      if (!parado && !estourou) return;
+      parar();
+      // `motivo` antes do abort(): o abort dispara onabort, que rejeitaria com
+      // 'abortado' e esconderia a causa real no log/diagnóstico.
+      motivo = parado ? 'sem resposta do servidor' : 'tempo esgotado';
+      try { x.abort(); } catch (_) {}
+      reject(new Error(motivo));
+    }, 2000);
+    x.open('GET', url, true);
+    x.onprogress = (e) => {
+      ultimo = Date.now();
+      if (onProgresso) onProgresso(e.lengthComputable && e.total ? e.loaded / e.total : -1, e.loaded);
+    };
+    x.onload = () => {
+      parar();
+      if (x.status >= 200 && x.status < 300) resolve(x.responseText || '');
+      else reject(new Error('HTTP ' + x.status));
+    };
+    x.onerror = () => { parar(); reject(new Error('erro de rede')); };
+    x.onabort = () => { parar(); reject(new Error(motivo || 'abortado')); };
+    try { x.send(); } catch (e) { parar(); reject(e); }
+  });
+}
+
 async function carregarLista(url, forcar) {
   if (!url) return false;
+  _bootDesistiu = false;
   try {
     // 1) CACHE: catálogo já parseado (IndexedDB). Evita baixar 46 MB e gastar
     //    ~23s parseando de novo a cada boot. Só no 1º boot (ou quando a lista
     //    muda / "Recarregar") pagamos o custo.
     if (!forcar) {
       const cache = await CacheLista.ler(url, null);
-      if (cache) {
+      if (cache && !_bootDesistiu) {
         loadingMsg(t('Carregando catálogo salvo…'));
         await new Promise((r) => requestAnimationFrame(r));
         const _tc = Date.now();
@@ -3051,9 +3156,18 @@ async function carregarLista(url, forcar) {
       }
     }
     _diag.doCache = false;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const txt = await resp.text();
+    let _ultPint = 0;
+    const txt = await baixarTexto(url, (frac, bytes) => {
+      // Progresso do DOWNLOAD (a barra andando é o que prova que não travou).
+      // Throttle: o onprogress dispara dezenas de vezes por segundo numa lista
+      // de 46 MB e a TV não precisa repintar tudo isso.
+      const agora = Date.now();
+      if (agora - _ultPint < 250) return;
+      _ultPint = agora;
+      if (frac >= 0) loadingProgresso(frac * 100, t('Baixando sua lista…'));
+      else loadingMsg(t('Baixando sua lista…') + ' ' + (bytes / 1048576).toFixed(1) + ' MB');
+    });
+    if (_bootDesistiu) return false;   // o usuário já saiu do loading
     loadingMsg(t('Organizando seus canais…'));
     await new Promise((r) => requestAnimationFrame(r)); // deixa a UI respirar
     _diag.bytesLista = txt.length;
@@ -3063,14 +3177,18 @@ async function carregarLista(url, forcar) {
     const parsed = await Lista.parse(txt, (frac) => loadingProgresso(frac * 100));
     _diag.msParse = Date.now() - _t0;
     _diag.heapPico = _heap();
+    // Valida ANTES de gravar: um parse vazio (URL expirada devolvendo HTML de
+    // erro, p. ex.) ia parar no cache e todo boot seguinte abria o app vazio
+    // sem nem tentar baixar de novo.
+    if (!parsed.canais.length && !parsed.filmes.length && !parsed.series.length) {
+      throw new Error('lista vazia ou formato não reconhecido');
+    }
     // Guarda pro próximo boot (best-effort — falha de IDB não quebra nada). O
     // clone de 167k objetos custa alguns segundos na TV, então avisamos.
     loadingMsg(t('Salvando catálogo para abrir rápido…'));
     await new Promise((r) => requestAnimationFrame(r));
     try { await CacheLista.gravar(url, txt.length, parsed); } catch (_) {}
-    if (!parsed.canais.length && !parsed.filmes.length && !parsed.series.length) {
-      throw new Error('lista vazia ou formato não reconhecido');
-    }
+    if (_bootDesistiu) return false;
     aplicarLista(parsed);
     return true;
   } catch (e) {
@@ -3111,6 +3229,9 @@ async function iniciarApp() {
   if (reg && reg.lista_url) {
     mostrarLoading(t('Baixando sua lista…'));
     const ok = await carregarLista(reg.lista_url);
+    // O usuário já saiu do loading pela saída de emergência (carregamento travado)
+    // e o app já está aberto — não abrir o gate de perfis de novo por cima.
+    if (_bootDesistiu) return;
     // TV: NÃO segura a tela pré-carregando banner — eles carregam lazy (observer)
     // e o hero carrega no 1º foco. Dispensa o loading assim que a lista é parseada.
     if (ok && !EH_TV) { loadingMsg(t('Preparando seus banners…')); await precarregarBanners(); precarregarLogosCanais(); }

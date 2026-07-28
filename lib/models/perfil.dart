@@ -39,6 +39,14 @@ class Perfil {
   /// Ordenacao dos canais dentro de uma categoria ('padrao' | 'az').
   final String ordemCanais;
 
+  /// PIN de 4 digitos do controle dos pais. `null` = controle desligado.
+  /// Guardado em texto puro de proposito: e uma trava de conveniencia contra
+  /// crianca, nao um segredo — igual ao app de TV. Nunca sai do aparelho.
+  final String? pin;
+
+  /// Categorias (group-title da lista) bloqueadas para este perfil.
+  final List<String> categoriasBloqueadas;
+
   /// Quando o perfil foi criado.
   final DateTime criadoEm;
 
@@ -50,8 +58,13 @@ class Perfil {
     this.autoQualidade = false,
     this.ordemCategorias = 'popularidade',
     this.ordemCanais = 'padrao',
+    this.pin,
+    this.categoriasBloqueadas = const [],
     required this.criadoEm,
   });
+
+  /// `true` quando o controle dos pais esta configurado neste perfil.
+  bool get temControleParental => pin != null && pin!.isNotEmpty;
 
   /// Cria um perfil novo com id gerado. As preferencias herdam os valores
   /// passados (usado para o 1o perfil adotar as preferencias legadas do app).
@@ -82,6 +95,10 @@ class Perfil {
     bool? autoQualidade,
     String? ordemCategorias,
     String? ordemCanais,
+    List<String>? categoriasBloqueadas,
+    // `pin` usa sentinela porque null aqui significa "APAGAR o pin" (desligar
+    // o controle), e nao "nao mexer".
+    Object? pin = naoMexer,
   }) {
     return Perfil(
       id: id,
@@ -91,9 +108,15 @@ class Perfil {
       autoQualidade: autoQualidade ?? this.autoQualidade,
       ordemCategorias: ordemCategorias ?? this.ordemCategorias,
       ordemCanais: ordemCanais ?? this.ordemCanais,
+      pin: identical(pin, naoMexer) ? this.pin : pin as String?,
+      categoriasBloqueadas: categoriasBloqueadas ?? this.categoriasBloqueadas,
       criadoEm: criadoEm,
     );
   }
+
+  /// Sentinela de copyWith para campos onde `null` tem significado proprio
+  /// ("apagar") e nao pode ser confundido com "nao informado".
+  static const naoMexer = Object();
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -103,6 +126,9 @@ class Perfil {
         'autoQualidade': autoQualidade,
         'ordemCategorias': ordemCategorias,
         'ordemCanais': ordemCanais,
+        if (pin != null) 'pin': pin,
+        if (categoriasBloqueadas.isNotEmpty)
+          'categoriasBloqueadas': categoriasBloqueadas,
         'criadoEm': criadoEm.toIso8601String(),
       };
 
@@ -114,36 +140,18 @@ class Perfil {
         autoQualidade: map['autoQualidade'] as bool? ?? false,
         ordemCategorias: map['ordemCategorias'] as String? ?? 'popularidade',
         ordemCanais: map['ordemCanais'] as String? ?? 'padrao',
+        pin: map['pin'] as String?,
+        categoriasBloqueadas: [
+          ...?(map['categoriasBloqueadas'] as List?)?.whereType<String>(),
+        ],
         criadoEm: DateTime.tryParse(map['criadoEm'] as String? ?? '') ??
             DateTime.now(),
       );
 
-  /// Versao para a nuvem (Supabase) — snake_case das colunas da tabela `perfis`.
-  Map<String, dynamic> toCloudMap() => {
-        'id': id,
-        'nome': nome,
-        'icone': icone,
-        'idioma': idioma,
-        'auto_qualidade': autoQualidade,
-        'ordem_categorias': ordemCategorias,
-        'ordem_canais': ordemCanais,
-      };
-
-  factory Perfil.fromCloudMap(Map<String, dynamic> map) => Perfil(
-        id: map['id'] as String,
-        nome: map['nome'] as String? ?? 'Perfil',
-        icone: map['icone'] as String? ?? 'aurora',
-        idioma: map['idioma'] as String?,
-        autoQualidade: map['auto_qualidade'] as bool? ?? false,
-        ordemCategorias: map['ordem_categorias'] as String? ?? 'popularidade',
-        ordemCanais: map['ordem_canais'] as String? ?? 'padrao',
-        criadoEm: DateTime.tryParse(map['criado_em'] as String? ?? '') ??
-            DateTime.now(),
-      );
 }
 
-/// Gera um UUID v4 sem depender de pacote externo. Suficiente para chavear
-/// linhas no Supabase (coluna UUID) e boxes locais do Hive.
+/// Gera um UUID v4 sem depender de pacote externo. Chaveia o perfil e as boxes
+/// locais do Hive.
 String _gerarUuid() {
   final rnd = Random();
   final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));

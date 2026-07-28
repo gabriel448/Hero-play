@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/perfil.dart';
+import '../services/controle_parental.dart';
 import '../state/iptv_provider.dart';
 import '../state/perfil_provider.dart';
 import '../theme/app_theme.dart';
@@ -35,6 +36,8 @@ class _TelaPerfisState extends State<TelaPerfis> {
     final perfis = context.read<PerfilProvider>();
     final iptv = context.read<IptvProvider>();
     await perfis.prepararPerfil(p);
+    // O que o adulto liberou digitando o PIN nao vale para o proximo perfil.
+    ControleParental.limparSessao();
     iptv.recarregarDadosDoPerfil();
     perfis.marcarEntrada(origem);
     perfis.confirmar(); // app.dart troca para a home, que anima a entrada.

@@ -1,16 +1,15 @@
 /* ============================================================================
    Hero Play — chrome compartilhado (header + footer + nav) + i18n (PT/EN) +
-   fundo animado. Injetado em todas as páginas públicas. Mantém DRY e torna a
-   ÁREA BETA (contas mobile/desktop) DESCARTÁVEL: BETA_ATIVA = false remove o
-   acesso (ou apague a pasta beta/ e este bloco).
+   fundo animado. Injetado em todas as páginas públicas. Mantém DRY.
+   A antiga ÁREA BETA (contas por e-mail no mobile/desktop) saiu do site — o app
+   não tem mais login, a identidade é o próprio aparelho. A pasta `beta/`
+   continua no repo, mas sem nenhum link para ela.
    ============================================================================ */
 (function () {
-  const BETA_ATIVA = true;
-  const BETA_URL = 'beta/index.html';
-
   const NAV = [
     { href: 'index.html',     k: 'nav.inicio' },
     { href: 'ativacao.html',  k: 'nav.ativacao' },
+    { href: 'download.html',  k: 'nav.download' },
     { href: 'upload.html',    k: 'nav.upload' },
     { href: 'gerenciar.html', k: 'nav.gerenciar' },
     { href: 'contato.html',   k: 'nav.contato' },
@@ -20,8 +19,8 @@
   const I18N = {
     pt: {
       'nav.inicio': 'Início', 'nav.ativacao': 'Ativação', 'nav.upload': 'Upload de Playlist',
-      'nav.gerenciar': 'Gerenciar', 'nav.contato': 'Contato',
-      'cta.ativar': 'Ativar', 'beta': 'Beta · App',
+      'nav.gerenciar': 'Gerenciar', 'nav.contato': 'Contato', 'nav.download': 'Download',
+      'cta.ativar': 'Ativar',
       'footer.blurb': 'O Hero Play é um reprodutor de mídia: ele toca as playlists M3U/M3U8 que você já possui. Não distribuímos nem vendemos canais, filmes ou séries — a licença cobre apenas o uso do aplicativo para organizar e reproduzir as suas listas.',
       'footer.nav': 'Navegação', 'footer.contato': 'Contato', 'footer.priv': 'Privacidade',
       'footer.termos': 'Termos', 'footer.rights': '© {ano} Hero Play — Todos os direitos reservados',
@@ -86,11 +85,31 @@
       'ct.nome': 'Nome completo', 'ct.email': 'E-mail', 'ct.assunto': 'Assunto', 'ct.msg': 'Mensagem',
       'ct.opt1': 'Ativação / pagamento', 'ct.opt2': 'Adicionar / gerenciar playlist', 'ct.opt3': 'Problema técnico', 'ct.opt4': 'Outro',
       'ct.enviar': 'Enviar mensagem', 'ct.ok': 'Mensagem pronta para envio. Abrindo seu app de email…',
+      'cta.b0': 'Baixar o app',
+      // Download
+      'dl.badge': 'Aplicativo',
+      'dl.h1': 'Baixe o Hero Play',
+      'dl.sub': 'Instale no celular ou no computador. A mesma conta de aparelho, a mesma lista, em todas as telas.',
+      'dl.and.t': 'Android', 'dl.and.d': 'Celular e tablet · Android 6.0 ou superior',
+      'dl.and.b': 'Baixar APK',
+      'dl.win.t': 'Windows', 'dl.win.d': 'Instalador para PC · Windows 10 ou superior',
+      'dl.win.b': 'Baixar instalador',
+      'dl.tv.t': 'Smart TV', 'dl.tv.d': 'Samsung, LG e Android TV — fale com o suporte para receber o arquivo do seu modelo.',
+      'dl.tv.b': 'Falar com o suporte',
+      'dl.versao': 'Versão',
+      'dl.comot': 'Como instalar',
+      'dl.and.p1': 'Baixe o APK e abra o arquivo no aparelho.',
+      'dl.and.p2': 'O Android vai pedir permissão para instalar de fora da loja — autorize apenas o Hero Play.',
+      'dl.and.p3': 'Abra o app: ele mostra o ID (MAC) e a Chave do aparelho para você ativar.',
+      'dl.win.p1': 'Baixe o instalador e execute.',
+      'dl.win.p2': 'O Windows pode avisar que o autor é desconhecido — clique em "Mais informações" e depois em "Executar assim mesmo".',
+      'dl.win.p3': 'O app abre mostrando o ID (MAC) e a Chave para ativação.',
+      'dl.nota': 'Os arquivos ficam hospedados no GitHub Releases — o download vem direto de lá, sempre na última versão publicada.',
     },
     en: {
       'nav.inicio': 'Home', 'nav.ativacao': 'Activation', 'nav.upload': 'Upload Playlist',
-      'nav.gerenciar': 'Manage', 'nav.contato': 'Contact',
-      'cta.ativar': 'Activate', 'beta': 'Beta · App',
+      'nav.gerenciar': 'Manage', 'nav.contato': 'Contact', 'nav.download': 'Download',
+      'cta.ativar': 'Activate',
       'footer.blurb': 'Hero Play is a media player: it plays the M3U/M3U8 playlists you already own. We do not distribute or sell channels, movies or series — the license only covers the use of the app to organize and play your own lists.',
       'footer.nav': 'Navigation', 'footer.contato': 'Contact', 'footer.priv': 'Privacy',
       'footer.termos': 'Terms', 'footer.rights': '© {ano} Hero Play — All rights reserved',
@@ -154,6 +173,26 @@
       'ct.nome': 'Full name', 'ct.email': 'Email', 'ct.assunto': 'Subject', 'ct.msg': 'Message',
       'ct.opt1': 'Activation / payment', 'ct.opt2': 'Add / manage playlist', 'ct.opt3': 'Technical issue', 'ct.opt4': 'Other',
       'ct.enviar': 'Send message', 'ct.ok': 'Message ready to send. Opening your email app…',
+      'cta.b0': 'Download the app',
+      // Download
+      'dl.badge': 'App',
+      'dl.h1': 'Download Hero Play',
+      'dl.sub': 'Install it on your phone or computer. Same device account, same playlist, on every screen.',
+      'dl.and.t': 'Android', 'dl.and.d': 'Phone and tablet · Android 6.0 or newer',
+      'dl.and.b': 'Download APK',
+      'dl.win.t': 'Windows', 'dl.win.d': 'PC installer · Windows 10 or newer',
+      'dl.win.b': 'Download installer',
+      'dl.tv.t': 'Smart TV', 'dl.tv.d': 'Samsung, LG and Android TV — contact support to get the file for your model.',
+      'dl.tv.b': 'Contact support',
+      'dl.versao': 'Version',
+      'dl.comot': 'How to install',
+      'dl.and.p1': 'Download the APK and open the file on the device.',
+      'dl.and.p2': 'Android will ask for permission to install from outside the store — allow it for Hero Play only.',
+      'dl.and.p3': 'Open the app: it shows the device ID (MAC) and Key for activation.',
+      'dl.win.p1': 'Download the installer and run it.',
+      'dl.win.p2': 'Windows may warn about an unknown publisher — click "More info" and then "Run anyway".',
+      'dl.win.p3': 'The app opens showing the ID (MAC) and Key for activation.',
+      'dl.nota': 'Files are hosted on GitHub Releases — the download comes straight from there, always the latest published version.',
     },
   };
 
@@ -185,9 +224,6 @@
       <span class="brand-text"><b>Hero</b> Play</span>
     </a>`;
   const ICO_SETA = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>';
-  const btnBeta = BETA_ATIVA
-    ? `<a class="btn-beta" href="${BETA_URL}"><span class="dot"></span><span data-i18n="beta">Beta · App</span></a>` : '';
-
   // ── Header ──────────────────────────────────────────────────────────────
   const header = document.getElementById('site-header');
   if (header) {
@@ -199,7 +235,6 @@
           ${NAV.map((n) => `<a href="${n.href}" class="${ativo(n.href).trim()}" data-i18n="${n.k}">${n.k}</a>`).join('')}
         </nav>
         <div class="header-acoes">
-          ${btnBeta}
           <a class="btn btn-primary" href="ativacao.html" style="padding:9px 18px;font-size:12px"><span data-i18n="cta.ativar">Ativar</span> ${ICO_SETA}</a>
           <button class="menu-btn" id="menu-abrir" aria-label="Menu">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/></svg>
@@ -215,8 +250,7 @@
   menu.className = 'menu-mob';
   menu.innerHTML = `
     <button class="fechar" id="menu-fechar" aria-label="Fechar"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-    ${NAV.map((n) => `<a href="${n.href}" class="${ativo(n.href).trim()}" data-i18n="${n.k}">${n.k}</a>`).join('')}
-    ${BETA_ATIVA ? `<a href="${BETA_URL}" data-i18n="beta">Beta · App</a>` : ''}`;
+    ${NAV.map((n) => `<a href="${n.href}" class="${ativo(n.href).trim()}" data-i18n="${n.k}">${n.k}</a>`).join('')}`;
   document.body.appendChild(menu);
   const ab = document.getElementById('menu-abrir'); if (ab) ab.addEventListener('click', () => menu.classList.add('show'));
   const fe = document.getElementById('menu-fechar'); if (fe) fe.addEventListener('click', () => menu.classList.remove('show'));

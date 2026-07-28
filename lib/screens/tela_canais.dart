@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/categoria_personalizada.dart';
 import '../services/agrupador_canais.dart';
+import '../services/controle_parental.dart';
 import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
 import '../state/preferencias_provider.dart';
@@ -1293,8 +1294,13 @@ class _LayoutDesktopCanaisState extends State<_LayoutDesktopCanais> {
 
   /// Tap em canal no desktop: ao vivo vai para o player embutido; filme/VOD
   /// segue empilhando TelaPlayer (nao faz sentido embutir filmes).
-  void _onCanalTap(Canal canal) {
+  Future<void> _onCanalTap(Canal canal) async {
     final provider = context.read<IptvProvider>();
+    // Controle dos pais: o player EMBUTIDO do desktop nao passa pela
+    // TelaPlayer, entao o bloqueio precisa ser checado aqui tambem — senao a
+    // restricao valeria no phone/tablet e nao no desktop.
+    if (!await ControleParental.liberar(context, canal.grupo)) return;
+    if (!mounted) return;
     provider.registrarVisualizacao(canal);
     if (canal.tipo == TipoCanal.aoVivo) {
       provider.selecionarCanalDesktop(canal);

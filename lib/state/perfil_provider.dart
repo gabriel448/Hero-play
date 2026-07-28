@@ -4,9 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import '../models/perfil.dart';
 import '../services/armazenamento.dart';
-import '../services/servico_conta.dart';
 
-/// Estado dos perfis de uso. Cada conta (ou o modo local) tem ate
+/// Estado dos perfis de uso. Cada aparelho tem ate
 /// [Perfil.maxPerfis] perfis, cada um com config e biblioteca proprias.
 ///
 /// Fluxo: ao abrir o app, [perfilConfirmado] e `false` — o `app.dart` mostra a
@@ -14,13 +13,12 @@ import '../services/servico_conta.dart';
 /// [selecionar], as boxes por perfil do [Armazenamento] sao apontadas para ele
 /// e [perfilConfirmado] vira `true`, liberando a home.
 ///
-/// As acoes de perfil sao espelhadas no Supabase de forma best-effort quando ha
-/// conta logada (falha de rede nao quebra o fluxo local).
+/// Tudo e LOCAL (Hive): nao ha conta nem sincronizacao na nuvem — a identidade
+/// do usuario e o proprio aparelho (ver `services/dispositivo.dart`).
 class PerfilProvider extends ChangeNotifier {
   final Armazenamento _armazenamento;
-  final ServicoConta? _conta;
 
-  PerfilProvider(this._armazenamento, this._conta);
+  PerfilProvider(this._armazenamento);
 
   List<Perfil> _perfis = [];
   Perfil? _ativo;
@@ -99,7 +97,6 @@ class PerfilProvider extends ChangeNotifier {
     }
     _perfis = _armazenamento.carregarPerfis();
     notifyListeners();
-    _espelhar(() => _conta?.salvarPerfil(p));
     return p;
   }
 
@@ -118,6 +115,9 @@ class PerfilProvider extends ChangeNotifier {
     bool? autoQualidade,
     String? ordemCategorias,
     String? ordemCanais,
+    List<String>? categoriasBloqueadas,
+    // Sentinela: null aqui apagaria o PIN sem querer. Ver Perfil.copyWith.
+    Object? pin = Perfil.naoMexer,
   }) async {
     final ativo = _ativo;
     if (ativo == null) return;
@@ -126,6 +126,8 @@ class PerfilProvider extends ChangeNotifier {
       autoQualidade: autoQualidade,
       ordemCategorias: ordemCategorias,
       ordemCanais: ordemCanais,
+      categoriasBloqueadas: categoriasBloqueadas,
+      pin: pin,
     );
     _ativo = atualizado;
     await _persistir(atualizado);
@@ -136,7 +138,6 @@ class PerfilProvider extends ChangeNotifier {
     _perfis = _armazenamento.carregarPerfis();
     if (_ativo?.id == p.id) _ativo = p;
     notifyListeners();
-    _espelhar(() => _conta?.salvarPerfil(p));
   }
 
   /// Remove um perfil e toda a sua biblioteca pessoal.
@@ -148,7 +149,6 @@ class PerfilProvider extends ChangeNotifier {
     }
     _perfis = _armazenamento.carregarPerfis();
     notifyListeners();
-    _espelhar(() => _conta?.removerPerfil(p.id));
   }
 
   /// Volta para a tela "Quem esta assistindo" sem apagar nada.
@@ -157,48 +157,12 @@ class PerfilProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sincroniza os perfis com a nuvem apos o login. A nuvem e a fonte da
-  /// verdade: traz os perfis da conta e empurra os criados offline que ainda
-  /// nao existem la. Best-effort — falha de rede nao quebra o app.
-  Future<void> sincronizarDoSupabase() async {
-    final conta = _conta;
-    debugPrint('[PSYNC] inicio logado=${conta?.estaLogado}');
-    if (conta == null || !conta.estaLogado) return;
-    try {
-      final remotos =
-          await conta.listarPerfis().timeout(const Duration(seconds: 20));
-      debugPrint('[PSYNC] listarPerfis retornou ${remotos.length}');
-      final idsRemotos = {for (final r in remotos) r.id};
-      final locais = _armazenamento.carregarPerfis();
-
-      // Traz/atualiza os da nuvem (fonte da verdade).
-      for (final r in remotos) {
-        await _armazenamento.salvarPerfil(r);
-      }
-      // Empurra os criados offline que ainda nao existem na nuvem.
-      for (final l in locais.where((l) => !idsRemotos.contains(l.id))) {
-        await conta.salvarPerfil(l);
-      }
-      _perfis = _armazenamento.carregarPerfis();
-      notifyListeners();
-    } catch (e) {
-      // best-effort
-      debugPrint('[PSYNC] ERRO: $e');
-    }
-  }
-
-  /// Apaga perfis e bibliotecas locais (logout — nao mistura contas).
+  /// Apaga perfis e bibliotecas locais.
   Future<void> limparLocais() async {
     await _armazenamento.limparPerfis();
     _perfis = [];
     _ativo = null;
     _confirmado = false;
     notifyListeners();
-  }
-
-  void _espelhar(Future<void>? Function() acao) {
-    final conta = _conta;
-    if (conta == null || !conta.estaLogado) return;
-    acao()?.catchError((_) {/* silencioso */});
   }
 }

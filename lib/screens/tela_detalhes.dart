@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/canal.dart';
 import '../models/serie.dart';
+import '../services/controle_parental.dart';
 import '../services/tmdb_service.dart';
 import '../state/iptv_provider.dart';
 import '../state/preferencias_provider.dart';
@@ -70,7 +71,7 @@ List<Canal> _selecionarRelacionados(List<Canal> canais, Canal filme) {
 }
 
 class _TelaDetalhesState extends State<TelaDetalhes> {
-  late final Future<TmdbInfo> _infoFuture;
+  late Future<TmdbInfo> _infoFuture;
   Future<String?>? _posterSerieFuture;
   // Filmes relacionados (mesmo grupo/tag) — calculado async para não atrasar
   // a abertura da tela (FutureBuilder mostra skeleton enquanto seleciona).
@@ -83,9 +84,40 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
 
   String get _nome => widget.ehSerie ? widget.serie!.nome : widget.filme!.nome;
 
+  String get _grupo =>
+      widget.ehSerie ? widget.serie!.grupo : widget.filme!.grupo;
+
+  /// `true` enquanto o controle dos pais nao liberou este titulo — a tela fica
+  /// vazia (sem capa, sem sinopse) ate o PIN ser aceito.
+  bool _bloqueadoPorPin = false;
+
   @override
   void initState() {
     super.initState();
+
+    // Controle dos pais: nem os metadados sao carregados antes do PIN.
+    if (ControleParental.exigePin(context, _grupo)) {
+      _bloqueadoPorPin = true;
+      _infoFuture = Future.value(TmdbInfo.vazio);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _pedirLiberacaoParental());
+      return;
+    }
+    _carregarMetadados();
+  }
+
+  Future<void> _pedirLiberacaoParental() async {
+    final liberou = await ControleParental.liberar(context, _grupo);
+    if (!mounted) return;
+    if (!liberou) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    setState(_carregarMetadados);
+  }
+
+  void _carregarMetadados() {
+    _bloqueadoPorPin = false;
     final tmdb = context.read<TmdbService>();
     final idioma = context.read<PreferenciasProvider>().idiomaEfetivo.codigo;
 
@@ -95,7 +127,7 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
       idioma: idioma,
     );
     if (widget.ehSerie) {
-      _posterSerieFuture = tmdb.posterSerie(widget.serie!.nome);
+      _posterSerieFuture = tmdb.poster(widget.serie!.nome);
       _agrup = _agruparEpisodios(widget.serie!);
       _temporadaSelecionada =
           _agrup!.temporadas.isNotEmpty ? _agrup!.temporadas.first : null;
@@ -140,6 +172,10 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
 
   @override
   Widget build(BuildContext context) {
+    if (_bloqueadoPorPin) {
+      // Nada do titulo aparece enquanto o PIN nao for aceito.
+      return const Scaffold(body: SizedBox());
+    }
     return Scaffold(
       // Fundo blur do banner sobe atrás da appbar transparente (até o "voltar").
       extendBodyBehindAppBar: true,

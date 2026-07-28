@@ -13,6 +13,7 @@ import '../state/perfil_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/chave_conteudo.dart';
 import '../utils/layout.dart';
+import '../utils/recencia.dart';
 import '../utils/qualidade.dart';
 import '../widgets/abertura_secao.dart';
 import '../widgets/animado_entrada.dart';
@@ -67,8 +68,13 @@ const double _kScrollStep = (_kPosterWidth + AppSpacing.sm) * 3;
     final ag = Serie.agrupar(categorias[cat]!);
     final items = tipo == TipoVod.filmes ? ag.filmes : ag.series;
     if (items.isEmpty) continue;
-    final lista = <Object>[...items]
-      ..sort((a, b) => nomeItem(a).compareTo(nomeItem(b)));
+    // Lançamentos / Em cartaz / Estreias: ordem de CHEGADA (mais novo primeiro),
+    // não alfabética — numa fila de lançamentos o que interessa é o que acabou
+    // de entrar no catálogo, e o A-Z escondia isso no meio da lista.
+    final lista = _ehCategoriaLancamento(cat)
+        ? ordenarPorRecencia(<Object>[...items])
+        : (<Object>[...items]
+          ..sort((a, b) => nomeItem(a).compareTo(nomeItem(b))));
     conteudo[cat] = lista;
 
     for (final item in lista) {
@@ -112,7 +118,7 @@ bool _ehCategoriaLancamento(String nome) {
   return _kwLancamento.any((k) => n.contains(k));
 }
 
-enum _OrdemCategoria { az, anoDesc, anoAsc, duracaoOuEp }
+enum _OrdemCategoria { recentes, az, anoDesc, anoAsc, duracaoOuEp }
 
 // Extrai o ano de lancamento do titulo (ex: "Avatar (2009)" -> 2009).
 // Prefere o ultimo ano encontrado para evitar falso positivo em titulos
@@ -148,6 +154,9 @@ class _VodCacheEntry {
 int? _vodCacheIdentidade;
 final Map<TipoVod, _VodCacheEntry> _vodCache = {};
 final Map<TipoVod, List<Object>> _destaqueCache = {};
+// "Recomendacoes pra voce": itens do catalogo que batem com os generos TMDB do
+// que o PERFIL assistiu. Cache junto com o destaque (mesma invalidacao).
+final Map<TipoVod, List<Object>> _recomendadosCache = {};
 // ID do perfil ativo quando o cache de destaque foi preenchido — invalida se trocar.
 String? _destaquePerfilId;
 
@@ -284,6 +293,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
     // entao a identidade do mapa categorias nao muda na troca de perfil).
     if (_destaquePerfilId != perfilId) {
       _destaqueCache.clear();
+      _recomendadosCache.clear();
       _destaquePerfilId = perfilId;
     }
 
@@ -303,6 +313,17 @@ class _TelaFilmesState extends State<TelaFilmes> {
           _todosConteudos, tmdb, idioma, gostos);
     }
     if (mounted) _destaqueCache[widget.tipo] = itens;
+
+    // Recomendacoes usam os MESMOS gostos ja calculados — nenhuma consulta
+    // extra ao TMDB alem da pontuacao dos candidatos.
+    final recomendados = await _selecionarRecomendadosAsync(
+      _todosConteudos,
+      tmdb,
+      idioma,
+      gostos,
+      ehSerie: widget.tipo == TipoVod.series,
+    );
+    if (mounted) _recomendadosCache[widget.tipo] = recomendados;
   }
 
   /// Pre-carrega (TMDB + cache de imagem) as capas das primeiras series na
@@ -344,7 +365,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
       await Future.wait(alvo.map((s) async {
         try {
           final url = await tmdb
-              .posterSerie(s.nome)
+              .poster(s.nome)
               .timeout(const Duration(seconds: 4));
           final fonte = (url != null && url.isNotEmpty)
               ? url
@@ -370,16 +391,29 @@ class _TelaFilmesState extends State<TelaFilmes> {
     super.dispose();
   }
 
+  /// Filtra por titulo/categoria E TAMBEM pelos nomes que o TMDB ja conhece
+  /// deste item (traduzido e original) — assim "Demon Slayer" acha a lista que
+  /// so tem "Kimetsu no Yaiba", e vice-versa. So usa o que ja esta em cache
+  /// (nada de rede durante a digitacao); o cache agora sobrevive ao fechar o
+  /// app, entao na pratica os titulos ja vistos casam.
   List<Object> _filtrar(String busca) {
-    final q = busca.toLowerCase();
-    return _todosConteudos.where((item) {
-      if (item is Canal) {
-        return item.nome.toLowerCase().contains(q) ||
-            item.grupo.toLowerCase().contains(q);
+    final q = Serie.chaveNome(busca);
+    if (q.isEmpty) return _todosConteudos;
+    final tmdb = context.read<TmdbService>();
+
+    bool casa(String nome, String grupo, bool ehSerie) {
+      if (Serie.chaveNome(nome).contains(q)) return true;
+      if (Serie.chaveNome(grupo).contains(q)) return true;
+      for (final apelido in tmdb.apelidosEmCache(nome, ehSerie: ehSerie)) {
+        if (Serie.chaveNome(apelido).contains(q)) return true;
       }
+      return false;
+    }
+
+    return _todosConteudos.where((item) {
+      if (item is Canal) return casa(item.nome, item.grupo, false);
       final s = item as Serie;
-      return s.nome.toLowerCase().contains(q) ||
-          s.grupo.toLowerCase().contains(q);
+      return casa(s.nome, s.grupo, true);
     }).toList();
   }
 
@@ -514,6 +548,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
                     seriesPorUrlEpisodio: _seriesPorUrlEpisodio,
                     progressos: provider.progressos,
                     minhaListaItens: minhaListaItens,
+                    recomendados: _recomendadosCache[widget.tipo] ?? const [],
                     todosItens: _todosConteudos,
                     tipo: widget.tipo,
                     onTap: (item, [tag]) => _navegar(context, item, tag),
@@ -616,7 +651,7 @@ Future<List<Object>> _selecionarSeriesDestaqueAsync(
     if (comBanner.length >= 15) break;
     try {
       final url =
-          await tmdb.posterSerie(s.nome).timeout(const Duration(seconds: 3));
+          await tmdb.poster(s.nome).timeout(const Duration(seconds: 3));
       if (url != null && url.isNotEmpty) comBanner.add(s);
     } catch (_) {}
   }
@@ -638,6 +673,45 @@ Future<List<Object>> _selecionarSeriesDestaqueAsync(
   final indices = List.generate(comBanner.length, (i) => i)
     ..sort((a, b) => pontos[b].compareTo(pontos[a]));
   return indices.take(n).map((i) => comBanner[i]).toList();
+}
+
+/// "Recomendacoes pra voce": pontua uma amostra do catalogo pelos generos TMDB
+/// que o perfil mais assistiu. Sem historico, nao ha recomendacao (a fila
+/// simplesmente nao aparece) — melhor do que fingir personalizacao.
+///
+/// Porte de `Biblioteca.recomendacoes` do app de TV. So consulta o TMDB de uma
+/// AMOSTRA (o catalogo tem dezenas de milhares de itens) e o cache agora e
+/// persistido em disco, entao a partir da 2a sessao isto sai quase de graca.
+Future<List<Object>> _selecionarRecomendadosAsync(
+  List<Object> todos,
+  TmdbService tmdb,
+  String idioma,
+  List<String> gostos, {
+  required bool ehSerie,
+  int n = 18,
+}) async {
+  if (gostos.isEmpty) return const [];
+  final candidatos = (List.of(todos)..shuffle()).take(60).toList();
+  final gostoSet = gostos.toSet();
+  final pontos = List<int>.filled(candidatos.length, 0);
+
+  await Future.wait(List.generate(candidatos.length, (i) async {
+    final item = candidatos[i];
+    final nome = item is Canal ? item.nome : (item as Serie).nome;
+    try {
+      final info = await tmdb
+          .info(nome: nome, ehSerie: ehSerie, idioma: idioma)
+          .timeout(const Duration(seconds: 5));
+      pontos[i] = info.generos.where(gostoSet.contains).length;
+    } catch (_) {}
+  }));
+
+  final indices = List.generate(candidatos.length, (i) => i)
+    ..sort((a, b) => pontos[b].compareTo(pontos[a]));
+  return [
+    for (final i in indices)
+      if (pontos[i] > 0) candidatos[i],
+  ].take(n).toList();
 }
 
 class _SecaoDestaque extends StatefulWidget {
@@ -712,7 +786,7 @@ class _SecaoDestaqueState extends State<_SecaoDestaque>
         } else {
           try {
             _posterUrls[i] = await tmdb
-                .posterSerie((item as Serie).nome)
+                .poster((item as Serie).nome)
                 .timeout(const Duration(seconds: 4));
           } catch (_) {
             _posterUrls[i] = null;
@@ -1295,6 +1369,7 @@ class _BodyComCarrosseis extends StatelessWidget {
   final Map<String, Serie> seriesPorUrlEpisodio;
   final List<ProgressoCanal> progressos;
   final List<Object> minhaListaItens;
+  final List<Object> recomendados;
   final List<Object> todosItens;
   final TipoVod tipo;
   final AoTocarItem onTap;
@@ -1306,6 +1381,7 @@ class _BodyComCarrosseis extends StatelessWidget {
     required this.seriesPorUrlEpisodio,
     required this.progressos,
     required this.minhaListaItens,
+    required this.recomendados,
     required this.todosItens,
     required this.tipo,
     required this.onTap,
@@ -1333,6 +1409,7 @@ class _BodyComCarrosseis extends StatelessWidget {
     }
 
     final temAndamento = continuar.isNotEmpty;
+    final temRecomendados = recomendados.isNotEmpty;
     final temMinhaLista = minhaListaItens.isNotEmpty;
     final nomeTodos = tipo == TipoVod.series ? 'Todas' : 'Todos';
     // Todos ordenados alfabeticamente para o carrossel fixo do topo.
@@ -1348,9 +1425,11 @@ class _BodyComCarrosseis extends StatelessWidget {
       ...nomes.where((n) => !_ehCategoriaLancamento(n)),
     ];
 
-    // Carrosseis especiais no topo: Continuar → Minha lista → Todos/Todas.
+    // Carrosseis especiais no topo, nesta ordem:
+    // Continuar → Recomendacoes → Minha lista → Todos/Todas.
     int especialCount = 0;
     if (temAndamento) especialCount++;
+    if (temRecomendados) especialCount++;
     if (temMinhaLista) especialCount++;
     especialCount++; // "Todos"/"Todas" sempre presente
 
@@ -1372,9 +1451,17 @@ class _BodyComCarrosseis extends StatelessWidget {
         }
         final j = i - 1; // índice real nos carrosseis
         final Widget linha;
+        final posRecomendados = temAndamento ? 1 : 0;
+        final posMinhaLista = posRecomendados + (temRecomendados ? 1 : 0);
         if (temAndamento && j == 0) {
           linha = _CarrosselContinuar(itens: continuar, onTap: onTap);
-        } else if (temMinhaLista && j == (temAndamento ? 1 : 0)) {
+        } else if (temRecomendados && j == posRecomendados) {
+          linha = _CarrosselCategoria(
+            nomeCategoria: 'Recomendações pra você',
+            itens: recomendados,
+            onTap: onTap,
+          );
+        } else if (temMinhaLista && j == posMinhaLista) {
           linha = _CarrosselCategoria(
             nomeCategoria: 'Minha lista',
             itens: minhaListaItens,
@@ -1916,7 +2003,7 @@ class _PosterSerieState extends State<_PosterSerie> {
   void initState() {
     super.initState();
     _tmdbFuture =
-        context.read<TmdbService>().posterSerie(widget.serie.nome);
+        context.read<TmdbService>().poster(widget.serie.nome);
   }
 
   @override
@@ -2089,11 +2176,16 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
   late final int _numFilmes;
   late final int _numSeries;
   late final bool _ehSeries;
-  _OrdemCategoria _ordem = _OrdemCategoria.az;
+  late _OrdemCategoria _ordem;
 
   @override
   void initState() {
     super.initState();
+    // Em categoria de lançamento a ordem padrão é a de chegada; nas demais,
+    // A-Z (que é o que faz sentido para procurar um título específico).
+    _ordem = _ehCategoriaLancamento(widget.nomeCategoria)
+        ? _OrdemCategoria.recentes
+        : _OrdemCategoria.az;
     _filtrados = widget.itens;
     _numFilmes = widget.itens.whereType<Canal>().length;
     _numSeries = widget.itens.whereType<Serie>().length;
@@ -2123,6 +2215,8 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
   List<Object> _ordenar(List<Object> lista) {
     final copia = [...lista];
     switch (_ordem) {
+      case _OrdemCategoria.recentes:
+        return ordenarPorRecencia(copia);
       case _OrdemCategoria.az:
         copia.sort((a, b) =>
             _normalizar(_nomeItem(a)).compareTo(_normalizar(_nomeItem(b))));
@@ -2189,12 +2283,14 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
 
   String get _labelOrdem {
     switch (_ordem) {
+      case _OrdemCategoria.recentes:
+        return 'Adicionados por último';
       case _OrdemCategoria.az:
         return 'A-Z';
       case _OrdemCategoria.anoDesc:
-        return 'Mais recentes';
+        return 'Ano (mais novo)';
       case _OrdemCategoria.anoAsc:
-        return 'Mais antigos';
+        return 'Ano (mais antigo)';
       case _OrdemCategoria.duracaoOuEp:
         return _ehSeries ? 'Mais episódios' : 'Duração';
     }
@@ -2275,18 +2371,23 @@ class _TelaCategoriaFilmesState extends State<_TelaCategoriaFilmes> {
             ),
             itemBuilder: (_) => [
               _itemOrdem(
+                _OrdemCategoria.recentes,
+                'Adicionados por último',
+                Icons.new_releases_rounded,
+              ),
+              _itemOrdem(
                 _OrdemCategoria.az,
                 'A-Z',
                 Icons.sort_by_alpha_rounded,
               ),
               _itemOrdem(
                 _OrdemCategoria.anoDesc,
-                'Mais recentes',
+                'Ano (mais novo)',
                 Icons.calendar_today_rounded,
               ),
               _itemOrdem(
                 _OrdemCategoria.anoAsc,
-                'Mais antigos',
+                'Ano (mais antigo)',
                 Icons.history_rounded,
               ),
               _itemOrdem(

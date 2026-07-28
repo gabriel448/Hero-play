@@ -33,6 +33,7 @@ class Armazenamento {
   static const _nomeBoxEpg = 'epg';
   static const _nomeBoxMinhaLista = 'minha_lista';
   static const _nomeBoxPerfis = 'perfis';
+  static const _nomeBoxTmdb = 'tmdb_cache';
 
   /// Bases das boxes que sao isoladas por perfil.
   static const _basesPorPerfil = [
@@ -51,6 +52,7 @@ class Armazenamento {
   late Box _boxPreferencias;
   late Box _boxEpg;
   late Box _boxPerfis;
+  late Box _boxTmdb;
 
   // Boxes por perfil — null ate [ativarPerfil] ser chamado.
   Box? _boxFavoritos;
@@ -75,7 +77,18 @@ class Armazenamento {
     _boxPreferencias = await Hive.openBox(_nomeBoxPreferencias);
     _boxEpg = await Hive.openBox(_nomeBoxEpg);
     _boxPerfis = await Hive.openBox(_nomeBoxPerfis);
+    _boxTmdb = await Hive.openBox(_nomeBoxTmdb);
   }
+
+  // ===== CACHE DO TMDB (posteres e infos) =====
+  //
+  // Sem isto os caches do TmdbService sao so de memoria: a cada abertura o app
+  // re-pergunta o poster de CADA titulo ao TMDB — lento, visivel ("a capa
+  // carrega de novo") e um risco de rate-limit quando houver muitos aparelhos.
+
+  Map? carregarCacheTmdb() => _boxTmdb.get('dump') as Map?;
+
+  Future<void> salvarCacheTmdb(Map dump) => _boxTmdb.put('dump', dump);
 
   // ===== PERFIS =====
 
@@ -246,12 +259,29 @@ class Armazenamento {
   // As preferencias por perfil (idioma, auto-qualidade, ordenacoes) vivem no
   // modelo [Perfil], nao aqui. Esta box guarda so flags globais ao aparelho.
 
-  /// Se o usuario escolheu usar o app sem conta (pulou a tela de login).
-  bool obterPulouLogin() =>
-      _boxPreferencias.get('pulou_login', defaultValue: false) as bool;
+  // ===== DISPOSITIVO (ativacao MAC+Key) =====
+  //
+  // Identidade do aparelho e o ultimo retorno da nuvem. Espelha o que o app de
+  // TV guarda em localStorage (`tv-app/device.js`).
 
-  Future<void> salvarPulouLogin(bool valor) =>
-      _boxPreferencias.put('pulou_login', valor);
+  String? obterIdentidadeDispositivo(String campo) =>
+      _boxPreferencias.get('dispositivo_$campo') as String?;
+
+  Future<void> salvarIdentidadeDispositivo(String campo, String valor) =>
+      _boxPreferencias.put('dispositivo_$campo', valor);
+
+  /// Snapshot do que a Edge Function de ativacao devolveu (status, lista_url,
+  /// epg_url, trial_expira_em). Offline-first: sem rede, o app usa este cache.
+  Map? obterRegistroDispositivo() =>
+      _boxPreferencias.get('dispositivo_registro') as Map?;
+
+  Future<void> salvarRegistroDispositivo(Map? registro) async {
+    if (registro == null) {
+      await _boxPreferencias.delete('dispositivo_registro');
+    } else {
+      await _boxPreferencias.put('dispositivo_registro', registro);
+    }
+  }
 
   /// Volume do player (0..150; 100 = sem atenuacao, depende do volume do
   /// aparelho). Padrao 100 — global ao app. Persistido quando o usuario ajusta.

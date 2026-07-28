@@ -11,6 +11,7 @@ import 'package:volume_controller/volume_controller.dart';
 import '../models/canal.dart';
 import '../services/player_ao_vivo.dart';
 import '../services/player_vod.dart';
+import '../services/controle_parental.dart';
 import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
 import '../state/preferencias_provider.dart';
@@ -197,6 +198,37 @@ class _TelaPlayerState extends State<TelaPlayer> {
     }
 
     _recalcularProximoEp();
+
+    // Controle dos pais: categoria bloqueada => NAO abre o stream. Pede o PIN
+    // no primeiro frame (dialogo precisa da arvore montada) e so entao inicia.
+    // Este e o ponto unico por onde passam favoritos, historico, busca,
+    // categoria e detalhe — gatear aqui cobre todos.
+    if (ControleParental.exigePin(context, widget.canal.grupo)) {
+      _bloqueadoPorPin = true;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _pedirLiberacaoParental());
+      return;
+    }
+
+    _prepararPlayer();
+  }
+
+  /// `true` enquanto o conteudo esta travado pelo controle dos pais (nada e
+  /// carregado nem exibido).
+  bool _bloqueadoPorPin = false;
+
+  Future<void> _pedirLiberacaoParental() async {
+    final liberou = await ControleParental.liberar(context, widget.canal.grupo);
+    if (!mounted) return;
+    if (!liberou) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    setState(() => _bloqueadoPorPin = false);
+    _prepararPlayer();
+  }
+
+  void _prepararPlayer() {
     if (widget.playerExterno != null) {
       // Veio do mini player: reutiliza o player que já está tocando.
       _player = widget.playerExterno!;
@@ -1045,7 +1077,10 @@ class _TelaPlayerState extends State<TelaPlayer> {
     _mostrarProximoEp.dispose();
     _barraVodVisivel.dispose();
     _temFaixas.dispose();
-    if (widget.mantemPlayerAoSair) {
+    if (_bloqueadoPorPin) {
+      // Saiu sem digitar o PIN: nenhum player foi criado (`_player` e `late` e
+      // nunca foi atribuido) — nao ha nada para parar/liberar.
+    } else if (widget.mantemPlayerAoSair) {
       // O player nao pertence a esta tela — o widget que a abriu (ex.: player
       // embutido do desktop) continua usando o stream apos o pop.
     } else if (_transferidoParaMini) {
@@ -1076,6 +1111,12 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    // Travado pelo controle dos pais: tela preta ate o PIN ser aceito (o
+    // dialogo esta por cima). Nada do conteudo — nem titulo — aparece.
+    if (_bloqueadoPorPin) {
+      return const Scaffold(backgroundColor: Colors.black, body: SizedBox());
+    }
+
     final provider = context.watch<IptvProvider>();
     final favorito = provider.ehFavorito(widget.canal);
     final aoVivo = widget.canal.tipo == TipoCanal.aoVivo;

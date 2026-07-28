@@ -82,17 +82,40 @@ class Serie {
     return rest.isEmpty ? eNum : '$eNum – $rest';
   }
 
+  /// Chave de comparacao: minusculo e sem acento, para dedup e agrupamento
+  /// ("Round 6" e "round 6" sao a MESMA serie; "Ação" e "Acao", o mesmo filme).
+  static const _comAcento = 'áàâãäåÁÀÂÃÄÅéèêëÉÈÊËíìîïÍÌÎÏóòôõöÓÒÔÕÖúùûüÚÙÛÜçÇñÑ';
+  static const _semAcento = 'aaaaaaAAAAAAeeeeEEEEiiiiIIIIoooooOOOOOuuuuUUUUcCnN';
+  static String chaveNome(String s) {
+    final b = StringBuffer();
+    for (final ch in s.trim().toLowerCase().split('')) {
+      final i = _comAcento.indexOf(ch);
+      b.write(i == -1 ? ch : _semAcento[i].toLowerCase());
+    }
+    return b.toString().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
   /// Agrupa uma lista de canais VOD em filmes puros e series agrupadas.
+  ///
+  /// Faz DEDUP: a mesma lista costuma repetir o mesmo titulo em varias
+  /// categorias (ou em "HD" e "4K") — sem isto aparecem posteres duplicados na
+  /// grade. Fica o primeiro que aparece. Mesma regra do app de TV.
   static AgrupamentoConteudo agrupar(List<Canal> canais) {
     final filmes = <Canal>[];
+    final filmesVistos = <String>{};
     final map = <String, _Builder>{};
 
     for (final c in canais) {
       final nome = nomeSerie(c.nome);
       if (nome == null) {
+        if (!filmesVistos.add(chaveNome(c.nome))) continue;
         filmes.add(c);
       } else {
-        final b = map.putIfAbsent(nome, () => _Builder(nome: nome, grupo: c.grupo));
+        final chave = chaveNome(nome);
+        final b = map.putIfAbsent(
+          chave,
+          () => _Builder(nome: nome, grupo: c.grupo),
+        );
         b.episodios.add(c);
         if (b.logoUrl == null && (c.logoUrl?.isNotEmpty ?? false)) {
           b.logoUrl = c.logoUrl;

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/lista_m3u.dart';
-import '../state/conta_provider.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
@@ -17,22 +16,18 @@ class TelaGerenciarListas extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
-    final conta = context.watch<ContaProvider>();
     final listas = provider.listas;
-    final podeSincronizar = conta.disponivel && conta.estaLogado;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gerenciar listas'),
-        actions: [
-          if (podeSincronizar) const _BotaoAtualizar(),
-        ],
+        actions: const [_BotaoAtualizar()],
       ),
       body: SafeArea(
         child: tabletBody(
           context,
-          listas.isEmpty && provider.sincronizando
-              ? _SkeletonListas(count: provider.totalSync)
+          listas.isEmpty && provider.baixandoLista
+              ? const _SkeletonListas(count: 1)
               : listas.isEmpty
                   ? const _SemListas()
                   : ListView.separated(
@@ -62,16 +57,16 @@ class TelaGerenciarListas extends StatelessWidget {
 
 // ─── Botao de atualizar (sincronizar com a nuvem) ─────────────────────────────
 
-/// Puxa de novo as listas da conta no Supabase — util quando o usuario
-/// adicionou/removeu uma lista pelo site. Enquanto sincroniza, vira spinner.
+/// Re-consulta a ativacao do aparelho e RE-BAIXA a lista definida pelo painel.
+/// Este e o unico caminho que refaz o download: abrir o app usa o cache local.
 class _BotaoAtualizar extends StatelessWidget {
   const _BotaoAtualizar();
 
   @override
   Widget build(BuildContext context) {
-    final sincronizando = context.watch<IptvProvider>().sincronizando;
+    final baixando = context.watch<IptvProvider>().baixandoLista;
 
-    if (sincronizando) {
+    if (baixando) {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: AppSpacing.base),
         child: Center(
@@ -85,15 +80,15 @@ class _BotaoAtualizar extends StatelessWidget {
     }
 
     return IconButton(
-      tooltip: 'Atualizar listas',
+      tooltip: 'Atualizar lista do aparelho',
       icon: const Icon(Icons.cloud_sync_rounded),
       onPressed: () async {
         final provider = context.read<IptvProvider>();
         final messenger = ScaffoldMessenger.of(context);
-        await provider.sincronizarDoSupabase();
+        await provider.sincronizarComDispositivo(forcar: true);
         if (!context.mounted) return;
         messenger.showSnackBar(
-          const SnackBar(content: Text('Listas atualizadas')),
+          const SnackBar(content: Text('Lista atualizada')),
         );
       },
     );
@@ -102,7 +97,7 @@ class _BotaoAtualizar extends StatelessWidget {
 
 // ─── Skeleton Loading ─────────────────────────────────────────────────────────
 
-/// Substituto animado para a lista enquanto as listas da conta carregam.
+/// Substituto animado enquanto a lista do aparelho e baixada.
 /// Exibe [count] blocos (ou 2 por padrao) que imitam o layout de [_ItemLista]
 /// com efeito shimmer — o brilho varre da esquerda para a direita em loop.
 class _SkeletonListas extends StatefulWidget {

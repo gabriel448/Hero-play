@@ -20,6 +20,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 const DIA = 86_400_000
+const DIAS_TESTE = 3   // periodo de teste de um aparelho novo (era 7)
 
 // ── Criptografia AES-256-CBC (mesma chave da função `iptv`) ───────────────────
 let _chave: CryptoKey | null = null
@@ -141,7 +142,7 @@ Deno.serve(async (req: Request) => {
       if (d) {
         if (d.device_key !== key) return erro('key invalida', 403)
       } else {
-        const trial = new Date(Date.now() + 7 * DIA).toISOString()
+        const trial = new Date(Date.now() + DIAS_TESTE * DIA).toISOString()
         const ins = await sb.from('dispositivos')
           .insert({ mac, device_key: key, modelo: body.modelo || null, status: 'trial', trial_expira_em: trial })
           .select().single()
@@ -173,7 +174,7 @@ Deno.serve(async (req: Request) => {
 
       let status = statusAtual(d)
       if (status === 'sem_lista') {
-        const trial = new Date(Date.now() + 7 * DIA).toISOString()
+        const trial = new Date(Date.now() + DIAS_TESTE * DIA).toISOString()
         await sb.from('dispositivos').update({ status: 'trial', trial_expira_em: trial, atualizado_em: new Date().toISOString() }).eq('id', d.id)
         status = 'trial'; d.trial_expira_em = trial
       }

@@ -1,15 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'services/armazenamento.dart';
-import 'services/servico_conta.dart';
+import 'services/dispositivo.dart';
 import 'services/servico_epg.dart';
 import 'services/tmdb_service.dart';
-import 'state/conta_provider.dart';
+import 'state/dispositivo_provider.dart';
 import 'state/iptv_provider.dart';
 import 'state/mini_player_provider.dart';
 import 'state/perfil_provider.dart';
@@ -41,41 +42,46 @@ Future<void> main() async {
   await dotenv.load(fileName: '.env');
   MediaKit.ensureInitialized();
 
-  // Supabase: contas e sincronizacao de listas. Se as credenciais nao
-  // estiverem no .env, o app segue funcionando 100% local (sem conta).
-  ServicoConta? servicoConta;
-  final supabaseUrl = dotenv.get('SUPABASE_URL', fallback: '');
-  final supabaseAnonKey = dotenv.get('SUPABASE_ANON_KEY', fallback: '');
-  if (supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty) {
-    await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
-    servicoConta = ServicoConta(Supabase.instance.client);
-  }
-
   final armazenamento = Armazenamento();
   await armazenamento.inicializar();
+
+  // Identidade do APARELHO (MAC + Key), no lugar de conta por e-mail. Tudo o
+  // que o usuario cria (perfis, favoritos, historico, progresso) e LOCAL.
+  final dispositivo = Dispositivo(
+    armazenamento,
+    api: dotenv.get('ATIVACAO_API', fallback: ''),
+    anonKey: dotenv.get('ATIVACAO_ANON_KEY', fallback: ''),
+  );
 
   final servicoEpg = ServicoEpg(armazenamento: armazenamento);
 
   final provider = IptvProvider(
     armazenamento: armazenamento,
     epg: servicoEpg,
-    conta: servicoConta,
+    dispositivo: dispositivo,
   );
   await provider.inicializar();
 
-  // Nao sincronizamos no startup: as listas ficam no cache local entre
-  // sessoes. O sync acontece no login e quando o usuario toca em
-  // "Atualizar listas" no gerenciador.
+  // A lista fica no cache local entre sessoes: o boot NAO re-baixa. A consulta
+  // de ativacao roda em background (abaixo) e so baixa se a playlist do painel
+  // mudou; "Atualizar" continua sendo o caminho manual.
+  final dispositivoProvider = DispositivoProvider(dispositivo);
+  unawaited(dispositivoProvider.inicializar().then((_) {
+    return provider.sincronizarComDispositivo();
+  }));
 
   // Perfis: carregados do disco aqui; nenhum e ativado ainda — a tela
   // "Quem esta assistindo" (TelaPerfis) decide qual perfil entra na sessao.
-  final perfis = PerfilProvider(armazenamento, servicoConta)..inicializar();
+  final perfis = PerfilProvider(armazenamento)..inicializar();
 
   // As preferencias por perfil (idioma, auto-qualidade, ordenacoes) saem do
   // perfil ativo — por isso o PreferenciasProvider recebe o PerfilProvider.
   final preferencias = PreferenciasProvider(armazenamento, perfis);
 
-  final tmdb = TmdbService(dotenv.get('TMDB_PROXY_URL', fallback: ''));
+  final tmdb = TmdbService(
+    dotenv.get('TMDB_PROXY_URL', fallback: ''),
+    armazenamento: armazenamento,
+  );
 
   runApp(
     MultiProvider(
@@ -88,8 +94,8 @@ Future<void> main() async {
         ChangeNotifierProvider<MiniPlayerProvider>(
           create: (_) => MiniPlayerProvider(),
         ),
-        ChangeNotifierProvider<ContaProvider>(
-          create: (_) => ContaProvider(servicoConta),
+        ChangeNotifierProvider<DispositivoProvider>.value(
+          value: dispositivoProvider,
         ),
       ],
       child: const IptvApp(),

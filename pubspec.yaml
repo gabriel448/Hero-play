@@ -2,7 +2,7 @@ name: iptv_app
 description: "Leitor de listas IPTV M3U - foco didatico"
 publish_to: 'none'
 
-version: 1.7.1+11
+version: 1.8.0+12
 
 environment:
   sdk: ^3.12.0
@@ -41,7 +41,14 @@ dependencies:
 
   # Carrega variaveis de ambiente do arquivo .env em runtime.
   flutter_dotenv: ^5.2.1
-  supabase_flutter: ^2.12.4
+
+  # Identidade ESTAVEL do aparelho (ativacao por MAC+Key, como no app de TV).
+  # Windows: MachineGuid via WindowsDeviceInfo.deviceId. No Android usamos o
+  # ANDROID_ID pelo MethodChannel da MainActivity (nao exposto por este pacote).
+  device_info_plus: ^11.1.1
+
+  # QR da pagina de ativacao (so aparece na build "direto" — ver Dispositivo.canal).
+  qr_flutter: ^4.1.0
 
   # Renderiza os avatares animados (Lottie) dos perfis. Os JSONs ficam em
   # assets/avatars/ — ver tool/gerar_avatares.py.
@@ -63,3 +70,5 @@ flutter:
   assets:
     - .env
     - assets/avatars/
+    # Logo "H" — usada na tela de ativacao e no cabecalho do app.
+    - assets/heroplay-icon-192.png

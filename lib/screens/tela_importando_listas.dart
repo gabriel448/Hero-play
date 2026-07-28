@@ -5,12 +5,12 @@ import 'package:provider/provider.dart';
 import '../state/iptv_provider.dart';
 import '../theme/app_theme.dart';
 
-/// Tela exibida logo apos o login, enquanto as listas da conta sao baixadas
-/// e parseadas pela primeira vez (quando ainda nao ha nenhuma no aparelho).
+/// Tela exibida enquanto a lista do APARELHO (ativacao MAC+Key) e baixada e
+/// parseada pela primeira vez — quando ainda nao ha nada em cache.
 ///
-/// O `app.dart` mostra esta tela enquanto [IptvProvider.primeiraSync] for
-/// verdadeiro; soltamos para a home/perfis somente quando TODAS as listas
-/// terminam de baixar.
+/// O `app.dart` mostra esta tela enquanto [IptvProvider.primeiroDownload] for
+/// verdadeiro. Nas aberturas seguintes ela nao aparece: a lista vem do cache
+/// local e o download so acontece de novo em "Atualizar".
 class TelaImportandoListas extends StatefulWidget {
   const TelaImportandoListas({super.key});
 
@@ -46,18 +46,21 @@ class _TelaImportandoListasState extends State<TelaImportandoListas> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
-    final progresso = provider.progressoSync;
-    final total = provider.totalSync;
+    final fracao = provider.fracaoDownload;
+    final mb = provider.bytesBaixados / 1048576;
 
-    // Texto que descreve a fase atual do download.
+    // Texto que descreve a fase atual. O servidor Xtream costuma NAO informar o
+    // tamanho total — nesse caso mostramos os MB recebidos, que e o que prova
+    // que o download esta andando.
     final String subtitulo;
-    if (total == 0) {
-      subtitulo = 'Conectando à sua conta…';
-    } else if (progresso >= total) {
-      subtitulo = 'Preparando…';
+    if (provider.bytesBaixados == 0) {
+      subtitulo = 'Conectando ao servidor…';
+    } else if (fracao != null && fracao >= 1) {
+      subtitulo = 'Organizando seus canais…';
+    } else if (fracao != null) {
+      subtitulo = 'Baixando sua lista… ${(fracao * 100).round()}%';
     } else {
-      final falta = total - progresso;
-      subtitulo = 'Baixando $falta ${falta == 1 ? 'lista' : 'listas'}…';
+      subtitulo = 'Baixando sua lista… ${mb.toStringAsFixed(1)} MB';
     }
 
     return Scaffold(
@@ -87,7 +90,7 @@ class _TelaImportandoListasState extends State<TelaImportandoListas> {
                       ),
                       const SizedBox(height: AppSpacing.xl),
                       Text(
-                        'Importando suas listas',
+                        'Preparando sua lista',
                         style: Theme.of(context).textTheme.headlineMedium,
                         textAlign: TextAlign.center,
                       ),
@@ -111,15 +114,12 @@ class _TelaImportandoListasState extends State<TelaImportandoListas> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(AppRadius.pill),
                         child: TweenAnimationBuilder<double>(
-                          tween: Tween(
-                            begin: 0,
-                            end: total > 0 ? progresso / total : 0,
-                          ),
+                          tween: Tween(begin: 0, end: fracao ?? 0),
                           duration: const Duration(milliseconds: 400),
                           curve: Curves.easeOut,
                           builder: (context, value, _) =>
                               LinearProgressIndicator(
-                            value: total > 0 ? value : null,
+                            value: fracao != null ? value : null,
                             minHeight: 5,
                             backgroundColor: AppColors.surface2,
                             valueColor: const AlwaysStoppedAnimation(
@@ -127,18 +127,14 @@ class _TelaImportandoListasState extends State<TelaImportandoListas> {
                           ),
                         ),
                       ),
-                      if (total > 0) ...[
+                      if (provider.bytesBaixados > 0) ...[
                         const SizedBox(height: AppSpacing.md),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 250),
-                          child: Text(
-                            '$progresso de $total',
-                            key: ValueKey(progresso),
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelSmall
-                                ?.copyWith(color: AppColors.textTertiary),
-                          ),
+                        Text(
+                          '${mb.toStringAsFixed(1)} MB',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(color: AppColors.textTertiary),
                         ),
                       ],
                     ],

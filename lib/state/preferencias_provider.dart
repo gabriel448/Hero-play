@@ -53,20 +53,45 @@ class PreferenciasProvider extends ChangeNotifier {
   Future<void> definirAutoQualidade(bool valor) =>
       _perfis.atualizarConfigAtivo(autoQualidade: valor);
 
-  // ── Login: o usuario pode optar por usar o app sem conta (global) ──────────
+  // ── Controle dos pais (por perfil) ────────────────────────────────────────
+  //
+  // PIN de 4 digitos + categorias bloqueadas. Fica no perfil, entao um perfil
+  // "Filhos" pode ter restricao e o do adulto nao. Local, nunca sai do
+  // aparelho.
 
-  /// `true` se o usuario escolheu seguir sem conta na tela de login.
-  bool get pulouLogin => _armazenamento.obterPulouLogin();
+  bool get controleParentalAtivo =>
+      _perfis.perfilAtivo?.temControleParental ?? false;
 
-  /// Marca que o usuario quer usar o app sem entrar (modo local).
-  Future<void> pularLogin() async {
-    await _armazenamento.salvarPulouLogin(true);
+  String? get pinPais => _perfis.perfilAtivo?.pin;
+
+  List<String> get categoriasBloqueadas =>
+      _perfis.perfilAtivo?.categoriasBloqueadas ?? const [];
+
+  bool categoriaBloqueada(String categoria) {
+    if (!controleParentalAtivo) return false;
+    final alvo = categoria.trim().toLowerCase();
+    for (final c in categoriasBloqueadas) {
+      if (c.trim().toLowerCase() == alvo) return true;
+    }
+    return false;
+  }
+
+  bool pinConfere(String tentativa) =>
+      controleParentalAtivo && tentativa.trim() == pinPais;
+
+  /// Define (ou troca) o PIN. Passar `null` DESLIGA o controle e limpa a lista
+  /// de categorias bloqueadas.
+  Future<void> definirPin(String? pin) async {
+    final limpo = (pin == null || pin.trim().isEmpty) ? null : pin.trim();
+    await _perfis.atualizarConfigAtivo(
+      pin: limpo,
+      categoriasBloqueadas: limpo == null ? const [] : null,
+    );
     notifyListeners();
   }
 
-  /// Volta a exigir login (usado ao sair da conta).
-  Future<void> reativarLogin() async {
-    await _armazenamento.salvarPulouLogin(false);
+  Future<void> definirCategoriasBloqueadas(List<String> categorias) async {
+    await _perfis.atualizarConfigAtivo(categoriasBloqueadas: categorias);
     notifyListeners();
   }
 

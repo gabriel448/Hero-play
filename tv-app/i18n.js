@@ -83,6 +83,9 @@ const I18N = {
     'Baixando sua lista…': 'Downloading your list…', 'Preparando seus banners…': 'Preparing your banners…',
     'Não foi possível carregar sua lista. Verifique a URL/conexão.': 'Could not load your list. Check the URL/connection.',
     'Carregando…': 'Loading…',
+    'Está demorando mais que o normal.': 'This is taking longer than usual.',
+    'Tentar de novo': 'Try again', 'Continuar sem a lista': 'Continue without the list',
+    'Sua lista não carregou. Tente Recarregar em Configurações.': 'Your list did not load. Try Reload in Settings.',
     // Aviso de teste
     'Período de teste': 'Trial period', '{n} dias grátis': '{n} free days',
     'Sua lista foi adicionada e o app está em teste. Para continuar depois do período, ative o app — você mesmo pode ativar escaneando o QR.': 'Your list was added and the app is in trial. To continue after the trial, activate the app — you can activate it yourself by scanning the QR.',
@@ -258,6 +261,9 @@ const I18N = {
     'Baixando sua lista…': 'Descargando tu lista…', 'Preparando seus banners…': 'Preparando tus banners…',
     'Não foi possível carregar sua lista. Verifique a URL/conexão.': 'No se pudo cargar tu lista. Revisa la URL/conexión.',
     'Carregando…': 'Cargando…',
+    'Está demorando mais que o normal.': 'Está tardando más de lo normal.',
+    'Tentar de novo': 'Intentar de nuevo', 'Continuar sem a lista': 'Continuar sin la lista',
+    'Sua lista não carregou. Tente Recarregar em Configurações.': 'Tu lista no cargó. Prueba Recargar en Ajustes.',
     // Aviso
     'Período de teste': 'Período de prueba', '{n} dias grátis': '{n} días gratis',
     'Sua lista foi adicionada e o app está em teste. Para continuar depois do período, ative o app — você mesmo pode ativar escaneando o QR.': 'Tu lista fue añadida y la app está en prueba. Para continuar después del período, activa la app — puedes activarla tú mismo escaneando el QR.',

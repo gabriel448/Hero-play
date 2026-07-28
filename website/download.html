@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download — Hero Play</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/heroplay-icon-192.png">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="secao" style="padding-top:140px">
+      <div class="secao-rotulo" data-i18n="dl.badge">Aplicativo</div>
+      <h2 data-i18n="dl.h1">Baixe o Hero Play</h2>
+      <p class="descr" data-i18n="dl.sub">Instale no celular ou no computador. A mesma conta de aparelho, a mesma lista, em todas as telas.</p>
+
+      <!-- Os arquivos moram no GitHub Releases. O caminho /releases/latest/download/
+           sempre aponta para a ÚLTIMA release publicada, então o link nunca precisa
+           ser trocado a cada versão — basta o nome do arquivo se manter igual. -->
+      <div class="grid grid-3" style="margin-top:38px">
+        <div class="card">
+          <div class="ico">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>
+            </svg>
+          </div>
+          <h3 data-i18n="dl.and.t">Android</h3>
+          <p data-i18n="dl.and.d">Celular e tablet · Android 6.0 ou superior</p>
+          <a class="btn btn-primary btn-bloco" style="margin-top:20px"
+             href="https://github.com/gabriel448/Hero-play/releases/latest/download/HeroPlay-android.apk"
+             data-i18n="dl.and.b">Baixar APK</a>
+        </div>
+
+        <div class="card">
+          <div class="ico">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>
+            </svg>
+          </div>
+          <h3 data-i18n="dl.win.t">Windows</h3>
+          <p data-i18n="dl.win.d">Instalador para PC · Windows 10 ou superior</p>
+          <a class="btn btn-primary btn-bloco" style="margin-top:20px"
+             href="https://github.com/gabriel448/Hero-play/releases/latest/download/HeroPlay-windows-setup.exe"
+             data-i18n="dl.win.b">Baixar instalador</a>
+        </div>
+
+        <div class="card">
+          <div class="ico">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M7 21h10"/>
+            </svg>
+          </div>
+          <h3 data-i18n="dl.tv.t">Smart TV</h3>
+          <p data-i18n="dl.tv.d">Samsung, LG e Android TV — fale com o suporte para receber o arquivo do seu modelo.</p>
+          <a class="btn btn-ghost btn-bloco" style="margin-top:20px" href="contato.html"
+             data-i18n="dl.tv.b">Falar com o suporte</a>
+        </div>
+      </div>
+
+      <p class="descr" style="margin-top:26px;max-width:720px;font-size:14px">
+        <span data-i18n="dl.versao">Versão</span> <b id="versao">1.8.0</b> ·
+        <span data-i18n="dl.nota">Os arquivos ficam hospedados no GitHub Releases — o download vem direto de lá, sempre na última versão publicada.</span>
+      </p>
+    </section>
+
+    <section class="secao" style="padding-top:0">
+      <h2 style="font-size:clamp(22px,3vw,32px)" data-i18n="dl.comot">Como instalar</h2>
+      <div class="grid grid-2" style="margin-top:24px">
+        <div class="card">
+          <h3 data-i18n="dl.and.t">Android</h3>
+          <ol style="color:var(--text-2);font-size:14px;line-height:1.9;margin:12px 0 0 18px">
+            <li data-i18n="dl.and.p1">Baixe o APK e abra o arquivo no aparelho.</li>
+            <li data-i18n="dl.and.p2">O Android vai pedir permissão para instalar de fora da loja — autorize apenas o Hero Play.</li>
+            <li data-i18n="dl.and.p3">Abra o app: ele mostra o ID (MAC) e a Chave do aparelho para você ativar.</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3 data-i18n="dl.win.t">Windows</h3>
+          <ol style="color:var(--text-2);font-size:14px;line-height:1.9;margin:12px 0 0 18px">
+            <li data-i18n="dl.win.p1">Baixe o instalador e execute.</li>
+            <li data-i18n="dl.win.p2">O Windows pode avisar que o autor é desconhecido — clique em "Mais informações" e depois em "Executar assim mesmo".</li>
+            <li data-i18n="dl.win.p3">O app abre mostrando o ID (MAC) e a Chave para ativação.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

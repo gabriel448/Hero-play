@@ -1,5 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+import 'armazenamento.dart';
 
 /// Um ator do elenco: nome + foto (opcional) vindos do TMDB.
 class AtorTmdb {
@@ -24,13 +29,60 @@ class TmdbInfo {
   /// recomendar titulos relacionados na tela do filme/serie.
   final List<String> generos;
 
+  /// Nome no idioma do app e nome ORIGINAL, como o TMDB devolveu. Servem para
+  /// a BUSCA achar por referencia/traducao: a lista traz "Kimetsu no Yaiba" e o
+  /// usuario digita "Demon Slayer" (ou o contrario).
+  final String? nome;
+  final String? original;
+
+  /// Ids canonicos de genero do TMDB — usados como tags de recomendacao.
+  final List<int> generoIds;
+
   const TmdbInfo({
     this.sinopse,
     this.ano,
     this.elenco = const [],
     this.nota,
     this.generos = const [],
+    this.nome,
+    this.original,
+    this.generoIds = const [],
   });
+
+  Map<String, dynamic> toMap() => {
+        if (sinopse != null) 'sinopse': sinopse,
+        if (ano != null) 'ano': ano,
+        if (nota != null) 'nota': nota,
+        if (generos.isNotEmpty) 'generos': generos,
+        if (generoIds.isNotEmpty) 'generoIds': generoIds,
+        if (nome != null) 'nome': nome,
+        if (original != null) 'original': original,
+        if (elenco.isNotEmpty)
+          'elenco': [
+            for (final a in elenco)
+              {'nome': a.nome, if (a.fotoUrl != null) 'foto': a.fotoUrl},
+          ],
+      };
+
+  factory TmdbInfo.fromMap(Map map) => TmdbInfo(
+        sinopse: map['sinopse'] as String?,
+        ano: (map['ano'] as num?)?.toInt(),
+        nota: (map['nota'] as num?)?.toDouble(),
+        generos: [...?(map['generos'] as List?)?.whereType<String>()],
+        generoIds: [
+          ...?(map['generoIds'] as List?)?.map((e) => (e as num).toInt()),
+        ],
+        nome: map['nome'] as String?,
+        original: map['original'] as String?,
+        elenco: [
+          ...?(map['elenco'] as List?)?.whereType<Map>().map(
+                (m) => AtorTmdb(
+                  nome: m['nome'] as String? ?? '',
+                  fotoUrl: m['foto'] as String?,
+                ),
+              ),
+        ],
+      );
 
   /// Resultado vazio — sem chave de API, sem match, ou erro de rede.
   static const vazio = TmdbInfo();
@@ -56,29 +108,136 @@ class TmdbService {
   static const _perfilBase = 'https://image.tmdb.org/t/p/w185';
 
   final String proxyBaseUrl;
+
+  /// Persistencia opcional do cache. Sem ela o servico funciona igual, mas os
+  /// caches morrem ao fechar o app.
+  final Armazenamento? _armazenamento;
+
   final _cachePoster = <String, String?>{};
   final _cacheInfo = <String, TmdbInfo>{};
 
-  TmdbService(this.proxyBaseUrl);
+  // Tetos do que vai pro disco (as chaves de um Map em Dart preservam ordem de
+  // insercao, entao guardamos os mais RECENTES).
+  static const _limitePoster = 40000;
+  static const _limiteInfo = 4000;
+
+  Timer? _debouncePersistencia;
+
+  TmdbService(this.proxyBaseUrl, {Armazenamento? armazenamento})
+      // ignore: prefer_initializing_formals
+      : _armazenamento = armazenamento {
+    _restaurarCache();
+  }
+
+  // ─── Cache em disco ──────────────────────────────────────────────────────
+
+  void _restaurarCache() {
+    final a = _armazenamento;
+    if (a == null) return;
+    try {
+      final dump = a.carregarCacheTmdb();
+      if (dump == null || dump['v'] != 1) return;
+      for (final e in ((dump['poster'] as Map?) ?? const {}).entries) {
+        // So o formato novo ("tv|nome"/"mv|nome"). As chaves antigas (so o
+        // nome) vinham de quando o poster era procurado em /search/tv para
+        // tudo — podem estar TROCADAS.
+        final k = e.key as String;
+        if (k.startsWith('tv|') || k.startsWith('mv|')) {
+          _cachePoster[k] = e.value as String?;
+        }
+      }
+      for (final e in ((dump['info'] as Map?) ?? const {}).entries) {
+        _cacheInfo[e.key as String] = TmdbInfo.fromMap(e.value as Map);
+      }
+    } catch (e) {
+      debugPrint('[TMDB] cache local invalido: $e');
+    }
+  }
+
+  /// Grava o cache em disco com debounce — um titulo novo nao dispara uma
+  /// escrita imediata, senao gravariamos o dump inteiro dezenas de vezes
+  /// enquanto o usuario rola um carrossel.
+  void _agendarPersistencia() {
+    final a = _armazenamento;
+    if (a == null) return;
+    _debouncePersistencia?.cancel();
+    _debouncePersistencia = Timer(const Duration(seconds: 5), () {
+      try {
+        a.salvarCacheTmdb({
+          'v': 1,
+          'poster': _ultimos(_cachePoster, _limitePoster),
+          'info': {
+            for (final e in _ultimos(_cacheInfo, _limiteInfo).entries)
+              e.key: e.value.toMap(),
+          },
+        });
+      } catch (e) {
+        debugPrint('[TMDB] falha ao gravar cache: $e');
+      }
+    });
+  }
+
+  static Map<String, T> _ultimos<T>(Map<String, T> m, int n) {
+    if (m.length <= n) return m;
+    final chaves = m.keys.toList();
+    return {
+      for (final k in chaves.sublist(chaves.length - n)) k: m[k] as T,
+    };
+  }
+
+  void dispose() => _debouncePersistencia?.cancel();
 
   bool get configurado => proxyBaseUrl.trim().isNotEmpty;
 
-  // ─── Poster (carrosseis de series) ───────────────────────────────────────
+  /// Nomes alternativos ja conhecidos deste titulo (traduzido + original), SEM
+  /// tocar na rede. Usado pela busca para achar por referencia: a lista traz
+  /// "Kimetsu no Yaiba" e o usuario digita "Demon Slayer".
+  ///
+  /// Vem do cache de [info], que agora e persistido em disco — entao vale para
+  /// tudo que o usuario ja abriu alguma vez, mesmo em outra sessao.
+  List<String> apelidosEmCache(String nome, {required bool ehSerie}) {
+    final sufixo = '|${ehSerie ? 'tv' : 'movie'}|$nome';
+    final out = <String>[];
+    for (final e in _cacheInfo.entries) {
+      if (!e.key.endsWith(sufixo)) continue;
+      final i = e.value;
+      if (i.nome != null && i.nome!.isNotEmpty) out.add(i.nome!);
+      if (i.original != null && i.original!.isNotEmpty) out.add(i.original!);
+    }
+    return out;
+  }
 
-  /// Retorna URL do poster para o nome da serie, ou null se nao encontrar.
-  /// Tenta TV shows primeiro, depois movies (cobre animes e OVAs).
-  Future<String?> posterSerie(String nome) async {
+  // ─── Poster ──────────────────────────────────────────────────────────────
+
+  /// Retorna a URL do poster do titulo, ou null se o TMDB nao tiver.
+  ///
+  /// Regras (as mesmas do app de TV, depois do bug de "capa de outro filme"):
+  ///  - procura SEMPRE no endpoint do tipo certo primeiro (serie -> tv,
+  ///    filme -> movie). Procurar filme em /search/tv trazia programas de TV
+  ///    homonimos e o poster saia trocado;
+  ///  - pt-BR antes de en-US: o titulo da lista costuma ser o traduzido
+  ///    ("Interestelar" so casa com language=pt-BR);
+  ///  - match ESTRITO: sem casar por titulo, devolve null (fica o fallback da
+  ///    UI) em vez de pegar "o primeiro que veio".
+  Future<String?> poster(String nome, {bool ehSerie = true}) async {
     if (!configurado) return null;
-    if (_cachePoster.containsKey(nome)) return _cachePoster[nome];
+    final chave = '${ehSerie ? 'tv' : 'mv'}|$nome';
+    if (_cachePoster.containsKey(chave)) return _cachePoster[chave];
 
     final query = _prepararQuery(nome);
-    final item = await _buscarItem('/3/search/tv', query, 'en-US', true) ??
-        await _buscarItem('/3/search/movie', query, 'en-US', false);
+    final principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
+    final outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
+    final item =
+        await _buscarItem(principal, query, 'pt-BR', ehSerie, estrito: true) ??
+            await _buscarItem(principal, query, 'en-US', ehSerie,
+                estrito: true) ??
+            await _buscarItem(outro, query, 'pt-BR', !ehSerie, estrito: true);
 
-    final poster = item?['poster_path'] as String?;
-    final url = poster != null ? '$_imgBase$poster' : null;
+    final caminho = item?['poster_path'] as String?;
+    final url = caminho != null ? '$_imgBase$caminho' : null;
 
-    _cachePoster[nome] = url;
+    _cachePoster[chave] = url;
+    _agendarPersistencia();
     return url;
   }
 
@@ -122,6 +281,7 @@ class TmdbService {
 
     if (item == null) {
       _cacheInfo[chave] = TmdbInfo.vazio;
+      _agendarPersistencia();
       return TmdbInfo.vazio;
     }
 
@@ -153,8 +313,13 @@ class TmdbService {
       elenco: elenco,
       nota: nota,
       generos: generos,
+      generoIds: genreIds,
+      nome: (item[ehTv ? 'name' : 'title'] as String?)?.trim(),
+      original: (item[ehTv ? 'original_name' : 'original_title'] as String?)
+          ?.trim(),
     );
     _cacheInfo[chave] = info;
+    _agendarPersistencia();
     return info;
   }
 
@@ -224,12 +389,15 @@ class TmdbService {
 
   /// Procura no [endpoint] e devolve o melhor resultado (o Map cru do TMDB),
   /// ou null. [ehTv] define quais campos de nome conferir.
+  /// [estrito]: nao cai no "primeiro resultado" quando nada casa por titulo —
+  /// e esse fallback que produz capa de outro filme.
   Future<Map<String, dynamic>?> _buscarItem(
     String endpoint,
     String query,
     String idioma,
-    bool ehTv,
-  ) async {
+    bool ehTv, {
+    bool estrito = false,
+  }) async {
     try {
       final uri = Uri.parse(
         '${proxyBaseUrl.trim()}/api/tmdb',
@@ -299,7 +467,9 @@ class TmdbService {
           }
         }
       }
-      // 5. Fallback: primeiro resultado (mais popular)
+      // 5. Fallback: primeiro resultado (mais popular) — desligado no modo
+      //    estrito, onde preferimos NAO ter poster a ter o poster errado.
+      if (melhor == null && estrito) return null;
       melhor ??= results.first as Map<String, dynamic>;
       return melhor;
     } catch (_) {
@@ -330,6 +500,10 @@ class TmdbService {
           RegExp(r'\b(?:LEG|DUB|VOST|DUAL|LEGENDADO|DUBLADO)\b',
               caseSensitive: false),
           ' ')
+      // Pontuacao separadora QUEBRA a busca do TMDB: ':' faz
+      // "Titulo: Subtitulo" voltar 0 resultados. Vira espaco. Apostrofo, hifen
+      // e '&' ficam (funcionam: "Grey's Anatomy", "Spider-Man").
+      .replaceAll(RegExp(r'[:;!?,|/\\*"“”]'), ' ')
       // Pontos e underscores como separadores viram espacos
       .replaceAll(RegExp(r'[._]'), ' ')
       // Colchetes/parenteses restantes (agora vazios ou orfaos)
@@ -338,8 +512,23 @@ class TmdbService {
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 
-  /// Normaliza para comparacao: minusculo, sem pontuacao, espacos simples.
-  static String _norm(String s) => s
+  /// Acentos -> letra base. Dart nao tem normalizacao Unicode no core e o
+  /// `[^\w\s]` do _norm APAGAVA a letra acentuada ("Pokémon" -> "pokmon"),
+  /// entao ela nunca casava com "Pokemon". Transliterar resolve os dois lados.
+  static const _comAcento = 'áàâãäåÁÀÂÃÄÅéèêëÉÈÊËíìîïÍÌÎÏóòôõöÓÒÔÕÖúùûüÚÙÛÜçÇñÑýÿÝ';
+  static const _semAcento = 'aaaaaaAAAAAAeeeeEEEEiiiiIIIIoooooOOOOOuuuuUUUUcCnNyyY';
+  static String _tirarAcento(String s) {
+    final b = StringBuffer();
+    for (final ch in s.split('')) {
+      final i = _comAcento.indexOf(ch);
+      b.write(i == -1 ? ch : _semAcento[i]);
+    }
+    return b.toString();
+  }
+
+  /// Normaliza para comparacao: sem acento, minusculo, sem pontuacao, espacos
+  /// simples.
+  static String _norm(String s) => _tirarAcento(s)
       .toLowerCase()
       .replaceAll(RegExp(r'[._]'), ' ')
       .replaceAll(RegExp(r"[^\w\s]"), '')

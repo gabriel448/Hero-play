@@ -8,14 +8,26 @@ const sb = createClient(SUPABASE_URL, ANON)
 const RANK = { reseller: 1, master: 2, admin: 3 }
 const PAPEL_PT = { admin: 'Admin', master: 'Master', reseller: 'Revendedor' }
 
-// Plataforma do device (código gravado pelo tv-app) → nome amigável + ícone.
-// 'web' = provavelmente teste no navegador. Futuro: androidtv/tvbox entram aqui.
+// Plataforma do device (código gravado pelo app de TV E pelo app Flutter) →
+// nome amigável + ícone. TVs vêm do tv-app; celular/tablet/desktop vêm do app
+// Flutter (`Dispositivo.plataforma()`), que desde 2026-07-27 usa a MESMA
+// Edge Function `ativacao` e a mesma tabela `dispositivos`.
+// 'web' = provavelmente teste no navegador.
 const MODELO_INFO = {
-  webos:    { nome: 'LG (webOS)',        icone: '📺' },
-  tizen:    { nome: 'Samsung (Tizen)',   icone: '📺' },
-  roku:     { nome: 'Roku',              icone: '🟣' },
-  androidtv:{ nome: 'Android TV / Box',  icone: '🤖' },
-  web:      { nome: 'Navegador (teste)', icone: '🌐' },
+  // TV
+  webos:        { nome: 'LG (webOS)',        icone: '📺' },
+  tizen:        { nome: 'Samsung (Tizen)',   icone: '📺' },
+  roku:         { nome: 'Roku',              icone: '🟣' },
+  androidtv:    { nome: 'Android TV / Box',  icone: '🤖' },
+  // Celular / tablet / desktop (app Flutter)
+  android:      { nome: 'Android (celular)', icone: '📱' },
+  androidtablet:{ nome: 'Android (tablet)',  icone: '💊' },
+  ios:          { nome: 'iPhone',            icone: '📱' },
+  ipados:       { nome: 'iPad',              icone: '💊' },
+  windows:      { nome: 'Windows (PC)',      icone: '🖥️' },
+  macos:        { nome: 'Mac',               icone: '🖥️' },
+  linux:        { nome: 'Linux (PC)',        icone: '🖥️' },
+  web:          { nome: 'Navegador (teste)', icone: '🌐' },
 }
 const modeloNome = (m) => (MODELO_INFO[m] && MODELO_INFO[m].nome) || (m || '—')
 const modeloIcone = (m) => (MODELO_INFO[m] && MODELO_INFO[m].icone) || '❓'

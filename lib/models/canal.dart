@@ -13,6 +13,41 @@ enum TipoCanal {
   filme,
 }
 
+/// Extensoes tipicas de arquivo de VIDEO sob demanda (filme/episodio).
+const _extensoesVod = [
+  '.mp4',
+  '.mkv',
+  '.avi',
+  '.mov',
+  '.flv',
+  '.wmv',
+  '.webm',
+  '.m4v',
+];
+
+/// Classifica ao vivo x VOD **so pela URL** — fonte unica da verdade, usada
+/// tanto pelo parser quanto ao recarregar do cache ([Canal.fromMap]).
+///
+/// No Xtream o caminho diz tudo: VOD tem `/movie/` ou `/series/`, ou termina em
+/// extensao de video. O resto e AO VIVO.
+///
+/// NAO usar palavra do `group-title` aqui (era o que fazia canais aparecerem em
+/// Filmes): "GLOBOSAT FILMES", "TELECINE" e "CINEMA" sao categorias de CANAIS,
+/// nao de VOD. Mesma regra ja aplicada no app de TV (`tv-app/lista.js`).
+TipoCanal tipoCanalPorUrl(String url) {
+  final q = url.indexOf('?');
+  final u = (q == -1 ? url : url.substring(0, q)).toLowerCase();
+  // `/vod/` nao existe na regra do app de TV; incluido aqui porque parte dos
+  // provedores serve VOD por esse caminho SEM extensao no fim.
+  if (u.contains('/movie/') || u.contains('/series/') || u.contains('/vod/')) {
+    return TipoCanal.filme;
+  }
+  for (final ext in _extensoesVod) {
+    if (u.endsWith(ext)) return TipoCanal.filme;
+  }
+  return TipoCanal.aoVivo;
+}
+
 /// Representa um canal de IPTV extraido de uma lista M3U.
 class Canal {
   /// Nome de exibicao (ex: "Globo HD" ou "Avatar (2009)").
@@ -95,10 +130,11 @@ class Canal {
         logoUrl: map['logoUrl'] as String?,
         grupo: map['grupo'] as String? ?? 'Sem categoria',
         tvgId: map['tvgId'] as String?,
-        tipo: TipoCanal.values.firstWhere(
-          (t) => t.name == map['tipo'],
-          orElse: () => TipoCanal.aoVivo,
-        ),
+        // Recalcula pela URL em vez de ler o valor salvo: listas que ja estao
+        // no cache foram classificadas pela regra ANTIGA (palavra no grupo) e
+        // trouxeram canais ao vivo para Filmes. Assim elas se corrigem ao
+        // carregar, sem precisar reimportar a lista.
+        tipo: tipoCanalPorUrl(map['url'] as String),
         variantes: (map['variantes'] as List?)
                 ?.map((m) => Canal.fromMap(m as Map))
                 .toList() ??

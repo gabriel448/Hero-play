@@ -28,6 +28,12 @@ class ListaM3U {
   /// Quando definida, o EpgService usa para baixar a grade dos canais ao vivo.
   final String? epgUrl;
 
+  /// `true` quando a lista veio da ATIVACAO do aparelho (painel/nuvem) em vez
+  /// de ter sido adicionada a mao pelo usuario. Listas do dispositivo sao
+  /// trocadas/removidas automaticamente quando o painel muda a playlist ativa;
+  /// as manuais, nunca.
+  final bool doDispositivo;
+
   const ListaM3U({
     required this.nome,
     required this.fonte,
@@ -35,6 +41,7 @@ class ListaM3U {
     required this.canais,
     required this.atualizadaEm,
     this.epgUrl,
+    this.doDispositivo = false,
   });
 
   /// Total de canais nesta lista.
@@ -77,6 +84,9 @@ class ListaM3U {
         'canais': canais.map((c) => c.toMap()).toList(),
         'atualizadaEm': atualizadaEm.toIso8601String(),
         if (epgUrl != null) 'epgUrl': epgUrl,
+        // Omitido quando falso -> schema retrocompativel (listas antigas leem
+        // como manuais, que e o que elas sao).
+        if (doDispositivo) 'doDispositivo': true,
       };
 
   factory ListaM3U.fromMap(Map map) => ListaM3U(
@@ -92,6 +102,7 @@ class ListaM3U {
         atualizadaEm: DateTime.tryParse(map['atualizadaEm'] as String? ?? '') ??
             DateTime.now(),
         epgUrl: map['epgUrl'] as String?,
+        doDispositivo: map['doDispositivo'] as bool? ?? false,
       );
 
   /// Cria uma copia modificando alguns campos. Util para "atualizar" a lista
@@ -101,6 +112,7 @@ class ListaM3U {
     List<Canal>? canais,
     DateTime? atualizadaEm,
     String? epgUrl,
+    bool? doDispositivo,
   }) =>
       ListaM3U(
         nome: nome ?? this.nome,
@@ -109,5 +121,6 @@ class ListaM3U {
         canais: canais ?? this.canais,
         atualizadaEm: atualizadaEm ?? this.atualizadaEm,
         epgUrl: epgUrl ?? this.epgUrl,
+        doDispositivo: doDispositivo ?? this.doDispositivo,
       );
 }

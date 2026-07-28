@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/idioma_app.dart';
-import '../state/conta_provider.dart';
+import '../services/dispositivo.dart';
+import '../state/dispositivo_provider.dart';
+import '../state/iptv_provider.dart';
 import '../state/perfil_provider.dart';
 import '../state/preferencias_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
 import '../widgets/avatar_perfil.dart';
+import 'tela_controle_pais.dart';
 import 'tela_historico.dart';
-import 'tela_login.dart';
 
 /// Tela de configuracoes. Hoje apenas o idioma — ponto de extensao natural
 /// para futuras opcoes.
@@ -25,14 +27,29 @@ class TelaConfiguracoes extends StatelessWidget {
       body: tabletBody(
         context,
         ListView(
-          padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+          // A barra de gestos do Android fica POR CIMA do conteudo (o app roda
+          // edge-to-edge): sem este respiro, o ultimo item da lista — hoje o
+          // idioma Espanhol — fica coberto e nao da para tocar.
+          padding: EdgeInsets.only(
+            bottom: AppSpacing.xl + MediaQuery.viewPaddingOf(context).bottom,
+          ),
           children: [
             const _TituloSecao('Perfil'),
             const _SecaoPerfil(),
-            if (context.watch<ContaProvider>().disponivel) ...[
-              const _TituloSecao('Conta'),
-              const _SecaoConta(),
-            ],
+            const _TituloSecao('Aparelho'),
+            const _SecaoDispositivo(),
+            const _TituloSecao('Controle dos pais'),
+            _OpcaoNavegacao(
+              icone: Icons.lock_outline_rounded,
+              titulo: 'Bloquear categorias',
+              subtitulo: preferencias.controleParentalAtivo
+                  ? '${preferencias.categoriasBloqueadas.length} categoria(s) '
+                      'bloqueada(s) neste perfil'
+                  : 'Defina um PIN e escolha o que fica bloqueado',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TelaControlePais()),
+              ),
+            ),
             const _TituloSecao('Atividade'),
             _OpcaoNavegacao(
               icone: Icons.history_rounded,
@@ -127,117 +144,84 @@ class _SecaoPerfil extends StatelessWidget {
   }
 }
 
-/// Mostra o estado da conta: se logado, email + sair; se nao, botao de entrar.
-class _SecaoConta extends StatelessWidget {
-  const _SecaoConta();
+/// Identificacao do aparelho (ID + Chave) e estado da ativacao. Substitui a
+/// antiga secao de conta: nao ha login por e-mail — a identidade e o aparelho.
+class _SecaoDispositivo extends StatelessWidget {
+  const _SecaoDispositivo();
+
+  // Na build de LOJA o app nao pode sinalizar cobranca: "Em teste" e
+  // "Expirado" viram estados neutros (o aparelho esta funcionando, ou nao tem
+  // lista). A build direta, distribuida pelo site, mostra o estado real.
+  static const _rotulosDireto = {
+    'ativo': 'Ativo',
+    'trial': 'Em teste',
+    'expirado': 'Acesso vencido',
+    'sem_lista': 'Sem lista vinculada',
+  };
+  static const _rotulosLoja = {
+    'ativo': 'Ativo',
+    'trial': 'Ativo',
+    'expirado': 'Sem lista vinculada',
+    'sem_lista': 'Sem lista vinculada',
+  };
 
   @override
   Widget build(BuildContext context) {
-    final conta = context.watch<ContaProvider>();
-
-    if (!conta.estaLogado) {
-      return _OpcaoNavegacao(
-        icone: Icons.login_rounded,
-        titulo: 'Entrar na conta',
-        subtitulo: 'Carregue e sincronize suas listas na nuvem.',
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const TelaLogin()),
-        ),
-      );
-    }
-
+    final d = context.watch<DispositivoProvider>();
+    final t = Theme.of(context).textTheme;
+    final direto = Dispositivo.mostraAtivacaoNoApp;
+    final rotulos = direto ? _rotulosDireto : _rotulosLoja;
+    final rotulo = rotulos[d.status] ?? d.status;
+    final cor = switch (direto ? d.status : (d.expirado ? 'sem_lista' : 'ativo')) {
+      'ativo' => AppColors.success,
+      'trial' => AppColors.warn,
+      'expirado' => AppColors.error,
+      _ => AppColors.textSecondary,
+    };
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
         vertical: AppSpacing.md,
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.accentDim,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            child: const Icon(
-              Icons.person_rounded,
-              size: 20,
-              color: AppColors.accentBright,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.base),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Conectado',
-                    style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 2),
-                Text(
-                  conta.email ?? '',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(rotulo, style: t.titleSmall?.copyWith(color: cor)),
+              // Contagem do teste so na build direta (ver comentario acima).
+              if (direto && d.emTeste) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Text('· ${d.diasTeste} dia(s)', style: t.bodySmall),
               ],
-            ),
+              const Spacer(),
+              TextButton(
+                onPressed: d.consultando
+                    ? null
+                    : () async {
+                        final iptv = context.read<IptvProvider>();
+                        if (await d.reconsultar()) {
+                          await iptv.sincronizarComDispositivo();
+                        }
+                      },
+                child: const Text('Verificar'),
+              ),
+            ],
           ),
-          const SizedBox(width: AppSpacing.sm),
-          OutlinedButton.icon(
-            onPressed: () => _sair(context),
-            icon: const Icon(Icons.logout_rounded, size: 16),
-            label: const Text('Sair'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.error,
-              side: const BorderSide(color: AppColors.error),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _sair(BuildContext context) async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Sair da conta?'),
-        content: const Text(
-          'Você sairá da sua conta neste aparelho. Para voltar a sincronizar '
-          'listas e perfis, entre novamente.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Sair'),
+          const SizedBox(height: AppSpacing.sm),
+          SelectableText(
+            'ID  ${d.mac}\nChave  ${d.chave}',
+            style: t.bodySmall?.copyWith(color: AppColors.textSecondary),
           ),
         ],
       ),
     );
-    if (confirmar != true || !context.mounted) return;
-
-    final conta = context.read<ContaProvider>();
-    final perfis = context.read<PerfilProvider>();
-    final preferencias = context.read<PreferenciasProvider>();
-    final navigator = Navigator.of(context);
-
-    await conta.sair();
-    // NAO apagamos as listas no logout: o cache fica e o re-login na MESMA
-    // conta volta instantaneo (sem re-baixar tudo). Se outra conta entrar, o
-    // `prune` do sincronizarDoSupabase remove o que nao for dela. Apagar tudo
-    // aqui causava ~40s de tela "Conectando" travada ao re-logar.
-    await perfis.limparLocais();
-    // Volta a exigir login na proxima abertura / imediatamente.
-    await preferencias.reativarLogin();
-
-    // Fecha as Configuracoes; o app.dart ja troca a home para a tela de login.
-    navigator.popUntil((r) => r.isFirst);
   }
 }
 

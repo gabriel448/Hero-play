@@ -62,7 +62,10 @@ const TMDB = (() => {
     if (!r.ok) throw new Error('tmdb ' + r.status);
     return r.json();
   }
-  function escolher(results, query, ehTv) {
+  // `estrito`: NÃO cai no results[0] quando nada casa por título. Sem isso o TMDB
+  // devolve "o primeiro que veio" — foi o que fazia a busca mostrar o pôster de
+  // OUTRO filme (ex.: "Interestelar" pegando um programa de TV qualquer).
+  function escolher(results, query, ehTv, estrito) {
     if (!results || !results.length) return null;
     const cn = ehTv ? 'name' : 'title';
     const co = ehTv ? 'original_name' : 'original_title';
@@ -74,7 +77,7 @@ const TMDB = (() => {
       || tk.find((it) => match(it, (s) => s.startsWith(q)))
       || tk.find((it) => match(it, (s) => s.includes(q)))
       || (words.length > 1 ? tk.find((it) => match(it, (s) => words.every((w) => s.includes(w)))) : null)
-      || results[0];
+      || (estrito ? null : results[0]);
   }
   async function buscarItem(endpoint, query, ehTv, idioma) {
     try {
@@ -136,35 +139,44 @@ const TMDB = (() => {
     return out;
   }
 
-  // Só o poster (trilhos de série, que não têm logo na lista). Igual ao mobile
-  // (posterSerie): busca em EN-US — nomes de série em listas costumam ser em
-  // inglês, casa melhor — TV primeiro, depois movie (cobre anime/OVA).
+  // Só o pôster — usado por séries (que não têm capa boa na lista) e como FALLBACK
+  // de filme cujo logo da lista não abre. Busca SEMPRE no endpoint do tipo certo
+  // primeiro (série→tv, filme→movie): procurar em /search/tv um filme trazia
+  // programas de TV homônimos e o pôster saía trocado.
+  // Idioma: pt-BR primeiro (o título da lista costuma ser o traduzido — "Interestelar"
+  // só casa com language=pt-BR); en-US como 2ª tentativa (anime/série que a lista
+  // traz pelo nome em inglês). Sempre ESTRITO: sem casar por título, sem pôster.
   // Busca que PROPAGA falha de rede/rate-limit (get lança em !ok) mas retorna null
   // em resultado vazio — p/ o poster() distinguir "TMDB não tem" de "falhou".
   async function buscarStrict(endpoint, query, ehTv, idioma) {
-    let it = escolher((await get(endpoint, { query, language: idioma || IDIOMA, include_adult: 'false' })).results, query, ehTv);
+    let it = escolher((await get(endpoint, { query, language: idioma || IDIOMA, include_adult: 'false' })).results, query, ehTv, true);
     if (it) return it;
     const r = reduzir(query);
-    if (r) it = escolher((await get(endpoint, { query: r, language: idioma || IDIOMA, include_adult: 'false' })).results, r, ehTv);
+    if (r) it = escolher((await get(endpoint, { query: r, language: idioma || IDIOMA, include_adult: 'false' })).results, r, ehTv, true);
     return it;
   }
   const _inflightPoster = {};   // dedupe: 1 requisição por título mesmo com N pedidos simultâneos
-  function poster(nome) {
-    if (nome in _cachePoster) return Promise.resolve(_cachePoster[nome]);
-    if (_inflightPoster[nome]) return _inflightPoster[nome];
+  const chavePoster = (nome, ehSerie) => (ehSerie ? 'tv|' : 'mv|') + nome;
+  function poster(nome, ehSerie) {
+    const chave = chavePoster(nome, ehSerie);
+    if (chave in _cachePoster) return Promise.resolve(_cachePoster[chave]);
+    if (_inflightPoster[chave]) return _inflightPoster[chave];
     const p = (async () => {
       const query = prepararQuery(nome);
+      const principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
+      const outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
       let url = '', falhou = false;
       try {
-        const item = (await buscarStrict('/3/search/tv', query, true, 'en-US'))
-          || (await buscarStrict('/3/search/movie', query, false, 'en-US'));
+        const item = (await buscarStrict(principal, query, !!ehSerie, IDIOMA))
+          || (await buscarStrict(principal, query, !!ehSerie, 'en-US'))
+          || (await buscarStrict(outro, query, !ehSerie, IDIOMA));
         url = item ? poster500(item.poster_path) : '';
       } catch (_) { falhou = true; }   // rede/rate-limit → NÃO cacheia (permite retry)
-      if (!falhou) { _cachePoster[nome] = url; _sujo = true; }
-      delete _inflightPoster[nome];
+      if (!falhou) { _cachePoster[chave] = url; _sujo = true; }
+      delete _inflightPoster[chave];
       return url;
     })();
-    _inflightPoster[nome] = p;
+    _inflightPoster[chave] = p;
     return p;
   }
 
@@ -245,7 +257,7 @@ const TMDB = (() => {
   // Acesso síncrono ao cache (pré-carregamento): null = ainda não buscado.
   const infoCache = (nome, ehSerie) => _cacheInfo[(ehSerie ? 'tv|' : 'mv|') + nome] || null;
   const logoCache = (id, ehTv) => { const k = (ehTv ? 'tv' : 'mv') + id; return k in _cacheLogo ? _cacheLogo[k] : null; };
-  const posterCache = (nome) => (nome in _cachePoster ? _cachePoster[nome] : null);
+  const posterCache = (nome, ehSerie) => { const k = chavePoster(nome, ehSerie); return k in _cachePoster ? _cachePoster[k] : null; };
   const temporadaCache = (id, s) => _cacheTemp[id + '|' + s] || null; // já pré-carregada?
 
   // ── Persistência dos metadados (IndexedDB, via CacheLista) ─────────────────
@@ -272,7 +284,10 @@ const TMDB = (() => {
     if (!d || d.v !== 1) return 0;
     // Assign: o que já foi buscado nesta sessão é mais novo — não sobrescreve.
     for (const k in (d.info || {})) if (!(k in _cacheInfo)) _cacheInfo[k] = d.info[k];
-    for (const k in (d.poster || {})) if (!(k in _cachePoster)) _cachePoster[k] = d.poster[k];
+    // Só chaves no formato novo ("tv|nome"/"mv|nome"). As antigas (só o nome) vêm
+    // da época em que o pôster era procurado em /search/tv p/ tudo — podem estar
+    // TROCADAS; descartar aqui limpa o cache persistido de quem já atualizou.
+    for (const k in (d.poster || {})) if (/^(tv|mv)\|/.test(k) && !(k in _cachePoster)) _cachePoster[k] = d.poster[k];
     for (const k in (d.logo || {})) if (!(k in _cacheLogo)) _cacheLogo[k] = d.logo[k];
     return Object.keys(d.poster || {}).length;
   }

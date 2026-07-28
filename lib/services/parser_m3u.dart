@@ -24,33 +24,6 @@ class ParserM3U {
   /// Regex para extrair atributos no formato chave="valor".
   static final RegExp _regexAtributos = RegExp(r'([\w-]+)="([^"]*)"');
 
-  /// Extensoes tipicas de arquivos de VIDEO sob demanda (filmes/series).
-  /// Se a URL termina com uma destas, classificamos como filme.
-  static const _extensoesFilme = {
-    '.mp4',
-    '.mkv',
-    '.avi',
-    '.mov',
-    '.flv',
-    '.wmv',
-    '.webm',
-    '.m4v',
-  };
-
-  /// Palavras-chave em group-title que indicam conteudo VOD.
-  /// Comparacao e case-insensitive.
-  static const _palavrasFilme = [
-    'filme',
-    'movie',
-    'cinema',
-    'serie',
-    'series',
-    'temporada',
-    'season',
-    'episodio',
-    'vod',
-  ];
-
   /// Detecta manifesto HLS (streaming adaptativo) pelo cabeçalho.
   /// Manifesto HLS usa tags como #EXT-X-TARGETDURATION, #EXT-X-STREAM-INF,
   /// #EXT-X-MEDIA-SEQUENCE — completamente diferentes do #EXTINF do M3U IPTV.
@@ -118,7 +91,7 @@ class ParserM3U {
           logoUrl: logoAtual,
           grupo: grupo,
           tvgId: tvgIdAtual,
-          tipo: _classificarTipo(url: linha, grupo: grupo),
+          tipo: tipoCanalPorUrl(linha),
           duracaoSegundos: (duracaoAtual != null && duracaoAtual > 0)
               ? duracaoAtual
               : null,
@@ -141,31 +114,21 @@ class ParserM3U {
     return canais;
   }
 
-  /// Determina se um canal e VOD (filme) ou stream ao vivo.
-  /// Heuristica:
-  ///  1. Se a URL termina com extensao de arquivo de video -> filme.
-  ///  2. Se o group-title contem palavras-chave de VOD -> filme.
-  ///  3. Caso contrario -> ao vivo (padrao para IPTV).
-  TipoCanal _classificarTipo({required String url, required String grupo}) {
-    final urlLower = url.toLowerCase();
-
-    // 1) Detecta pela extensao da URL. Removemos querystring antes.
-    final urlSemQuery = urlLower.split('?').first;
-    for (final ext in _extensoesFilme) {
-      if (urlSemQuery.endsWith(ext)) return TipoCanal.filme;
-    }
-
-    // 2) Detecta por palavras-chave no nome do grupo.
-    final grupoLower = grupo.toLowerCase();
-    for (final palavra in _palavrasFilme) {
-      if (grupoLower.contains(palavra)) return TipoCanal.filme;
-    }
-
-    return TipoCanal.aoVivo;
-  }
-
   _DadosExtinf _parseExtinf(String linha) {
-    final indexVirgula = linha.indexOf(',');
+    // A virgula separadora e a 1a FORA de aspas. Valores de atributo podem ter
+    // virgula (ex.: tvg-name="MEU FILHO, NOSSO MUNDO") — um indexOf(',') simples
+    // cortava no meio do atributo e jogava o resto da linha no nome.
+    var indexVirgula = -1;
+    var dentroDeAspas = false;
+    for (var i = 0; i < linha.length; i++) {
+      final ch = linha[i];
+      if (ch == '"') {
+        dentroDeAspas = !dentroDeAspas;
+      } else if (ch == ',' && !dentroDeAspas) {
+        indexVirgula = i;
+        break;
+      }
+    }
     String nome = 'Sem nome';
     String antesVirgula = linha;
 

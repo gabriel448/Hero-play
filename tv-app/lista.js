@@ -277,6 +277,43 @@ const Lista = (() => {
   const _kwLancamento = ['lanca', 'cinema', 'estreia', 'cartaz', 'em alta'];
   const ehLancamento = (nome) => { const n = _normVod(nome); return _kwLancamento.some((k) => n.includes(k)); };
 
+  // ── Recência: "o que acabou de entrar no catálogo" ────────────────────────
+  // A lista M3U não traz data de inclusão, e o ANO do título é o ano de
+  // lançamento do FILME — não serve. O sinal que existe é o id numérico do
+  // stream na URL Xtream (.../movie/user/pass/123456.mp4): o painel do provedor
+  // gera ids crescentes, então id maior = entrou depois.
+  function idStream(url) {
+    const semQuery = (url || '').split('?')[0];
+    const ultimo = semQuery.split('/').pop();
+    const ponto = ultimo.lastIndexOf('.');
+    const n = parseInt(ponto === -1 ? ultimo : ultimo.slice(0, ponto), 10);
+    return isNaN(n) ? null : n;
+  }
+  // Série: usa o MAIOR id entre os episódios (o episódio mais novo é o que diz
+  // se a série teve movimento recente).
+  function pesoRecencia(it) {
+    if (it.tipo !== 'serie') return idStream(it.url);
+    let maior = null;
+    for (const e of (it.episodios || [])) {
+      const id = idStream(e.url);
+      if (id !== null && (maior === null || id > maior)) maior = id;
+    }
+    return maior;
+  }
+  // Do mais novo para o mais antigo. Quem não tem id (M3U avulsa) fica depois,
+  // na ordem INVERSA da lista — provedor acrescenta no fim do arquivo.
+  function ordenarPorRecencia(arr) {
+    return arr
+      .map((it, i) => ({ it, id: pesoRecencia(it), i }))
+      .sort((a, b) => {
+        if (a.id !== null && b.id !== null) return b.id - a.id;
+        if (a.id !== null) return -1;
+        if (b.id !== null) return 1;
+        return b.i - a.i;
+      })
+      .map((x) => x.it);
+  }
+
   // ── Catálogo ──────────────────────────────────────────────────────────────
   // Filmes/Séries: categorias A-Z, com LANÇAMENTOS primeiro (igual ao mobile).
   function trilhosPorGrupo(itens) {
@@ -289,9 +326,15 @@ const Lista = (() => {
     const ordenadas = [...nomes.filter(ehLancamento), ...nomes.filter((n) => !ehLancamento(n))];
     return ordenadas.slice(0, maxTrilhos).map((titulo) => ({
       titulo,
-      // Chave pré-calculada (1x por item) em vez de toLowerCase()+localeCompare()
+      // LANÇAMENTOS: ordem de CHEGADA (mais novo primeiro) — numa fila de
+      // lançamentos o que importa é o que acabou de entrar, e o A-Z escondia
+      // isso no meio da lista. Demais categorias seguem A-Z, com a chave
+      // pré-calculada (1x por item) em vez de toLowerCase()+localeCompare()
       // por comparação — era centenas de milhares de operações lentas no boot.
-      itens: _ordenarPorChave(g[titulo], (it) => _chaveOrd(it.titulo)).slice(0, maxItens),
+      itens: (ehLancamento(titulo)
+        ? ordenarPorRecencia(g[titulo])
+        : _ordenarPorChave(g[titulo], (it) => _chaveOrd(it.titulo))
+      ).slice(0, maxItens),
     }));
   }
 
