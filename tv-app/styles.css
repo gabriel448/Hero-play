@@ -726,6 +726,15 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
 #live-overlay.controles-ocultos .player-voltar,
 #live-overlay.controles-ocultos .player-fade { opacity: 0; pointer-events: none; }
 
+/* Espera pela vinculação: avisa que a TV está checando sozinha, para o usuário
+   não achar que precisa apertar "Recarregar". */
+.ob-espera { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 15px; color: var(--text-tertiary); }
+.ob-espera-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-bright); animation: obPulso 1.4s ease-in-out infinite; will-change: opacity, transform; }
+@keyframes obPulso {
+  0%, 100% { opacity: .35; transform: scale(.85); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+
 /* ── Onboarding / aviso de teste (tela cheia) ─────────────────────────────── */
 .oculto { display: none !important; }
 

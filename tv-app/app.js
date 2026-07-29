@@ -2903,6 +2903,7 @@ function mostrarOnboarding() {
         <div class="ob-left-txt">${t('Adicione e ative <b>tudo pelo site</b>')}</div>
         <div class="ob-link">heroplaytv.com/upload</div>
         <button class="btn btn-secundario focusable" id="ob-reload">${escapar(t('↻ Recarregar'))}</button>
+        <div class="ob-espera" id="ob-espera"><span class="ob-espera-dot"></span>${escapar(t('Aguardando a playlist…'))}</div>
         <div class="ob-ou"><span>${escapar(t('ou'))}</span></div>
         <div class="ob-hint">${escapar(t('Use as credenciais ou a URL da playlist no formulário ao lado'))}</div>
       </div>
@@ -2936,6 +2937,54 @@ function mostrarOnboarding() {
     t.addEventListener('click', () => trocarModoOnboarding(t.dataset.modo)));
   ob.querySelectorAll('.ob-input').forEach((inp) => inp.addEventListener('click', () => abrirTeclado(inp)));
   SpatialNav.setFocus(document.getElementById('x-host'));
+  ligarEsperaVinculo();
+}
+
+// ── Espera pela vinculação (o usuário não precisa apertar nada) ─────────────
+//
+// Enquanto o onboarding está na tela, perguntamos à nuvem de tempos em tempos
+// se já vincularam uma playlist a este aparelho. Assim que vincular (pelo site
+// ou pelo painel do revendedor), a TV entra sozinha — o "↻ Recarregar" vira
+// atalho para quem não quer esperar, não uma obrigação.
+let _obPoll = null, _obPollInicio = 0;
+
+function pararEsperaVinculo() {
+  if (_obPoll) { clearTimeout(_obPoll); _obPoll = null; }
+}
+
+function ligarEsperaVinculo() {
+  pararEsperaVinculo();
+  _obPollInicio = Date.now();
+
+  const agendar = () => {
+    // 5s nos primeiros 3 minutos — é a janela em que o usuário está mexendo no
+    // celular AGORA. Depois cai para 20s: uma TV pode ficar horas nesta tela e
+    // não faz sentido martelar a Edge Function a noite toda.
+    const decorrido = Date.now() - _obPollInicio;
+    _obPoll = setTimeout(tick, decorrido < 180000 ? 5000 : 20000);
+  };
+
+  async function tick() {
+    _obPoll = null;
+    // Saiu do onboarding (entrou pelo formulário, por exemplo): para.
+    if (!document.getElementById('onboarding')) return;
+    // App em segundo plano: não gasta rede, só re-agenda.
+    if (document.hidden) return agendar();
+    try {
+      await Dispositivo.consultar();
+      if (Dispositivo.temLista()) {
+        pararEsperaVinculo();
+        toast(t('Playlist encontrada! Carregando…'));
+        const ob = document.getElementById('onboarding');
+        if (ob) ob.remove();
+        iniciarApp();
+        return;
+      }
+    } catch (_) { /* rede instável: tenta de novo no próximo ciclo */ }
+    agendar();
+  }
+
+  agendar();
 }
 
 function trocarModoOnboarding(modo) {
@@ -2967,6 +3016,7 @@ function onboardingAdicionar() {
   }
 
   // Registra na nuvem (best-effort) + grava local, depois carrega a lista.
+  pararEsperaVinculo();   // o usuário resolveu pelo formulário
   const ob = document.getElementById('onboarding');
   if (ob) ob.remove();
   mostrarLoading(t('Adicionando sua lista…'));
@@ -2977,6 +3027,7 @@ async function recarregarOnboarding() {
   toast(t('Verificando…'));
   await Dispositivo.consultar();
   if (Dispositivo.temLista()) {
+    pararEsperaVinculo();
     const ob = document.getElementById('onboarding');
     if (ob) ob.remove();
     iniciarApp();

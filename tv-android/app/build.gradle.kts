@@ -25,8 +25,8 @@ android {
         // Fire OS 5 (Fire Stick 2a geracao) roda Android 5.1 = API 22.
         minSdk = 22
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.3.1"
+        versionCode = 10
+        versionName = "0.4.0"
     }
 
     if (keystorePropertiesFile.exists()) {
