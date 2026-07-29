@@ -68,7 +68,12 @@ const SpatialNav = (() => {
     el.classList.add('is-focused');
     aoMudarFoco(el);
     // Campos de texto: foco NATIVO p/ digitar (e abrir o teclado on-screen na TV).
-    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+    // EXCETO na casca Android (TV Box/Fire TV): lá o foco nativo faz o IME do
+    // sistema abrir SOZINHO, só de passar o D-pad pelo campo — e ele cobre o app
+    // sem que o Voltar do controle feche. Lá o teclado é o do próprio app e abre
+    // no Enter (ver abrirTeclado em app.js).
+    const androidTv = (function () { try { return !!window.HeroPlayAndroid; } catch (_) { return false; } })();
+    if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && !androidTv) {
       try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); }
     } else if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();

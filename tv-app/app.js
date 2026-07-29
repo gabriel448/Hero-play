@@ -2835,7 +2835,13 @@ let _kbShift = false;
 // ao focar um <input>. Nesses casos NÃO abrimos o nosso (evita 2 teclados) —
 // só focamos o campo e deixamos o nativo agir. No desktop/navegador comum (sem
 // VKB do sistema), abrimos o teclado on-screen do Hero Play.
-const _tvComTecladoNativo = () => /web[0o]s|tizen|netcast|smart-?tv/i.test(navigator.userAgent);
+//
+// ⚠️ O TV Box/Fire TV fica de FORA: o userAgent da casca Android também diz
+// "SmartTV", mas o teclado de lá é o IME do Android — ele abre sozinho ao focar
+// o campo, cobre o app e o Voltar do controle não fecha (a Activity intercepta o
+// Back e manda pro app). Resultado: onboarding travado com o teclado aberto.
+// Lá usamos o teclado do próprio app, que é navegável por D-pad e fecha no Back.
+const _tvComTecladoNativo = () => !EH_ANDROID_TV && /web[0o]s|tizen|netcast|smart-?tv/i.test(navigator.userAgent);
 function abrirTeclado(input) {
   if (!input || document.querySelector('.tv-kb')) return;
   if (_tvComTecladoNativo()) {

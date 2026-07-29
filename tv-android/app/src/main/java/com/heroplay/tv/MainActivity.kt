@@ -1,6 +1,7 @@
 package com.heroplay.tv
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
@@ -14,6 +15,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 
@@ -119,9 +121,32 @@ class MainActivity : AppCompatActivity() {
         // evento para o JS em vez de fechar a Activity na cara do usuario.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                // Teclado do SISTEMA aberto? O Back fecha ELE primeiro — como faria
+                // em qualquer app Android. Sem isto o usuario ficava preso: o Back
+                // ia direto pro JS, o IME continuava por cima e nao havia saida.
+                if (fecharTecladoDoSistema()) return
                 web.evaluateJavascript("window.history.back()", null)
             }
         })
+    }
+
+    /**
+     * Fecha o teclado do sistema, se ele estiver ligado a algum campo.
+     *
+     * `isAcceptingText` = existe conexao de entrada ativa. Junto com o
+     * `clearFocus` do WebView a conexao cai, entao o proximo Back segue o
+     * caminho normal — no pior caso engolimos UM toque, nunca prendemos.
+     *
+     * Na pratica isto quase nunca dispara: a web app nao deixa mais o campo
+     * receber foco nativo no Android (ver setFocus em spatial-nav.js), justo
+     * pra o IME nao abrir sozinho. Fica como rede de seguranca.
+     */
+    private fun fecharTecladoDoSistema(): Boolean {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return false
+        if (!imm.isAcceptingText) return false
+        try { imm.hideSoftInputFromWindow(web.windowToken, 0) } catch (e: Throwable) { Log.e("HeroPlay", "ime", e) }
+        web.clearFocus()
+        return true
     }
 
     /**
