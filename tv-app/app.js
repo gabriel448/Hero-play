@@ -3630,6 +3630,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Hero reage ao item em foco (Início/Filmes/Séries).
   SpatialNav.aoFocar((el) => {
     if (!el || !el.classList) return;
+    // Campo de texto (onboarding / adicionar playlist): a moldura de destaque é
+    // do WRAPPER (.ob-campo) e vinha do `:focus-within`, ou seja, do foco nativo
+    // do <input> — que no TV Box deixou de existir de propósito. Marcamos o
+    // wrapper na mão pra o campo continuar demarcado ao descer o foco nele.
+    // Com o teclado aberto o foco está nas TECLAS: aí o campo que está sendo
+    // preenchido continua demarcado (não se apaga o destaque dele).
+    if (!document.querySelector('.tv-kb')) {
+      document.querySelectorAll('.ob-campo.focado').forEach((c) => c.classList.remove('focado'));
+      const campo = el.closest && el.closest('.ob-campo');
+      if (campo) campo.classList.add('focado');
+    }
     // Detalhe: subir do elenco/semelhantes de volta pros botões tem que trazer a
     // tela INTEIRA de volta ao topo (logo-título e sinopse completos). Isso era
     // feito só por `scroll-margin-top: 100vh` no CSS, que depende de

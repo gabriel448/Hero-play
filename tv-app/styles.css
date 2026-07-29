@@ -910,7 +910,12 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
   background: var(--surface2); border: 1px solid var(--outline);
   transition: border-color .12s, box-shadow .12s;
 }
-.ob-campo:focus-within { border-color: var(--accent-bright); box-shadow: 0 0 0 3px rgba(239,83,80,.35); }
+/* Destaque do campo. `:focus-within` depende do foco NATIVO do <input> — que no
+   TV Box não acontece mais (é o que fazia o teclado do sistema abrir sozinho e
+   prender o app). Por isso a classe `.focado`, posta no wrapper pelo D-pad: as
+   duas dão o mesmo visual, cada uma cobrindo uma plataforma. */
+.ob-campo:focus-within,
+.ob-campo.focado { border-color: var(--accent-bright); box-shadow: 0 0 0 3px rgba(239,83,80,.35); }
 .ob-ico { width: 24px; height: 24px; flex-shrink: 0; color: var(--text-tertiary); display: flex; align-items: center; justify-content: center; }
 .ob-ico svg { width: 24px; height: 24px; }
 .ob-input {
