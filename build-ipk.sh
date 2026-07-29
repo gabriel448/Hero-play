@@ -16,7 +16,9 @@ cd "$(dirname "$0")"
 SRC=tv-app
 STAGE=dist-build
 OUT=dist-webos
-IPK="$OUT/com.heroplay.tv_0.1.0_all.ipk"
+# Versao vem do appinfo.json (fonte unica) — o ares nomeia o .ipk com ela.
+VER=$(python -c "import json;print(json.load(open('$SRC/appinfo.json'))['version'])")
+IPK="$OUT/com.heroplay.tv_${VER}_all.ipk"
 ESBUILD="npx --yes esbuild@0.20.2"
 
 echo "[1/4] Staging + transpile (chrome68)…"
@@ -38,9 +40,10 @@ rm -f "$IPK"
 ares-package "$STAGE" -n -o "$OUT"
 
 echo "[3/4] Corrigindo control…"
-python - "$IPK" <<'PYEOF'
+python - "$IPK" "$VER" <<'PYEOF'
 import sys, tarfile, io, time
 src = sys.argv[1]
+ver = sys.argv[2]
 d = open(src, 'rb').read()
 assert d[:8] == b'!<arch>\n', 'ipk invalido'
 i, mem = 8, {}
@@ -53,7 +56,7 @@ while i < len(d):
     i += 60 + size + (size % 2)
 control = (
     "Package: com.heroplay.tv\n"
-    "Version: 0.1.0\n"
+    "Version: " + ver + "\n"
     "Section: misc\n"
     "Priority: optional\n"
     "Architecture: all\n"

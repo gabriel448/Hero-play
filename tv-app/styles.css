@@ -572,17 +572,37 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
 .tv-panes { display: flex; height: 100%; }
 .tv-pane-cat, .tv-pane-canais {
   flex-shrink: 0; overflow-y: auto; overflow-x: hidden; padding: 40px 0;
-  scrollbar-width: none; transition: width .25s cubic-bezier(.22,.61,.36,1), opacity .25s;
+  scrollbar-width: none;
+  transition: width .25s cubic-bezier(.22,.61,.36,1), opacity .25s, transform .25s;
 }
 .tv-pane-cat::-webkit-scrollbar, .tv-pane-canais::-webkit-scrollbar { width: 0; }
 .tv-pane-cat { width: 100%; }
 .tv-pane-canais { width: 0; }
+/* Recuadas: escurecidas + levemente afastadas, com o painel de canais projetando
+   sombra por cima — assim leem como uma camada ATRAS, e nao como uma coluna
+   colada ali. (O mask-image que havia aqui apagava o COMECO do nome e o que
+   sobrava parecia texto picotado; alem de nao existir em WebView antigo.) */
 .tv-panes.com-canais .tv-pane-cat {
-  width: 22%; opacity: .45;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 80%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 80%);
+  width: 24%;
+  opacity: .30;
+  transform: scale(.94);
+  transform-origin: left center;
+  will-change: transform, opacity;
 }
-.tv-panes.com-canais .tv-pane-canais { width: 78%; }
+.tv-panes.com-canais .tv-pane-canais {
+  width: 76%;
+  position: relative;
+  box-shadow: -22px 0 44px -14px rgba(0,0,0,.95);
+}
+/* Degrade preto na borda esquerda do painel: reforca a sensacao de profundidade
+   (as categorias "somem por baixo" dele). */
+.tv-panes.com-canais .tv-pane-canais::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 46px;
+  pointer-events: none; z-index: 1;
+  background: linear-gradient(90deg, rgba(0,0,0,.75), rgba(0,0,0,0));
+}
+/* Nome longo termina em "…" em vez de ser cortado no meio da palavra. */
+.tv-cat-nome { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Animacoes de slide entre categorias e canais */
 @keyframes slideDir { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
@@ -641,8 +661,14 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
 .tv-vazio-titulo { font-size: 30px; font-weight: 800; }
 .tv-vazio-sub { font-size: 17px; color: var(--text-secondary); }
 
-.tv-tela { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; cursor: pointer; border: 1px solid var(--outline); transition: box-shadow .15s, transform .15s; }
-.tv-tela video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* Moldura da preview em 16:9 pelo truque do padding (56.25%), NAO por
+   `aspect-ratio`: essa propriedade so existe do Chromium 88 pra frente, e o
+   WebView de TV Box/webOS costuma ser bem mais velho. Sem ela a altura da
+   moldura passava a vir do <video>: com o player NATIVO o <video> fica vazio
+   (300x150 de fabrica), a moldura esticava e empurrava o nome do canal e a
+   programacao pra fora da tela — a "coluna direita bugada". */
+.tv-tela { position: relative; width: 100%; height: 0; padding-top: 56.25%; background: #000; border-radius: 10px; overflow: hidden; cursor: pointer; border: 1px solid var(--outline); transition: box-shadow .15s, transform .15s; }
+.tv-tela video { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .tv-tela-hint { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 10px; background: rgba(0,0,0,.65); font-size: 14px; font-weight: 700; opacity: 0; transition: opacity .15s; }
 .tv-tela-hint svg { width: 18px; height: 18px; }
 .tv-tela.is-focused { box-shadow: 0 0 0 4px var(--accent-bright); }
@@ -680,7 +706,7 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
 #live-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; background: transparent; }
 /* Preview maximizado: a MESMA moldura vai a tela cheia por CSS, sem mover o DOM.
    z-index abaixo do overlay (400) para os controles ficarem por cima do video. */
-.tv-tela.cheia { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 399; width: auto; height: auto; aspect-ratio: auto; border: none; border-radius: 0; background: #000; }
+.tv-tela.cheia { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 399; width: auto; height: auto; padding-top: 0; border: none; border-radius: 0; background: #000; }
 .tv-tela.cheia.is-focused { box-shadow: none; }
 .tv-tela.cheia .tv-tela-hint { display: none; }
 
@@ -1323,9 +1349,9 @@ html.tv .cfg-termos, html.tv .jg-modal, html.tv .cont-modal, html.tv .perfil-for
 html.tv #sidebar,
 html.tv .tv-pane-cat, html.tv .tv-pane-canais,
 html.tv .logo-text, html.tv .nav-item .rotulo, html.tv .perfil-mini-nome { transition: none !important; }
-/* Máscara de gradiente no painel recuado: filtro caro por frame. O fade de
-   opacidade (.45) já sinaliza o recuo. */
-html.tv .tv-panes.com-canais .tv-pane-cat { -webkit-mask-image: none; mask-image: none; }
+/* (A máscara de gradiente do painel recuado saiu do CSS: era filtro caro por
+   frame, recortava o começo do nome da categoria e nem existe em WebView
+   antigo. Agora o recuo é opacidade + escala + a sombra do painel de canais.) */
 
 /* Sombra de foco barata. `0 22px 48px -16px` é um blur de 48px repintado a cada
    troca de foco (em DOIS pôsteres: o que sai e o que entra) — caro na GPU da TV.

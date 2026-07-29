@@ -34,6 +34,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var raiz: FrameLayout
     private lateinit var nativo: PlayerNativo
 
+    companion object {
+        /** Fracao de cada borda reservada contra o overscan da TV. */
+        private const val MARGEM_SEGURA = 0.02f
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +95,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(raiz)
         esconderBarras()
+        aplicarMargemDeSeguranca()
         web.loadUrl("file:///android_asset/www/index.html")
 
         // Botao VOLTAR do controle: o app ja trata a navegacao por history +
@@ -100,6 +106,28 @@ class MainActivity : AppCompatActivity() {
                 web.evaluateJavascript("window.history.back()", null)
             }
         })
+    }
+
+    /**
+     * OVERSCAN: quase toda TV corta as bordas do sinal HDMI (uns 2%), e ai a
+     * sidebar fica colada no canto e o lado direito some. Numa LG/Samsung isso
+     * nao acontece porque o app E da TV — aqui o app chega por HDMI.
+     *
+     * A solucao e uma margem de seguranca no CONTAINER: o WebView encolhe, a
+     * pagina continua com a MESMA viewport (o Chromium reescala o layout, sem
+     * borrar — nada de `transform: scale`) e o video nativo, que e irmao do
+     * WebView dentro do mesmo padding, acompanha automaticamente.
+     *
+     * Se a TV estiver com "Just Scan"/"Tela 100%" ligado, isto so deixa uma
+     * borda preta de 2% que some no fundo do app.
+     */
+    private fun aplicarMargemDeSeguranca() {
+        raiz.post {
+            if (raiz.width <= 0 || raiz.height <= 0) return@post
+            val px = (raiz.width * MARGEM_SEGURA).toInt()
+            val py = (raiz.height * MARGEM_SEGURA).toInt()
+            raiz.setPadding(px, py, px, py)
+        }
     }
 
     /** Tela cheia de verdade: sem barra de status nem de navegacao. */
@@ -209,9 +237,14 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun mudo(on: Boolean) = naUi { nativo.mudo(on) }
 
-        /** Retangulo onde o video deve aparecer, em CSS px. */
+        /**
+         * Retangulo onde o video deve aparecer, em CSS px, acompanhado do
+         * tamanho da viewport (tambem em CSS px) — e a viewport que da o fator
+         * de conversao para pixels de verdade. Ver `PlayerNativo.area`.
+         */
         @JavascriptInterface
-        fun area(x: Float, y: Float, w: Float, h: Float) = naUi { nativo.area(x, y, w, h) }
+        fun area(x: Float, y: Float, w: Float, h: Float, larguraCss: Float, alturaCss: Float) =
+            naUi { nativo.area(x, y, w, h, larguraCss, alturaCss) }
 
         /** JSON: posicao, duracao, tocando, buffering. Lido em polling pelo JS. */
         @JavascriptInterface

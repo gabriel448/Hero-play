@@ -5,7 +5,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
-import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -166,18 +165,46 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
 
     /**
      * Posiciona a superficie de video no MESMO retangulo que a web app reservou
-     * (preview da TV ao vivo ou tela cheia). Coordenadas em CSS px; aqui viram
-     * pixels reais pela densidade da tela. Largura 0 esconde.
+     * (preview da TV ao vivo ou tela cheia). Largura 0 esconde.
+     *
+     * `x/y/w/h` vem em CSS px, junto com o TAMANHO DA VIEWPORT em CSS px
+     * (`larguraCss/alturaCss`) — e dai sai o fator exato de conversao.
+     *
+     * ⚠️ Antes isto usava `displayMetrics.density`, e so acertava por acaso: a
+     * pagina tem viewport FIXA (ver o <meta viewport> do index.html), entao ela
+     * NAO e medida em dp. Com a densidade errada a superficie saia deslocada e
+     * esticada — o video da preview ia parar fora da moldura e a tela cheia
+     * nascia torta. Medindo a area util real do container o fator fica certo em
+     * qualquer TV, com qualquer densidade e com qualquer viewport.
      */
-    fun area(x: Float, y: Float, w: Float, h: Float) {
+    @JvmOverloads
+    fun area(x: Float, y: Float, w: Float, h: Float, larguraCss: Float = 0f, alturaCss: Float = 0f) {
         val pv = view ?: return
+        val utilW = (raiz.width - raiz.paddingLeft - raiz.paddingRight).toFloat()
+        val utilH = (raiz.height - raiz.paddingTop - raiz.paddingBottom).toFloat()
         val d = ctx.resources.displayMetrics.density
+        // Antes do 1o layout `raiz.width` e 0: cai na densidade e o proximo tick
+        // (a cada 500 ms, vindo do JS) corrige sozinho.
+        val ex = if (larguraCss > 0f && utilW > 0f) utilW / larguraCss else d
+        val ey = if (alturaCss > 0f && utilH > 0f) utilH / alturaCss else ex
+        // Tela cheia: em vez de confiar na conta, casa com a area util INTEIRA.
+        // Assim o filme em tela cheia nunca nasce com faixa preta de um lado.
+        val cheio = larguraCss > 0f && alturaCss > 0f &&
+            w >= larguraCss * 0.98f && h >= alturaCss * 0.98f
         // ⚠️ TEM que ser FrameLayout.LayoutParams. Com um MarginLayoutParams
         // "cru" o FrameLayout estoura ClassCastException no onMeasure e o app
         // FECHA no instante em que a midia comeca — foi exatamente esse o bug.
-        val lp = FrameLayout.LayoutParams((w * d).toInt(), (h * d).toInt())
-        lp.leftMargin = (x * d).toInt()
-        lp.topMargin = (y * d).toInt()
+        val lp = if (cheio) {
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
+        } else {
+            FrameLayout.LayoutParams((w * ex).toInt(), (h * ey).toInt()).apply {
+                leftMargin = (x * ex).toInt()
+                topMargin = (y * ey).toInt()
+            }
+        }
         pv.layoutParams = lp
         pv.visibility = if (w <= 0f || h <= 0f) View.GONE else View.VISIBLE
         pv.requestLayout()

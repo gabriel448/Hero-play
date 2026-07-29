@@ -953,7 +953,10 @@ const PlayerNativo = (function () {
   function sincronizarArea() {
     if (!elDest) return;
     const r = elDest.getBoundingClientRect();
-    try { HeroPlayAndroid.area(r.left, r.top, r.width, r.height); } catch (_) {}
+    // Manda o tamanho da VIEWPORT junto: é ele que dá ao lado nativo o fator
+    // exato de CSS px → pixel de tela. Sem isso o Kotlin chutava pela densidade
+    // do aparelho e a superfície saía deslocada (vídeo fora da moldura).
+    try { HeroPlayAndroid.area(r.left, r.top, r.width, r.height, window.innerWidth, window.innerHeight); } catch (_) {}
     // Ocupando (quase) a tela toda? Então o resto do app tem que sumir — com a
     // página transparente ele apareceria POR CIMA do vídeo.
     const cheio = r.width >= window.innerWidth * 0.92 && r.height >= window.innerHeight * 0.92;

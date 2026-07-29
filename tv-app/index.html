@@ -2,12 +2,16 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <!-- Largura FIXA de 1920: todo o CSS do app foi medido para a viewport de uma
-       TV (webOS/Tizen relatam 1920x1080). Com `device-width` o WebView do Android
-       usa pixels LOGICOS (1080p / densidade 2 = 960 css px) e a interface sai com
-       o DOBRO do tamanho — foi o que apareceu no TV Box e piorou na TV grande.
-       Nas TVs o valor e o mesmo de antes, entao nada muda la. -->
-  <meta name="viewport" content="width=1920, user-scalable=no">
+  <!-- Largura FIXA da viewport (nunca `device-width`: no WebView do Android ela
+       vira pixel LOGICO — 1080p / densidade 2 = 960 css px — e a interface sai
+       com o dobro do tamanho, foi o que apareceu no TV Box).
+
+       1600 e nao 1920: o CSS foi escrito em px sobre 1920, e a 3-4 metros do
+       sofa texto secundario de 17-19px fica pequeno demais (regra dos 10 pes).
+       Declarar 1600 reescala TUDO — texto, icone, espacamento — em 1,2x de uma
+       vez, mantendo as proporcoes do desenho. E reescala de LAYOUT: o Chromium
+       rasteriza na resolucao real da tela, entao nada borra. -->
+  <meta name="viewport" content="width=1600, user-scalable=no">
   <title>Hero Play TV</title>
   <link rel="stylesheet" href="styles.css">
 
