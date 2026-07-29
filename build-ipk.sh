@@ -34,6 +34,19 @@ done
 # CSS: polyfill de `gap` em flexbox (não existe no Chromium 68) → margem entre
 # filhos. Grid gap é preservado. (`inset` já foi corrigido no fonte.)
 python tools/css-flex-gap.py "$STAGE/styles.css"
+# VERSAO de verdade no pacote: troca o APP_VERSAO do config.js pela do
+# appinfo.json. Antes era um '1.0.0-beta' fixo, igual em toda release — e ai nao
+# havia como saber, olhando a TV, se o aparelho tinha atualizado.
+python - "$STAGE/config.js" "$VER" <<'PYVER'
+import re, sys
+arq, ver = sys.argv[1], sys.argv[2]
+s = open(arq, encoding='utf-8').read()
+# Aspas dos DOIS tipos: o esbuild roda ANTES daqui e normaliza ' -> "
+novo, n = re.subn(r"""const APP_VERSAO = ['"][^'"]*['"]""", "const APP_VERSAO = '%s'" % ver, s, count=1)
+assert n == 1, 'APP_VERSAO nao encontrado em config.js'
+open(arq, 'w', encoding='utf-8').write(novo)
+print('  APP_VERSAO = %s' % ver)
+PYVER
 
 echo "[2/4] Empacotando…"
 rm -f "$IPK"

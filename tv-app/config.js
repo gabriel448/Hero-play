@@ -8,7 +8,12 @@
    navegar, SpatialNav, gerarQr, categorias, escapar, iniciais, IC_*).
    ============================================================================ */
 
-const APP_VERSAO = '1.0.0-beta';
+// ⚠️ NÃO editar à mão. Os empacotadores (build-ipk.sh / build-apk-tv.sh) trocam
+// esta linha pela versão do `appinfo.json` na cópia que vai pro pacote — antes
+// isto era um `'1.0.0-beta'` fixo que nunca mudou em release nenhuma, e por isso
+// não havia como saber, olhando a TV, se o app estava atualizado. O valor aqui é
+// só o do fonte/web (dev).
+const APP_VERSAO = '0.4.9-dev';
 
 // ── Ícones (pequenos, stroke) ───────────────────────────────────────────────
 const CFG_ICO = {
@@ -675,10 +680,22 @@ function paneDiag(pane) {
 }
 
 function paneSobre(pane) {
-  const disp = /Tizen/i.test(navigator.userAgent) ? 'Samsung Tizen' : /Web0S|webOS/i.test(navigator.userAgent) ? 'LG webOS' : t('Web / Navegador');
+  // Android TV/TV Box entra ANTES: a casca manda "SmartTV" no userAgent, então
+  // sem esta checagem um TV Box aparecia como "Web / Navegador".
+  const ehAndroid = (function () { try { return !!window.HeroPlayAndroid; } catch (_) { return false; } })();
+  const disp = ehAndroid ? 'Android TV / TV Box'
+    : /Tizen/i.test(navigator.userAgent) ? 'Samsung Tizen'
+    : /Web0S|webOS/i.test(navigator.userAgent) ? 'LG webOS'
+    : t('Web / Navegador');
+  // VIEWPORT: quantos px de CSS a tela tem. O app é desenhado para 1600 (ver o
+  // <meta viewport> do index.html). Se aparecer um número bem menor aqui, a TV
+  // está IGNORANDO o meta — e é isso que espreme as colunas (nome de categoria
+  // cortado em duas letras). Serve pra diagnosticar por foto, sem adb.
+  const vp = `${window.innerWidth}×${window.innerHeight}`;
   const linhas = [
     [t('Versão do App'), APP_VERSAO],
     [t('Dispositivo'), disp],
+    [t('Tela (viewport)'), vp + (window.innerWidth < 1400 ? ' ⚠' : '')],
     [t('Endereço MAC'), Dispositivo.mac()],
     [t('Device Key'), Dispositivo.key()],
   ];

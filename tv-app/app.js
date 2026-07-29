@@ -535,6 +535,19 @@ if (EH_TV) { try { document.documentElement.classList.add('tv'); } catch (_) {} 
 // Botão VOLTAR visível (SÓ na TV): em muitas TVs o botão Voltar do controle FECHA
 // o app no nível do sistema (nada em JS impede). Este botão focável garante voltar
 // pelo D-pad em telas que só saíam pelo Voltar. Vai no topo-esquerda do overlay.
+// Etiqueta discreta de versão + largura da tela, mostrada nas telas em que o
+// usuário PARA (onboarding e aviso de teste).
+//
+// Existe por um caso real: o app numa TV Philips (Google TV) aparecia espremido
+// e não havia como saber, olhando a tela, se aquela TV tinha a versão nova — a
+// tela "Sobre" trazia um `1.0.0-beta` fixo, igual em toda release. Com isto, uma
+// FOTO da tela responde as duas perguntas: qual versão, e se a TV respeitou a
+// viewport de 1600 (se vier um número bem menor, é ela que está espremendo).
+function etiquetaVersao() {
+  const v = (typeof APP_VERSAO === 'string' && APP_VERSAO) || '?';
+  return `v${v} · ${window.innerWidth}×${window.innerHeight}`;
+}
+
 function htmlVoltar() {
   if (!EH_TV) return '';
   return '<button class="tela-voltar focusable" data-acao="tela-voltar" aria-label="Voltar">'
@@ -2961,6 +2974,7 @@ function mostrarOnboarding() {
     <div class="ob-cred-fixo">
       <div>Key: <b>${Dispositivo.key()}</b></div>
       <div>Mac: <b>${Dispositivo.mac()}</b></div>
+      <div class="ob-versao">${escapar(etiquetaVersao())}</div>
     </div>`;
   gerarQr('ob-qr', Dispositivo.urlAtivacao());
   document.getElementById('ob-reload').addEventListener('click', recarregarOnboarding);
@@ -3083,6 +3097,7 @@ function mostrarAvisoTeste() {
       <div class="aviso-rotulo">${escapar(t('Ativar / gerenciar'))}</div>
       <div class="ob-link">heroplaytv.com/upload</div>
       <button class="btn btn-primario focusable" id="aviso-ok">${escapar(t('Continuar no teste'))}</button>
+      <div class="ob-versao">${escapar(etiquetaVersao())}</div>
     </div>`;
   document.body.appendChild(ov);
   ov._onVoltar = fecharAvisoTeste;

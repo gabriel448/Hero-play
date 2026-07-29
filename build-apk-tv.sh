@@ -19,6 +19,8 @@ SRC=tv-app
 STAGE=dist-build-android
 WWW=tv-android/app/src/main/assets/www
 ESBUILD="npx --yes esbuild@0.20.2"
+# Fonte unica da versao da web app (a mesma que nomeia o .ipk da LG).
+VER=$(python -c "import json;print(json.load(open('$SRC/appinfo.json'))['version'])")
 
 echo "[1/3] Staging + transpile (chrome68)…"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
@@ -32,6 +34,19 @@ for f in "$STAGE"/*.js "$STAGE"/vendor/*.js; do
   mv "$f.tp" "$f"
 done
 python tools/css-flex-gap.py "$STAGE/styles.css"
+# VERSAO de verdade no pacote: troca o APP_VERSAO do config.js pela do
+# appinfo.json. Antes era um '1.0.0-beta' fixo, igual em toda release — e ai nao
+# havia como saber, olhando a TV, se o aparelho tinha atualizado.
+python - "$STAGE/config.js" "$VER" <<'PYVER'
+import re, sys
+arq, ver = sys.argv[1], sys.argv[2]
+s = open(arq, encoding='utf-8').read()
+# Aspas dos DOIS tipos: o esbuild roda ANTES daqui e normaliza ' -> "
+novo, n = re.subn(r"""const APP_VERSAO = ['"][^'"]*['"]""", "const APP_VERSAO = '%s'" % ver, s, count=1)
+assert n == 1, 'APP_VERSAO nao encontrado em config.js'
+open(arq, 'w', encoding='utf-8').write(novo)
+print('  APP_VERSAO = %s' % ver)
+PYVER
 
 echo "[2/3] Copiando para os assets do APK…"
 rm -rf "$WWW"; mkdir -p "$WWW"

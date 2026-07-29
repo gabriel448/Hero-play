@@ -884,6 +884,11 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
   color: var(--text-tertiary); font-size: 18px; opacity: .85;
 }
 .ob-cred-fixo b { color: var(--text-secondary); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+/* Etiqueta de versao + largura da tela: discreta, mas legivel numa FOTO da TV —
+   e assim que se descobre, a distancia, se o aparelho atualizou (ver
+   etiquetaVersao em app.js). */
+.ob-versao { margin-top: 4px; font-size: 15px; color: var(--text-tertiary); opacity: .7; font-variant-numeric: tabular-nums; }
+.aviso-card .ob-versao { margin-top: 14px; text-align: center; }
 .ob-cred > div { display: flex; flex-direction: column; gap: 4px; }
 .ob-cred span { font-size: 16px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .08em; }
 .ob-cred b { font-size: 26px; font-weight: 800; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
