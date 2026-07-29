@@ -3601,6 +3601,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Hero reage ao item em foco (Início/Filmes/Séries).
   SpatialNav.aoFocar((el) => {
     if (!el || !el.classList) return;
+    // Detalhe: subir do elenco/semelhantes de volta pros botões tem que trazer a
+    // tela INTEIRA de volta ao topo (logo-título e sinopse completos). Isso era
+    // feito só por `scroll-margin-top: 100vh` no CSS, que depende de
+    // `scroll-margin` — WebView antigo de TV Box/webOS não tem, e aí a tela
+    // ficava parada no meio. Aqui é explícito e não depende do motor.
+    if (el.closest && el.closest('.det2-topo')) {
+      // No frame seguinte: o SpatialNav dá um scrollIntoView('nearest') logo
+      // depois deste callback, e ele rolaria só o mínimo, deixando a tela no meio.
+      const sc = document.getElementById('det2-scroll');
+      if (sc && sc.scrollTop > 0) requestAnimationFrame(() => sc.scrollTo({ top: 0, behavior: 'smooth' }));
+    }
     if (el.classList.contains('poster')) {
       if (el.closest('.bsc-grid')) {
         el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // grade da busca rola sozinha

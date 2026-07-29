@@ -22,7 +22,10 @@
 
   --sidebar-col:   116px;  /* largura recolhida (10-foot: icones grandes) */
   --sidebar-exp:   312px;  /* largura expandida (overlay, nao empurra conteudo) */
-  --safe:          64px;   /* margem segura horizontal (TV safe area) */
+  /* Margem segura horizontal. Não é contra overscan (isso é problema da TV) — é
+     pra que o ANEL DE FOCO e o crescimento do item focado caibam sem encostar
+     na borda da tela. */
+  --safe:          76px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -176,10 +179,11 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
   display: flex; align-items: center; gap: 12px;
 }
 .trilho-titulo::before { content: ''; width: 5px; height: 25px; border-radius: 2px; background: var(--accent); }
-/* Padding vertical p/ o item crescer no foco sem cortar (overflow-x força y). */
+/* Padding vertical p/ o item crescer no foco sem cortar (overflow-x força y —
+   o eixo vertical vira `auto` e RECORTA o que passa: anel de foco e sombra). */
 .trilho-fila {
   display: flex; gap: 18px; overflow-x: auto;
-  padding: 20px var(--safe); scrollbar-width: none;
+  padding: 26px var(--safe) 32px; scrollbar-width: none;
 }
 .trilho-fila::-webkit-scrollbar { height: 0; }
 
@@ -266,9 +270,14 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
     linear-gradient(90deg, var(--bg) 36%, rgba(15,14,13,.72) 52%, transparent 82%),
     linear-gradient(0deg, var(--bg) 6%, transparent 42%);
 }
-.det2-scroll { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; overflow-y: auto; scrollbar-width: none; }
+/* padding-bottom: a última fila (semelhantes) é a que costuma ficar encostada no
+   rodapé — sem folga, o anel de foco do pôster de baixo era cortado pela tela. */
+.det2-scroll { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; overflow-y: auto; padding-bottom: 44px; scrollbar-width: none; }
 .det2-scroll::-webkit-scrollbar { width: 0; }
-.det2-topo { min-height: 64vh; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--safe); max-width: 52%; }
+/* padding-top livra o botão VOLTAR (fixo em top:28px, ~46px de altura): como é
+   `min-height`, quando o conteúdo passa de 64vh a seção CRESCE em vez de
+   transbordar pra cima — antes o logo-título subia por baixo do botão. */
+.det2-topo { min-height: 64vh; display: flex; flex-direction: column; justify-content: center; padding: 108px var(--safe) 20px; max-width: 52%; }
 .det2-logo { max-height: 220px; max-width: 640px; object-fit: contain; object-position: left; margin-bottom: 20px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
 .det2-titulo { font-size: 56px; font-weight: 800; letter-spacing: -1.4px; line-height: 1.02; margin-bottom: 14px; text-wrap: balance; }
 .det2-meta { color: var(--text-secondary); margin-bottom: 12px; }
@@ -289,7 +298,9 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 .btn-icone.is-focused { background: rgba(255,255,255,.22); box-shadow: 0 0 0 3px #fff; }
 .det2-secao { padding: 8px 0 10px; }
 .det2-h2 { font-size: 22px; font-weight: 700; padding: 0 var(--safe); margin-bottom: 4px; }
-.det2-fila { display: flex; gap: 16px; overflow-x: auto; padding: 16px var(--safe); scrollbar-width: none; }
+/* Mesmo cuidado do .trilho-fila: o pôster semelhante cresce 8% e ganha anel de
+   3px + sombra ao focar — com 16px de padding tudo isso era cortado. */
+.det2-fila { display: flex; gap: 16px; overflow-x: auto; padding: 26px var(--safe) 34px; scrollbar-width: none; }
 .det2-fila::-webkit-scrollbar { height: 0; }
 /* Elenco */
 .ator { flex-shrink: 0; width: 120px; text-align: center; cursor: default; }
