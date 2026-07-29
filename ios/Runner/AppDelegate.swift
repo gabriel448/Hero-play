@@ -18,7 +18,10 @@ import Security
   /// Flutter 3.35 / UISceneDelegate. O messenger vem do `applicationRegistrar`.
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    ligarCanalDoDispositivo(engineBridge.applicationRegistrar.messenger)
+    // `messenger()` com parenteses: em Objective-C e um METODO do registrar, e
+    // o Swift importa como metodo. Sem os parenteses o Xcode reprova com
+    // "Function produces expected type 'any FlutterBinaryMessenger'".
+    ligarCanalDoDispositivo(engineBridge.applicationRegistrar.messenger())
   }
 
   private func ligarCanalDoDispositivo(_ messenger: FlutterBinaryMessenger) {
