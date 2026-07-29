@@ -136,10 +136,13 @@ class TmdbService {
     if (a == null) return;
     try {
       final dump = a.carregarCacheTmdb();
-      // v2: a escolha do titulo mudou (desempate por categoria + fallback do
-      // subtitulo). O cache v1 guarda as fichas ERRADAS — anime com dados do
-      // live action, serie com ':' sem capa. Descartar forca a rebusca.
-      if (dump == null || dump['v'] != 2) return;
+      // A versao sobe SEMPRE que a forma de escolher o titulo muda — o cache
+      // antigo guarda as fichas resolvidas pela regra velha e sem invalidar o
+      // usuario nunca veria a correcao.
+      //   v2: desempate por categoria (anime x live action).
+      //   v3: escada de consultas (encurta o titulo ate achar) + resolucao
+      //       UNICA para ficha e capa.
+      if (dump == null || dump['v'] != 3) return;
       for (final e in ((dump['poster'] as Map?) ?? const {}).entries) {
         // So o formato novo ("tv|nome"/"mv|nome"). As chaves antigas (so o
         // nome) vinham de quando o poster era procurado em /search/tv para
@@ -167,7 +170,7 @@ class TmdbService {
     _debouncePersistencia = Timer(const Duration(seconds: 5), () {
       try {
         a.salvarCacheTmdb({
-          'v': 2,
+          'v': 3,
           'poster': _ultimos(_cachePoster, _limitePoster),
           'info': {
             for (final e in _ultimos(_cacheInfo, _limiteInfo).entries)
@@ -210,6 +213,32 @@ class TmdbService {
     return out;
   }
 
+  /// Acha o item do TMDB para este titulo — a UNICA porta de entrada.
+  ///
+  /// Antes `poster()` e `info()` faziam buscas separadas e podiam DISCORDAR: a
+  /// ficha vinha de um item e a capa de outro (ou de nenhum). Agora os dois
+  /// passam por aqui.
+  Future<Map<String, dynamic>?> _resolver({
+    required String nome,
+    required bool ehSerie,
+    required String idioma,
+    String? categoria,
+  }) async {
+    final principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
+    final outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
+    for (final q in _consultas(nome)) {
+      final it = await _buscarItem(principal, q, idioma, ehSerie,
+              estrito: true, categoria: categoria) ??
+          await _buscarItem(principal, q, 'en-US', ehSerie,
+              estrito: true, categoria: categoria);
+      if (it != null) return it;
+    }
+    // Nada no tipo esperado: o outro tipo cobre anime/OVA cadastrado como filme
+    // (e vice-versa). So com o titulo mais especifico, para nao viajar.
+    return _buscarItem(outro, _consultas(nome).first, idioma, !ehSerie,
+        estrito: true, categoria: categoria);
+  }
+
   // ─── Poster ──────────────────────────────────────────────────────────────
 
   /// Retorna a URL do poster do titulo, ou null se o TMDB nao tiver.
@@ -231,22 +260,12 @@ class TmdbService {
     final chave = '${ehSerie ? 'tv' : 'mv'}|$nome';
     if (_cachePoster.containsKey(chave)) return _cachePoster[chave];
 
-    final query = _prepararQuery(nome);
-    final principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
-    final outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
-    // Subtitulo que o TMDB nao conhece ("One Piece: Fan Letter") derruba a
-    // busca inteira no modo estrito — tentamos so o titulo principal.
-    final base = _tituloPrincipal(nome);
-    final item = await _buscarItem(principal, query, 'pt-BR', ehSerie,
-            estrito: true, categoria: categoria) ??
-        await _buscarItem(principal, query, 'en-US', ehSerie,
-            estrito: true, categoria: categoria) ??
-        (base == null
-            ? null
-            : await _buscarItem(principal, _prepararQuery(base), 'pt-BR',
-                ehSerie, estrito: true, categoria: categoria)) ??
-        await _buscarItem(outro, query, 'pt-BR', !ehSerie,
-            estrito: true, categoria: categoria);
+    final item = await _resolver(
+      nome: nome,
+      ehSerie: ehSerie,
+      idioma: 'pt-BR',
+      categoria: categoria,
+    );
 
     final caminho = item?['poster_path'] as String?;
     final url = caminho != null ? '$_imgBase$caminho' : null;
@@ -274,25 +293,18 @@ class TmdbService {
     final cache = _cacheInfo[chave];
     if (cache != null) return cache;
 
-    final query = _prepararQuery(nome);
-
-    // Procura no tipo primario; se nao achar nada, tenta so o titulo principal
-    // (antes do ':') e, por fim, o outro tipo.
-    final principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
-    final outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
-    final base = _tituloPrincipal(nome);
-    var ehTv = ehSerie;
-    var item = await _buscarItem(principal, query, idioma, ehSerie,
-        categoria: categoria);
-    if (item == null && base != null) {
-      item = await _buscarItem(principal, _prepararQuery(base), idioma, ehSerie,
-          categoria: categoria);
-    }
-    if (item == null) {
-      item = await _buscarItem(outro, query, idioma, !ehSerie,
-          categoria: categoria);
-      ehTv = !ehSerie;
-    }
+    // MESMA resolucao que a capa usa — sem isso a ficha vinha de um item e a
+    // capa de outro (ou de nenhum, como em "One Piece Log: Saga da Ilha dos
+    // Homens-Peixe", que nao existe no TMDB).
+    final item = await _resolver(
+      nome: nome,
+      ehSerie: ehSerie,
+      idioma: idioma,
+      categoria: categoria,
+    );
+    final ehTv = item == null
+        ? ehSerie
+        : (item['name'] != null || item['first_air_date'] != null);
 
     if (item == null) {
       _cacheInfo[chave] = TmdbInfo.vazio;
@@ -533,6 +545,35 @@ class TmdbService {
     if (i < 3) return null;
     final base = nome.substring(0, i).trim();
     return base.length >= 3 ? base : null;
+  }
+
+  /// Sequencia de consultas a tentar, da mais especifica para a mais ampla.
+  ///
+  /// Listas IPTV colam saga/arco/temporada no nome ("One Piece Log: Saga da
+  /// Ilha dos Homens-Peixe") — titulo que NAO existe no TMDB. Buscar so o que
+  /// existe de verdade exige encurtar: tira o subtitulo depois do ':' e depois
+  /// vai cortando a ultima palavra ate sobrar o nome da obra ("One Piece").
+  ///
+  /// Para no minimo de 2 palavras e no maximo de 4 tentativas — encurtar demais
+  /// acabaria casando com a franquia errada.
+  static List<String> _consultas(String nome) {
+    final out = <String>[];
+    void add(String? q) {
+      if (q == null) return;
+      final v = _prepararQuery(q).trim();
+      if (v.isNotEmpty && !out.contains(v)) out.add(v);
+    }
+
+    add(nome);
+    add(_tituloPrincipal(nome));
+
+    var palavras = _prepararQuery(_tituloPrincipal(nome) ?? nome).split(' ')
+      ..removeWhere((p) => p.isEmpty);
+    while (out.length < 4 && palavras.length > 2) {
+      palavras = palavras.sublist(0, palavras.length - 1);
+      add(palavras.join(' '));
+    }
+    return out;
   }
 
   /// Categoria da lista sugere ANIMACAO? ("ANIMES", "DESENHOS", "INFANTIL"...)
