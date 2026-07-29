@@ -606,17 +606,15 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
   transform-origin: left center;
   will-change: transform, opacity;
 }
+/* Divisor SECO entre as duas colunas. Aqui havia uma sombra de 44px de blur +
+   um degrade preto de 46px: numa tela que ja e quase preta isso nao vira
+   profundidade, vira uma FAIXA cinza chapada bem no meio do conteudo (e blur
+   grande ainda e caro por frame na TV). Quem faz o papel de "camada de tras" e
+   a opacidade + a escala das categorias; a divisao so precisa da linha. */
 .tv-panes.com-canais .tv-pane-canais {
   width: 76%;
   position: relative;
-  box-shadow: -22px 0 44px -14px rgba(0,0,0,.95);
-}
-/* Degrade preto na borda esquerda do painel: reforca a sensacao de profundidade
-   (as categorias "somem por baixo" dele). */
-.tv-panes.com-canais .tv-pane-canais::before {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 46px;
-  pointer-events: none; z-index: 1;
-  background: linear-gradient(90deg, rgba(0,0,0,.75), rgba(0,0,0,0));
+  border-left: 1px solid var(--divider);
 }
 /* Nome longo termina em "…" em vez de ser cortado no meio da palavra. */
 .tv-cat-nome { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

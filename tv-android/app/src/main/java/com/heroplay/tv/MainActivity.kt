@@ -35,6 +35,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nativo: PlayerNativo
 
     companion object {
+        /** `--bg` do tv-app (styles.css). Tem que ser o MESMO valor. */
+        private const val COR_FUNDO = 0xFF0F0E0D.toInt()
+
         /**
          * Fracao de cada borda reservada contra o overscan da TV.
          *
@@ -87,7 +90,13 @@ class MainActivity : AppCompatActivity() {
         // app desenha os controles sobre a imagem. Sem o fundo transparente a
         // pagina cobriria o video.
         raiz = FrameLayout(this)
-        raiz.setBackgroundColor(Color.BLACK)
+        // COR DE FUNDO DO APP, nao preto puro. Enquanto o video nativo toca, a
+        // pagina inteira fica transparente (e a unica forma de o video, que esta
+        // ATRAS do WebView, aparecer) — e o que se ve por tras dela e este
+        // container. Com preto puro a tela de canais trocava de cor no instante
+        // em que o canal comecava a tocar. A tela cheia continua preta de
+        // verdade: quem pinta ali e o PlayerView, que tem fundo proprio.
+        raiz.setBackgroundColor(COR_FUNDO)
         web.setBackgroundColor(Color.TRANSPARENT)
         raiz.addView(web)
         nativo = PlayerNativo(this, raiz)
