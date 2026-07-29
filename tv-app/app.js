@@ -3351,6 +3351,7 @@ function mostrarLoading(msg) {
       <div class="logo ld-logo"><img class="logo-mark" src="heroplay-icon.svg" alt="Hero Play"><span class="ob-logo-text"><b>Hero</b> Play</span></div>
       <div class="ld-barra"><span></span></div>
       <div class="ld-msg" id="ld-msg">${escapar(msg || t('Carregando…'))}</div>
+      <div class="ob-versao">${escapar(etiquetaVersao())}</div>
     </div>`;
   el.style.display = 'grid';
   _ldRearmar();

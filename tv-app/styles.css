@@ -889,6 +889,11 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
    etiquetaVersao em app.js). */
 .ob-versao { margin-top: 4px; font-size: 15px; color: var(--text-tertiary); opacity: .7; font-variant-numeric: tabular-nums; }
 .aviso-card .ob-versao { margin-top: 14px; text-align: center; }
+/* Gate de perfis e loading: sao as telas que TODO boot passa, inclusive de quem
+   ja tem lista vinculada (esse usuario nunca mais ve o onboarding). E o unico
+   lugar onde a etiqueta serve para conferir a versao de um aparelho ja em uso. */
+.perfis-wrap .ob-versao { margin-top: 26px; text-align: center; }
+.ld-card .ob-versao { margin-top: 16px; text-align: center; }
 .ob-cred > div { display: flex; flex-direction: column; gap: 4px; }
 .ob-cred span { font-size: 16px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .08em; }
 .ob-cred b { font-size: 26px; font-weight: 800; letter-spacing: .04em; font-variant-numeric: tabular-nums; }

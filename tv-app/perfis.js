@@ -132,6 +132,7 @@ function abrirGatePerfis(cb) {
       <h1 class="perfis-titulo">${escapar(t('Quem está assistindo?'))}</h1>
       <div class="perfis-grade">${tiles}${add}</div>
       ${perfis.length ? `<button class="perfil-gerenciar focusable" data-ger="1">${escapar(t('Gerenciar perfis'))}</button>` : ''}
+      <div class="ob-versao">${escapar(typeof etiquetaVersao === 'function' ? etiquetaVersao() : '')}</div>
     </div>`;
     ov.querySelectorAll('.perfil-tile[data-id]').forEach((b) => b.addEventListener('click', () => {
       const perfil = Perfis.lista().find((p) => p.id === b.dataset.id);
