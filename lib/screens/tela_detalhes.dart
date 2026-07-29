@@ -125,9 +125,13 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
       nome: _nome,
       ehSerie: widget.ehSerie,
       idioma: idioma,
+      // A categoria da lista desempata homonimos — "ONE PIECE" em ANIMES e o
+      // anime; em SERIES e o live action.
+      categoria: _grupo,
     );
     if (widget.ehSerie) {
-      _posterSerieFuture = tmdb.poster(widget.serie!.nome);
+      _posterSerieFuture =
+          tmdb.poster(widget.serie!.nome, categoria: widget.serie!.grupo);
       _agrup = _agruparEpisodios(widget.serie!);
       _temporadaSelecionada =
           _agrup!.temporadas.isNotEmpty ? _agrup!.temporadas.first : null;
@@ -1505,41 +1509,70 @@ class _SeletorTemporada extends StatelessWidget {
 
   static String _rotulo(int t) => t == 0 ? 'Especiais' : 'Temporada $t';
 
+  /// Altura aproximada de um ListTile — usada só para abrir a lista já na
+  /// temporada atual quando a série tem muitas (One Piece tem 23).
+  static const _alturaItem = 56.0;
+
   void _abrirPicker(BuildContext context) {
+    final iSel = temporadas.indexOf(selecionada);
+    final altura = MediaQuery.sizeOf(context).height;
+    // Sem `isScrollControlled` a folha nunca passa de metade da tela, e o
+    // Column interno NÃO rolava: numa série com muitas temporadas a lista era
+    // cortada e não havia como chegar nas últimas.
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.surface2,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: AppSpacing.base),
-              decoration: BoxDecoration(
-                color: AppColors.outlineSubtle,
-                borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: ConstrainedBox(
+          // Deixa uma faixa do conteúdo à mostra (dá o "toque fora p/ fechar")
+          // e ainda assim cabe muita temporada.
+          constraints: BoxConstraints(maxHeight: altura * 0.75),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: AppSpacing.base),
+                decoration: BoxDecoration(
+                  color: AppColors.outlineSubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
               ),
-            ),
-            for (final t in temporadas)
-              ListTile(
-                title: Text(_rotulo(t)),
-                trailing: t == selecionada
-                    ? const Icon(Icons.check_rounded, color: AppColors.accent)
-                    : null,
-                selected: t == selecionada,
-                selectedColor: AppColors.textPrimary,
-                onTap: () {
-                  Navigator.pop(context);
-                  onSelecionada(t);
-                },
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  // Abre já mostrando a temporada atual, não a primeira.
+                  controller: ScrollController(
+                    initialScrollOffset:
+                        iSel <= 2 ? 0 : (iSel - 2) * _alturaItem,
+                  ),
+                  itemCount: temporadas.length,
+                  itemBuilder: (_, i) {
+                    final t = temporadas[i];
+                    return ListTile(
+                      title: Text(_rotulo(t)),
+                      trailing: t == selecionada
+                          ? const Icon(Icons.check_rounded,
+                              color: AppColors.accent)
+                          : null,
+                      selected: t == selecionada,
+                      selectedColor: AppColors.textPrimary,
+                      onTap: () {
+                        Navigator.pop(context);
+                        onSelecionada(t);
+                      },
+                    );
+                  },
+                ),
               ),
-            const SizedBox(height: AppSpacing.sm),
-          ],
+            ],
+          ),
         ),
       ),
     );

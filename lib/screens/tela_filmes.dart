@@ -365,7 +365,7 @@ class _TelaFilmesState extends State<TelaFilmes> {
       await Future.wait(alvo.map((s) async {
         try {
           final url = await tmdb
-              .poster(s.nome)
+              .poster(s.nome, categoria: s.grupo)
               .timeout(const Duration(seconds: 4));
           final fonte = (url != null && url.isNotEmpty)
               ? url
@@ -588,7 +588,7 @@ Future<List<String>> _gostosTmdb(
   await Future.wait(candidatos.map((c) async {
     try {
       final info = await tmdb
-          .info(nome: c.nome, ehSerie: false, idioma: idioma)
+          .info(nome: c.nome, ehSerie: false, idioma: idioma, categoria: c.grupo)
           .timeout(const Duration(seconds: 5));
       for (final g in info.generos) {
         freq[g] = (freq[g] ?? 0) + 1;
@@ -626,7 +626,7 @@ Future<List<Canal>> _selecionarFilmesDestaqueAsync(
   await Future.wait(List.generate(amostra.length, (i) async {
     try {
       final info = await tmdb
-          .info(nome: amostra[i].nome, ehSerie: false, idioma: idioma)
+          .info(nome: amostra[i].nome, ehSerie: false, idioma: idioma, categoria: amostra[i].grupo)
           .timeout(const Duration(seconds: 5));
       pontos[i] = info.generos.where(gostoSet.contains).length;
     } catch (_) {}
@@ -651,7 +651,7 @@ Future<List<Object>> _selecionarSeriesDestaqueAsync(
     if (comBanner.length >= 15) break;
     try {
       final url =
-          await tmdb.poster(s.nome).timeout(const Duration(seconds: 3));
+          await tmdb.poster(s.nome, categoria: s.grupo).timeout(const Duration(seconds: 3));
       if (url != null && url.isNotEmpty) comBanner.add(s);
     } catch (_) {}
   }
@@ -664,7 +664,7 @@ Future<List<Object>> _selecionarSeriesDestaqueAsync(
   await Future.wait(List.generate(comBanner.length, (i) async {
     try {
       final info = await tmdb
-          .info(nome: comBanner[i].nome, ehSerie: true, idioma: idioma)
+          .info(nome: comBanner[i].nome, ehSerie: true, idioma: idioma, categoria: comBanner[i].grupo)
           .timeout(const Duration(seconds: 5));
       pontos[i] = info.generos.where(gostoSet.contains).length;
     } catch (_) {}
@@ -700,7 +700,7 @@ Future<List<Object>> _selecionarRecomendadosAsync(
     final nome = item is Canal ? item.nome : (item as Serie).nome;
     try {
       final info = await tmdb
-          .info(nome: nome, ehSerie: ehSerie, idioma: idioma)
+          .info(nome: nome, ehSerie: ehSerie, idioma: idioma, categoria: item is Canal ? item.grupo : (item as Serie).grupo)
           .timeout(const Duration(seconds: 5));
       pontos[i] = info.generos.where(gostoSet.contains).length;
     } catch (_) {}
@@ -786,7 +786,7 @@ class _SecaoDestaqueState extends State<_SecaoDestaque>
         } else {
           try {
             _posterUrls[i] = await tmdb
-                .poster((item as Serie).nome)
+                .poster((item as Serie).nome, categoria: item.grupo)
                 .timeout(const Duration(seconds: 4));
           } catch (_) {
             _posterUrls[i] = null;
@@ -797,7 +797,7 @@ class _SecaoDestaqueState extends State<_SecaoDestaque>
       if (!_infos.containsKey(i)) {
         try {
           _infos[i] = await tmdb
-              .info(nome: nome, ehSerie: ehSerie, idioma: idioma)
+              .info(nome: nome, ehSerie: ehSerie, idioma: idioma, categoria: item is Canal ? item.grupo : (item as Serie).grupo)
               .timeout(const Duration(seconds: 5));
         } catch (_) {
           _infos[i] = TmdbInfo.vazio;
@@ -2003,7 +2003,7 @@ class _PosterSerieState extends State<_PosterSerie> {
   void initState() {
     super.initState();
     _tmdbFuture =
-        context.read<TmdbService>().poster(widget.serie.nome);
+        context.read<TmdbService>().poster(widget.serie.nome, categoria: widget.serie.grupo);
   }
 
   @override

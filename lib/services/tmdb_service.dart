@@ -136,7 +136,10 @@ class TmdbService {
     if (a == null) return;
     try {
       final dump = a.carregarCacheTmdb();
-      if (dump == null || dump['v'] != 1) return;
+      // v2: a escolha do titulo mudou (desempate por categoria + fallback do
+      // subtitulo). O cache v1 guarda as fichas ERRADAS — anime com dados do
+      // live action, serie com ':' sem capa. Descartar forca a rebusca.
+      if (dump == null || dump['v'] != 2) return;
       for (final e in ((dump['poster'] as Map?) ?? const {}).entries) {
         // So o formato novo ("tv|nome"/"mv|nome"). As chaves antigas (so o
         // nome) vinham de quando o poster era procurado em /search/tv para
@@ -164,7 +167,7 @@ class TmdbService {
     _debouncePersistencia = Timer(const Duration(seconds: 5), () {
       try {
         a.salvarCacheTmdb({
-          'v': 1,
+          'v': 2,
           'poster': _ultimos(_cachePoster, _limitePoster),
           'info': {
             for (final e in _ultimos(_cacheInfo, _limiteInfo).entries)
@@ -219,7 +222,11 @@ class TmdbService {
   ///    ("Interestelar" so casa com language=pt-BR);
   ///  - match ESTRITO: sem casar por titulo, devolve null (fica o fallback da
   ///    UI) em vez de pegar "o primeiro que veio".
-  Future<String?> poster(String nome, {bool ehSerie = true}) async {
+  Future<String?> poster(
+    String nome, {
+    bool ehSerie = true,
+    String? categoria,
+  }) async {
     if (!configurado) return null;
     final chave = '${ehSerie ? 'tv' : 'mv'}|$nome';
     if (_cachePoster.containsKey(chave)) return _cachePoster[chave];
@@ -227,11 +234,19 @@ class TmdbService {
     final query = _prepararQuery(nome);
     final principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
     final outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
-    final item =
-        await _buscarItem(principal, query, 'pt-BR', ehSerie, estrito: true) ??
-            await _buscarItem(principal, query, 'en-US', ehSerie,
-                estrito: true) ??
-            await _buscarItem(outro, query, 'pt-BR', !ehSerie, estrito: true);
+    // Subtitulo que o TMDB nao conhece ("One Piece: Fan Letter") derruba a
+    // busca inteira no modo estrito — tentamos so o titulo principal.
+    final base = _tituloPrincipal(nome);
+    final item = await _buscarItem(principal, query, 'pt-BR', ehSerie,
+            estrito: true, categoria: categoria) ??
+        await _buscarItem(principal, query, 'en-US', ehSerie,
+            estrito: true, categoria: categoria) ??
+        (base == null
+            ? null
+            : await _buscarItem(principal, _prepararQuery(base), 'pt-BR',
+                ehSerie, estrito: true, categoria: categoria)) ??
+        await _buscarItem(outro, query, 'pt-BR', !ehSerie,
+            estrito: true, categoria: categoria);
 
     final caminho = item?['poster_path'] as String?;
     final url = caminho != null ? '$_imgBase$caminho' : null;
@@ -251,6 +266,7 @@ class TmdbService {
     required String nome,
     required bool ehSerie,
     required String idioma,
+    String? categoria,
   }) async {
     if (!configurado) return TmdbInfo.vazio;
 
@@ -260,23 +276,22 @@ class TmdbService {
 
     final query = _prepararQuery(nome);
 
-    // Procura no tipo primario; se nao achar nada, tenta o outro tipo.
-    Map<String, dynamic>? item;
-    bool ehTv;
-    if (ehSerie) {
-      item = await _buscarItem('/3/search/tv', query, idioma, true);
-      ehTv = true;
-      if (item == null) {
-        item = await _buscarItem('/3/search/movie', query, idioma, false);
-        ehTv = false;
-      }
-    } else {
-      item = await _buscarItem('/3/search/movie', query, idioma, false);
-      ehTv = false;
-      if (item == null) {
-        item = await _buscarItem('/3/search/tv', query, idioma, true);
-        ehTv = true;
-      }
+    // Procura no tipo primario; se nao achar nada, tenta so o titulo principal
+    // (antes do ':') e, por fim, o outro tipo.
+    final principal = ehSerie ? '/3/search/tv' : '/3/search/movie';
+    final outro = ehSerie ? '/3/search/movie' : '/3/search/tv';
+    final base = _tituloPrincipal(nome);
+    var ehTv = ehSerie;
+    var item = await _buscarItem(principal, query, idioma, ehSerie,
+        categoria: categoria);
+    if (item == null && base != null) {
+      item = await _buscarItem(principal, _prepararQuery(base), idioma, ehSerie,
+          categoria: categoria);
+    }
+    if (item == null) {
+      item = await _buscarItem(outro, query, idioma, !ehSerie,
+          categoria: categoria);
+      ehTv = !ehSerie;
     }
 
     if (item == null) {
@@ -397,6 +412,7 @@ class TmdbService {
     String idioma,
     bool ehTv, {
     bool estrito = false,
+    String? categoria,
   }) async {
     try {
       final uri = Uri.parse(
@@ -427,45 +443,25 @@ class TmdbService {
         return test(n) || test(o);
       }
 
-      Map<String, dynamic>? melhor;
+      final topo = results.take(10).cast<Map<String, dynamic>>().toList();
 
-      // 1. Match exato
-      for (final r in results.take(10)) {
-        final item = r as Map<String, dynamic>;
-        if (nomeMatch(item, (s) => s == queryNorm)) {
-          melhor = item;
-          break;
-        }
-      }
-      // 2. Comeca com
-      if (melhor == null) {
-        for (final r in results.take(10)) {
-          final item = r as Map<String, dynamic>;
-          if (nomeMatch(item, (s) => s.startsWith(queryNorm))) {
-            melhor = item;
-            break;
-          }
-        }
-      }
-      // 3. Contem
-      if (melhor == null) {
-        for (final r in results.take(10)) {
-          final item = r as Map<String, dynamic>;
-          if (nomeMatch(item, (s) => s.contains(queryNorm))) {
-            melhor = item;
-            break;
-          }
-        }
-      }
-      // 4. Todas as palavras da query aparecem no resultado
-      if (melhor == null && queryWords.length > 1) {
-        for (final r in results.take(10)) {
-          final item = r as Map<String, dynamic>;
-          if (nomeMatch(item, (s) => queryWords.every(s.contains))) {
-            melhor = item;
-            break;
-          }
-        }
+      /// Todos os que casam neste nivel — nao so o primeiro. Com varios, quem
+      /// decide e a DICA da categoria (anime x live action), nao a ordem que o
+      /// TMDB devolveu.
+      List<Map<String, dynamic>> casam(bool Function(String) teste) =>
+          [for (final it in topo) if (nomeMatch(it, teste)) it];
+
+      Map<String, dynamic>? melhor;
+      for (final nivel in <List<Map<String, dynamic>>>[
+        casam((s) => s == queryNorm),                       // 1. exato
+        casam((s) => s.startsWith(queryNorm)),              // 2. comeca com
+        casam((s) => s.contains(queryNorm)),                // 3. contem
+        if (queryWords.length > 1)
+          casam((s) => queryWords.every(s.contains)),       // 4. todas as palavras
+      ]) {
+        if (nivel.isEmpty) continue;
+        melhor = _desempatar(nivel, categoria, ehTv);
+        break;
       }
       // 5. Fallback: primeiro resultado (mais popular) — desligado no modo
       //    estrito, onde preferimos NAO ter poster a ter o poster errado.
@@ -524,6 +520,73 @@ class TmdbService {
       b.write(i == -1 ? ch : _semAcento[i]);
     }
     return b.toString();
+  }
+
+  /// Parte ANTES do primeiro ':' — "One Piece: Fan Letter" -> "One Piece".
+  ///
+  /// Listas IPTV adoram subtitulo que o TMDB nao tem. A busca com o titulo
+  /// inteiro volta vazia (ou com outra coisa), e no modo estrito isso vira
+  /// "sem capa". Tentar so o titulo principal resolve. Devolve null quando nao
+  /// ha ':' ou quando o que sobra e curto demais para ser confiavel.
+  static String? _tituloPrincipal(String nome) {
+    final i = nome.indexOf(':');
+    if (i < 3) return null;
+    final base = nome.substring(0, i).trim();
+    return base.length >= 3 ? base : null;
+  }
+
+  /// Categoria da lista sugere ANIMACAO? ("ANIMES", "DESENHOS", "INFANTIL"...)
+  static bool _dicaAnimacao(String? categoria) {
+    if (categoria == null) return false;
+    final c = _norm(categoria);
+    return c.contains('anime') ||
+        c.contains('desenho') ||
+        c.contains('animac') ||
+        c.contains('cartoon');
+  }
+
+  /// Id de genero do TMDB para Animacao.
+  static const _generoAnimacao = 16;
+
+  /// Desempata candidatos que casaram IGUALMENTE bem pelo titulo.
+  ///
+  /// O caso que motivou isto: "One Piece" existe como ANIME (1999, japones,
+  /// genero Animacao) e como serie LIVE ACTION (2023, ingles). Sem desempate,
+  /// os dois itens da lista pegavam a mesma ficha — capa, sinopse e elenco do
+  /// live action no anime. A categoria da lista ("ANIMES") resolve.
+  static Map<String, dynamic> _desempatar(
+    List<Map<String, dynamic>> candidatos,
+    String? categoria,
+    bool ehTv,
+  ) {
+    if (candidatos.length == 1) return candidatos.first;
+    final querAnimacao = _dicaAnimacao(categoria);
+    double nota(Map<String, dynamic> it) {
+      final generos = (it['genre_ids'] as List?)?.whereType<int>() ?? const [];
+      final animacao = generos.contains(_generoAnimacao);
+      final japones = it['original_language'] == 'ja';
+      var n = 0.0;
+      if (querAnimacao) {
+        n += animacao ? 3 : -3;      // categoria de anime -> tem que ser animacao
+        if (japones) n += 2;         // anime quase sempre e original japones
+      } else {
+        if (animacao) n -= 2;        // categoria comum nao deve pegar desenho
+      }
+      // Empate persistente: o mais popular costuma ser o certo.
+      n += ((it['popularity'] as num?)?.toDouble() ?? 0) / 1000;
+      return n;
+    }
+
+    var melhor = candidatos.first;
+    var melhorNota = nota(melhor);
+    for (final c in candidatos.skip(1)) {
+      final n = nota(c);
+      if (n > melhorNota) {
+        melhorNota = n;
+        melhor = c;
+      }
+    }
+    return melhor;
   }
 
   /// Normaliza para comparacao: sem acento, minusculo, sem pontuacao, espacos
