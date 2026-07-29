@@ -1,0 +1,74 @@
+# ============================================================================
+# Build de iOS num Mac emprestado do GitHub.
+#
+# Existe porque `.ipa` nao compila no Windows e este projeto e desenvolvido no
+# Windows. O runner `macos-latest` ja vem com Xcode e CocoaPods.
+#
+# ⚠️ SEM ASSINATURA. O que sai daqui NAO instala num iPhone por si so: serve
+# para (1) provar que o app COMPILA para iOS — o que mais quebra ao portar — e
+# (2) ser assinado depois com uma Apple ID (Sideloadly/AltStore dao 7 dias) ou
+# com certificado do Apple Developer Program. Nuvem resolve o Mac, nao a Apple.
+#
+# So roda quando alguem manda rodar (workflow_dispatch): minuto de macOS conta
+# 10x no plano gratuito, entao nada de disparar a cada push.
+# ============================================================================
+name: iOS (sem assinatura)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # O `.env` NAO e versionado (tem chave de API), mas o pubspec o declara
+      # como asset — sem o arquivo o build falha antes de compilar nada. Os
+      # valores tem default embutido no codigo (ver services/dispositivo.dart).
+      - name: .env vazio (os defaults estao no codigo)
+        run: touch .env
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter analyze
+        run: flutter analyze
+
+      # HP_CANAL=loja: build NEUTRA (sem QR nem link de ativacao). No iOS nao
+      # existe trilho direto — tudo passa pela Apple. Ver CLAUDE.md.
+      - name: Build iOS (sem assinar)
+        run: flutter build ios --release --no-codesign --dart-define=HP_CANAL=loja
+
+      # `.ipa` e um zip com o .app dentro de uma pasta `Payload/`. Sem
+      # assinatura ele nao instala, mas e exatamente o formato que Sideloadly e
+      # AltStore recebem para assinar com a sua Apple ID.
+      - name: Empacotar .ipa (nao assinado)
+        run: |
+          mkdir -p empacotado/Payload
+          cp -R build/ios/iphoneos/Runner.app empacotado/Payload/
+          cd empacotado
+          zip -qry HeroPlay-ios-nao-assinado.ipa Payload
+          ls -lh HeroPlay-ios-nao-assinado.ipa
+
+      - name: Diagnostico (tamanho e frameworks embutidos)
+        if: always()
+        run: |
+          echo "── App ──"
+          du -sh build/ios/iphoneos/Runner.app 2>/dev/null || echo "nao gerou"
+          echo "── Frameworks ──"
+          ls build/ios/iphoneos/Runner.app/Frameworks 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-nao-assinado
+          path: empacotado/*.ipa
+          if-no-files-found: warn
