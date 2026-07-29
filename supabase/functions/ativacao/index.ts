@@ -66,6 +66,27 @@ function ehXtream(url: string): boolean {
 function urlValida(url: string): boolean {
   try { return ['http:', 'https:'].includes(new URL(url).protocol) } catch { return false }
 }
+/**
+ * host[:porta] em minusculo, sem `www.` — a chave que casa uma playlist com um
+ * parceiro. O `www.` sai dos DOIS lados (aqui e no cadastro do dominio): sem
+ * isso uma lista em `www.parceiro.com` nao casaria com `parceiro.com`.
+ */
+function hostDe(url: string): string | null {
+  try { return new URL(url).host.toLowerCase().replace(/^www\./, '') || null } catch { return null }
+}
+/**
+ * Dominio PARCEIRO? Se for, o device entra ativo na hora: sem teste e sem
+ * consumir credito (e o acordo com quem revende o app junto do painel dele).
+ * Best-effort: se a consulta falhar, o fluxo normal (teste) continua valendo.
+ */
+async function parceiroDoHost(host: string | null) {
+  if (!host) return null
+  try {
+    const { data } = await sb.from('parceiros')
+      .select('id, dominio, ativo').eq('dominio', host).eq('ativo', true).maybeSingle()
+    return data || null
+  } catch { return null }
+}
 
 // deno-lint-ignore no-explicit-any
 function statusAtual(d: any): string {
@@ -138,13 +159,19 @@ Deno.serve(async (req: Request) => {
       if (!mac || !key) return erro('mac e key obrigatorios')
       if (!urlValida(lista_url)) return erro('lista_url invalida (use http/https)')
 
+      // Dominio parceiro → nasce ATIVO (sem teste, sem credito). Ver `parceiros`.
+      const host = hostDe(lista_url)
+      const parceiro = await parceiroDoHost(host)
+
       let { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
       if (d) {
         if (d.device_key !== key) return erro('key invalida', 403)
       } else {
-        const trial = new Date(Date.now() + DIAS_TESTE * DIA).toISOString()
+        const novo = parceiro
+          ? { status: 'ativo', trial_expira_em: null, ativado_por: 'parceiro' }
+          : { status: 'trial', trial_expira_em: new Date(Date.now() + DIAS_TESTE * DIA).toISOString() }
         const ins = await sb.from('dispositivos')
-          .insert({ mac, device_key: key, modelo: body.modelo || null, status: 'trial', trial_expira_em: trial })
+          .insert({ mac, device_key: key, modelo: body.modelo || null, ...novo })
           .select().single()
         if (ins.error) throw ins.error
         d = ins.data
@@ -166,19 +193,30 @@ Deno.serve(async (req: Request) => {
 
       // Cria a playlist no cliente e vincula ao device como SELECIONADA (desmarca
       // as outras do device). NÃO apaga as anteriores — agora são múltiplas.
-      const insP = await sb.from('playlists').insert({ cliente_id, nome, tipo, url_cifrada, epg_cifrada }).select('id').single()
+      // `host` em texto claro (a URL segue cifrada): e por ele que se casa a
+      // playlist com um parceiro e se conta quantos devices usam cada dominio.
+      const insP = await sb.from('playlists')
+        .insert({ cliente_id, nome, tipo, url_cifrada, epg_cifrada, host, free_dns: !!parceiro })
+        .select('id').single()
       if (insP.error) throw insP.error
       await sb.from('dispositivo_playlists').update({ selecionada: false }).eq('dispositivo_id', d.id)
       const insDP = await sb.from('dispositivo_playlists').insert({ dispositivo_id: d.id, playlist_id: insP.data.id, selecionada: true })
       if (insDP.error) throw insDP.error
 
       let status = statusAtual(d)
-      if (status === 'sem_lista') {
+      // Parceiro: ATIVA na hora, inclusive um device que ja existia em teste ou
+      // expirado — a lista nova e que decide.
+      if (parceiro && status !== 'banido' && status !== 'ativo') {
+        await sb.from('dispositivos')
+          .update({ status: 'ativo', ativado_por: 'parceiro', atualizado_em: new Date().toISOString() })
+          .eq('id', d.id)
+        status = 'ativo'
+      } else if (status === 'sem_lista') {
         const trial = new Date(Date.now() + DIAS_TESTE * DIA).toISOString()
         await sb.from('dispositivos').update({ status: 'trial', trial_expira_em: trial, atualizado_em: new Date().toISOString() }).eq('id', d.id)
         status = 'trial'; d.trial_expira_em = trial
       }
-      return json({ ok: true, status, trial_expira_em: d.trial_expira_em })
+      return json({ ok: true, status, trial_expira_em: d.trial_expira_em, parceiro: !!parceiro })
     }
 
     // ── POST listar: playlists vinculadas ao device (na ordem de criação) ─────

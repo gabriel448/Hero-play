@@ -284,6 +284,33 @@ alter table public.notificacoes enable row level security;
 revoke all on public.notificacoes from anon, authenticated;
 grant all on public.notificacoes to service_role;
 
+-- ── PARCEIROS (dominios com ativacao liberada) ───────────────────────────────
+-- Um parceiro e um SERVIDOR/dominio de lista. Todo dispositivo que recebe uma
+-- playlist apontando pra ele entra ATIVO na hora — sem teste e sem consumir
+-- credito. E o acordo comercial com quem revende o app junto do proprio painel
+-- de IPTV. Quem cadastra/suspende e SO o admin.
+create table if not exists public.parceiros (
+  id        uuid primary key default gen_random_uuid(),
+  dominio   text not null,               -- host[:porta], minusculo, sem esquema nem caminho
+  nome      text,                        -- rotulo do acordo (opcional)
+  ativo     boolean not null default true,
+  cobranca  text not null default 'gratuito',   -- gratuito | mensal | por_device
+  valor     numeric(12,2),               -- valor da mensalidade / por device
+  nota      text,
+  criado_em timestamptz not null default now()
+);
+create unique index if not exists idx_parceiros_dominio on public.parceiros(lower(dominio));
+alter table public.parceiros enable row level security;
+revoke all on public.parceiros from anon, authenticated;
+grant all on public.parceiros to service_role;
+
+-- HOST da playlist em texto claro. A URL continua CIFRADA (e ela que carrega
+-- usuario e senha); aqui fica so o dominio, que e o que precisamos para casar
+-- com um parceiro e para contar quantos devices usam cada um — sem ter que
+-- decifrar a base inteira a cada consulta.
+alter table public.playlists add column if not exists host text;
+create index if not exists idx_playlists_host on public.playlists(host);
+
 notify pgrst, 'reload schema';
 
 -- ════════════════════════════════════════════════════════════════════════════

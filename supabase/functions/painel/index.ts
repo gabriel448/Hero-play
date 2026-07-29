@@ -77,6 +77,36 @@ function ehXtream(url: string): boolean {
 function urlValida(url: string): boolean {
   try { return ['http:', 'https:'].includes(new URL(url).protocol) } catch { return false }
 }
+/**
+ * host[:porta] em minusculo, sem `www.` — a chave que casa uma playlist com um
+ * parceiro. O `www.` sai dos DOIS lados (aqui e no cadastro do dominio): sem
+ * isso uma lista em `www.parceiro.com` nao casaria com `parceiro.com`.
+ */
+function hostDe(url: string): string | null {
+  try { return new URL(url).host.toLowerCase().replace(/^www\./, '') || null } catch { return null }
+}
+/**
+ * Normaliza o que o admin digitar no cadastro de parceiro: aceita URL inteira,
+ * "http://host:porta/get.php?...", "www.host" ou so o host. Sai host[:porta].
+ */
+function normalizarDominio(entrada: string): string {
+  let s = String(entrada || '').trim().toLowerCase()
+  if (!s) return ''
+  if (!/^[a-z][a-z0-9+.-]*:\/\//.test(s)) s = 'http://' + s
+  try {
+    const h = new URL(s).host
+    return h.replace(/^www\./, '')
+  } catch { return '' }
+}
+/** Parceiro ATIVO deste host (ou null). Ver tabela `parceiros` no schema. */
+async function parceiroDoHost(host: string | null) {
+  if (!host) return null
+  try {
+    const { data } = await sb.from('parceiros')
+      .select('id, dominio').eq('dominio', host).eq('ativo', true).maybeSingle()
+    return data || null
+  } catch { return null }
+}
 // Código de indicação: 8 chars sem caracteres ambíguos (0/O/1/I).
 function gerarCodigo(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -255,6 +285,97 @@ Deno.serve(async (req: Request) => {
       return json({ revendedores, admin: true })
     }
 
+    // ── PARCEIROS (só admin) ──────────────────────────────────────────────────
+    // Domínio parceiro = servidor com acordo: device que recebe uma playlist
+    // apontando pra ele já entra ATIVO, sem teste e sem consumir crédito.
+    if (acao === 'listar_parceiros') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data: lista } = await sb.from('parceiros').select('*').order('criado_em', { ascending: false })
+      const parceiros = lista || []
+      // Devices por domínio: playlists guardam o `host` em texto claro, então dá
+      // pra contar sem decifrar nada. Conta o vínculo SELECIONADO — é a lista
+      // que o aparelho está usando de fato.
+      const contagem: Record<string, number> = {}
+      if (parceiros.length) {
+        // deno-lint-ignore no-explicit-any
+        const hosts = parceiros.map((p: any) => p.dominio)
+        const { data: pls } = await sb.from('playlists').select('id, host').in('host', hosts)
+        // deno-lint-ignore no-explicit-any
+        const porId = new Map((pls || []).map((p: any) => [p.id, p.host]))
+        if (porId.size) {
+          const { data: vins } = await sb.from('dispositivo_playlists')
+            .select('playlist_id, dispositivo_id').eq('selecionada', true).in('playlist_id', [...porId.keys()])
+          const vistos = new Set<string>()
+          for (const v of (vins || [])) {
+            // deno-lint-ignore no-explicit-any
+            const vv = v as any
+            if (vistos.has(vv.dispositivo_id)) continue      // 1 device conta 1x
+            vistos.add(vv.dispositivo_id)
+            const h = porId.get(vv.playlist_id)
+            if (h) contagem[h] = (contagem[h] || 0) + 1
+          }
+        }
+      }
+      // deno-lint-ignore no-explicit-any
+      return json({ parceiros: parceiros.map((p: any) => ({ ...p, devices: contagem[p.dominio] || 0 })) })
+    }
+
+    if (acao === 'criar_parceiro') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const dominio = normalizarDominio(body.dominio)
+      if (!dominio) return erro('informe um domínio válido (ex.: meuservidor.com ou 1.2.3.4:25461)')
+      const cobranca = ['gratuito', 'mensal', 'por_device'].includes(body.cobranca) ? body.cobranca : 'gratuito'
+      const valor = cobranca === 'gratuito' ? null : (Number(body.valor) || 0)
+      const { data: ja } = await sb.from('parceiros').select('id').eq('dominio', dominio).maybeSingle()
+      if (ja) return erro('esse domínio já está cadastrado', 409)
+      const { data, error } = await sb.from('parceiros')
+        .insert({ dominio, nome: (body.nome || '').trim() || null, cobranca, valor })
+        .select('id').single()
+      if (error) return erro(error.message)
+      // Playlists que JÁ apontam pra esse domínio passam a valer como parceiras,
+      // e os aparelhos delas são ativados — senão o acordo só valeria daqui pra
+      // frente e o admin teria que mexer device a device.
+      const { data: pls } = await sb.from('playlists').select('id').eq('host', dominio)
+      // deno-lint-ignore no-explicit-any
+      const ids = (pls || []).map((p: any) => p.id)
+      let ativados = 0
+      if (ids.length) {
+        await sb.from('playlists').update({ free_dns: true }).in('id', ids)
+        const { data: vins } = await sb.from('dispositivo_playlists')
+          .select('dispositivo_id').eq('selecionada', true).in('playlist_id', ids)
+        // deno-lint-ignore no-explicit-any
+        const devs = [...new Set((vins || []).map((v: any) => v.dispositivo_id))]
+        if (devs.length) {
+          await sb.from('dispositivos')
+            .update({ status: 'ativo', ativado_por: 'parceiro', atualizado_em: new Date().toISOString() })
+            .in('id', devs).neq('status', 'banido')
+          ativados = devs.length
+        }
+      }
+      return json({ ok: true, id: data.id, dominio, ativados })
+    }
+
+    if (acao === 'parceiro_ativo') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      const ativo = !!body.ativo
+      if (!id) return erro('id obrigatorio')
+      // Suspender NÃO desativa quem já está ativo: só para de valer p/ listas
+      // novas. Tirar o acesso de quem já usa é outra decisão, e manual.
+      const { error } = await sb.from('parceiros').update({ ativo }).eq('id', id)
+      if (error) return erro(error.message)
+      return json({ ok: true })
+    }
+
+    if (acao === 'excluir_parceiro') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      if (!id) return erro('id obrigatorio')
+      const { error } = await sb.from('parceiros').delete().eq('id', id)
+      if (error) return erro(error.message)
+      return json({ ok: true })
+    }
+
     // ── Caixa de entrada ──────────────────────────────────────────────────────
     if (acao === 'listar_notificacoes') {
       const { data } = await sb.from('notificacoes')
@@ -408,7 +529,13 @@ Deno.serve(async (req: Request) => {
       const url_cifrada = await cifrar(lista_url)
       const epg_cifrada = epg_url ? await cifrar(epg_url) : null
       const tipo = ehXtream(lista_url) ? 'xtream' : 'm3u'
-      const { data: pl, error } = await sb.from('playlists').insert({ cliente_id, nome, tipo, url_cifrada, epg_cifrada }).select('id').single()
+      // Host em texto claro + parceiro: mesma regra da `ativacao` — playlist de
+      // domínio parceiro ativa o device na hora, sem teste e sem crédito.
+      const host = hostDe(lista_url)
+      const parceiro = await parceiroDoHost(host)
+      const { data: pl, error } = await sb.from('playlists')
+        .insert({ cliente_id, nome, tipo, url_cifrada, epg_cifrada, host, free_dns: !!parceiro })
+        .select('id').single()
       if (error) return erro(error.message)
 
       // alvos: os dispositivos informados, OU todos do cliente
@@ -423,7 +550,12 @@ Deno.serve(async (req: Request) => {
         const { count } = await sb.from('dispositivo_playlists').select('*', { count: 'exact', head: true }).eq('dispositivo_id', did).eq('selecionada', true)
         await sb.from('dispositivo_playlists').insert({ dispositivo_id: did, playlist_id: pl.id, selecionada: !count })
       }
-      return json({ ok: true, playlist_id: pl.id, vinculados: alvos.length })
+      if (parceiro && alvos.length) {
+        await sb.from('dispositivos')
+          .update({ status: 'ativo', ativado_por: 'parceiro', atualizado_em: new Date().toISOString() })
+          .in('id', alvos).neq('status', 'banido')
+      }
+      return json({ ok: true, playlist_id: pl.id, vinculados: alvos.length, parceiro: !!parceiro })
     }
 
     if (acao === 'selecionar_playlist') {

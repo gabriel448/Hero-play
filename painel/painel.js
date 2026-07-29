@@ -95,6 +95,7 @@ const IC = {
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
   menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
   check: '<path d="m5 12.5 5 5 9-11"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff: '<path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.1 6.1A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 3.4-.66"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="2" x2="22" y1="2" y2="22"/>',
 }
@@ -138,7 +139,8 @@ const NAV = [
     { id: 'revendedores', rotulo: 'Revendedores', ic: 'userplus' },
     { id: 'comprar', rotulo: 'Comprar Créditos', ic: 'cart' },
     { id: 'indicacao', rotulo: 'Indicação', ic: 'link' },
-    { id: 'parceiros', rotulo: 'Parceiros', ic: 'globe' },
+    // Só o admin cadastra domínio parceiro (é acordo comercial da plataforma).
+    { id: 'parceiros', rotulo: 'Parceiros', ic: 'globe', papeis: ['admin'] },
   ] },
 ]
 
@@ -390,7 +392,15 @@ async function vDashboard() {
     html += card('users', '#4f8ef7', clientes.length, 'Clientes')
     const { revendedores } = await pega('downline', () => api('listar_revendedores'))
     html += card('userplus', '#9b7bff', revendedores.length, 'Revendedores')
-    if (me.papel === 'admin') html += card('shield', '#7c5cff', revendedores.filter((r) => r.papel === 'master').length, 'Masters')
+    if (me.papel === 'admin') {
+      html += card('shield', '#7c5cff', revendedores.filter((r) => r.papel === 'master').length, 'Masters')
+      // Parceiros é só do admin — e a conta não pode derrubar o resto do painel
+      // se a tabela ainda não existir no banco.
+      try {
+        const { parceiros } = await pega('parceiros', () => api('listar_parceiros'))
+        html += card('globe', '#34c759', parceiros.filter((p) => p.ativo).length, 'Parceiros')
+      } catch (_) { /* sem parceiros: o dashboard segue */ }
+    }
     if (meu !== viewAtual()) return
     document.getElementById('dash-stats').innerHTML = html
   } catch (e) {
@@ -906,7 +916,117 @@ function placeholder(titulo, sub, ic) {
     <div class="vazio" style="padding:70px 20px"><div style="opacity:.4;margin-bottom:12px">${svg(ic, ' width="30" height="30"')}</div>Em breve.</div></div>`
 }
 const vComprar = () => placeholder('Comprar Créditos', 'Adquira créditos para ativar dispositivos', 'cart')
-const vParceiros = () => placeholder('Parceiros', 'Domínios parceiros (Free DNS) — ativação sem consumir crédito', 'globe')
+
+// ── Parceiros (SÓ ADMIN) ─────────────────────────────────────────────────────
+// Parceiro = servidor/domínio com acordo: todo dispositivo que recebe uma
+// playlist apontando pra ele entra ATIVO na hora, sem teste e sem consumir
+// crédito. O casamento é pelo HOST da URL da lista.
+const COBRANCA = {
+  gratuito: { rot: 'Gratuito', cor: 'info' },
+  mensal: { rot: 'Mensalidade fixa', cor: 'ok' },
+  por_device: { rot: 'Por device', cor: 'ok' },
+}
+function rotuloValor(p) {
+  if (!p.valor || p.cobranca === 'gratuito') return ''
+  const v = Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+  return `R$ ${v}${p.cobranca === 'mensal' ? '/mês' : '/device'}`
+}
+
+async function vParceiros() {
+  if (me.papel !== 'admin') { placeholder('Parceiros', 'Área restrita ao administrador', 'globe'); return }
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head">
+      <div><h1>Parceiros</h1><p id="pc-sub">Carregando…</p></div>
+      <button class="btn" id="pc-novo">${svg('plus')} Adicionar domínio</button>
+    </div>
+    <div class="stats" id="pc-stats"></div>
+    <div class="lista" id="pc-lista"><div class="vazio">Carregando…</div></div>
+  </div>`
+  document.getElementById('pc-novo').onclick = () => modalParceiro(carregar)
+  const meu = viewAtual()
+
+  async function carregar() {
+    const el = document.getElementById('pc-lista'); if (el) el.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const { parceiros } = await api('listar_parceiros')
+      if (meu !== viewAtual()) return
+      const l = document.getElementById('pc-lista'); if (!l) return
+      const devices = parceiros.reduce((s, p) => s + (p.devices || 0), 0)
+      document.getElementById('pc-sub').textContent =
+        'Dispositivos com lista destes servidores são ativados sem consumir crédito'
+      document.getElementById('pc-stats').innerHTML =
+        statCard('globe', '#4f8ef7', parceiros.length, 'Domínios') +
+        statCard('shield', '#34c759', parceiros.filter((p) => p.ativo).length, 'Ativos') +
+        statCard('monitor', '#9b7bff', devices, 'Devices atendidos')
+      if (!parceiros.length) { l.innerHTML = '<div class="vazio">Nenhum domínio parceiro cadastrado.</div>'; return }
+      l.innerHTML = parceiros.map((p) => {
+        const cb = COBRANCA[p.cobranca] || COBRANCA.gratuito
+        const val = rotuloValor(p)
+        return `<div class="pc-row">
+          <div class="pc-ic ${p.ativo ? 'on' : ''}">${svg('globe')}</div>
+          <div class="pc-meta">
+            <div class="pc-top">
+              <span class="pc-dom mono">${esc(p.dominio)}</span>
+              <span class="badge badge-${p.ativo ? 'ok' : 'warn'}">${p.ativo ? 'Ativo' : 'Suspenso'}</span>
+              <span class="badge badge-${cb.cor}">${esc(cb.rot)}</span>
+            </div>
+            <div class="pc-sub">
+              ${p.nome ? `<span>${esc(p.nome)}</span>` : ''}
+              <span>${svg('monitor')} ${p.devices} device(s)</span>
+              ${val ? `<span>${svg('coins')} ${esc(val)}</span>` : ''}
+            </div>
+          </div>
+          <div class="pc-acoes">
+            <button class="btn-sec" data-acao="alternar" data-id="${esc(p.id)}" data-ativo="${p.ativo ? '1' : ''}">${p.ativo ? 'Suspender' : 'Reativar'}</button>
+            <button class="pc-del" data-acao="excluir" data-id="${esc(p.id)}" data-dom="${esc(p.dominio)}" title="Excluir">${svg('trash')}</button>
+          </div>
+        </div>`
+      }).join('')
+      l.querySelectorAll('[data-acao="alternar"]').forEach((b) => {
+        b.onclick = async () => {
+          try { await api('parceiro_ativo', { id: b.dataset.id, ativo: !b.dataset.ativo }); invalidar('parceiros'); toast(b.dataset.ativo ? 'Domínio suspenso' : 'Domínio reativado'); carregar() }
+          catch (e) { toast(e.message, true) }
+        }
+      })
+      l.querySelectorAll('[data-acao="excluir"]').forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm(`Excluir o parceiro ${b.dataset.dom}?\n\nOs dispositivos já ativados CONTINUAM ativos; listas novas desse domínio voltam a cair no teste de 3 dias.`)) return
+          try { await api('excluir_parceiro', { id: b.dataset.id }); invalidar('parceiros'); toast('Parceiro excluído'); carregar() }
+          catch (e) { toast(e.message, true) }
+        }
+      })
+    } catch (e) {
+      if (meu !== viewAtual()) return
+      const l = document.getElementById('pc-lista'); if (l) l.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+  carregar()
+}
+
+function modalParceiro(recarregar) {
+  abrirModal({
+    titulo: 'Adicionar domínio parceiro', okLabel: 'Adicionar',
+    aviso: 'Todo dispositivo que receber uma lista deste servidor é ativado <b>na hora</b>, sem teste e <b>sem consumir crédito</b>.',
+    campos: [
+      { id: 'dominio', label: 'Domínio ou URL do servidor', placeholder: 'meuservidor.com  ou  http://1.2.3.4:25461/get.php?...' },
+      { id: 'nome', label: 'Identificação (opcional)', placeholder: 'Nome do parceiro' },
+      { id: 'cobranca', label: 'Cobrança', escolhas: [
+        { v: 'gratuito', t: 'Gratuito', d: 'Sem cobrança pelo acordo', ic: 'globe' },
+        { v: 'mensal', t: 'Mensalidade fixa', d: 'Valor fechado por mês', ic: 'coins' },
+        { v: 'por_device', t: 'Por device', d: 'Valor por dispositivo ativado', ic: 'monitor' },
+      ] },
+      { id: 'valor', label: 'Valor (R$) — só para mensal/por device', type: 'number', placeholder: '0,00' },
+    ],
+    onOk: async (v) => {
+      if (!v.dominio) return 'Informe o domínio do servidor'
+      const r = await api('criar_parceiro', v)
+      invalidar('parceiros', 'dispositivos')
+      toast(r.ativados ? `Parceiro adicionado — ${r.ativados} device(s) ativados` : 'Parceiro adicionado')
+      recarregar()
+      return null
+    },
+  })
+}
 
 // ── Indicação (código + link; novos revendedores se cadastram por aqui) ──────
 async function vIndicacao() {

@@ -198,6 +198,31 @@ tbody tr:first-child td { border-top: none; }
 .badge-tk-aberto { color: var(--warn); border-color: rgba(232,178,58,.4); background: rgba(232,178,58,.08); }
 .badge-tk-respondido { color: var(--info); border-color: rgba(79,142,247,.4); background: rgba(79,142,247,.08); }
 .badge-tk-fechado { color: var(--muted); }
+/* Genéricos (não presos a um status do banco): usados em Parceiros. */
+.badge-ok { color: var(--ok); border-color: rgba(52,199,89,.4); background: rgba(52,199,89,.08); }
+.badge-warn { color: var(--warn); border-color: rgba(232,178,58,.4); background: rgba(232,178,58,.08); }
+.badge-info { color: var(--info); border-color: rgba(79,142,247,.4); background: rgba(79,142,247,.08); }
+
+/* ── Parceiros (domínios com ativação liberada) ───────────────────────────── */
+.pc-row { display: flex; align-items: center; gap: 16px; background: var(--surface1); border: 1px solid var(--divider); border-radius: 14px; padding: 16px 20px; transition: border-color .12s; }
+.pc-row:hover { border-color: var(--outline); }
+.pc-ic { width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; display: grid; place-items: center; background: var(--surface3); color: var(--muted); }
+.pc-ic.on { background: rgba(52,199,89,.10); color: var(--ok); }
+.pc-ic svg { width: 19px; height: 19px; }
+.pc-meta { flex: 1; min-width: 0; }
+.pc-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.pc-dom { font-size: 15px; font-weight: 700; color: #fff; word-break: break-all; }
+.pc-sub { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.pc-sub span { display: inline-flex; align-items: center; gap: 5px; }
+.pc-sub svg { width: 12px; height: 12px; }
+.pc-acoes { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pc-del { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: transparent; border: 1px solid var(--divider); color: var(--muted); transition: color .12s, border-color .12s, background .12s; }
+.pc-del:hover { color: var(--danger); border-color: rgba(255,91,84,.4); background: rgba(255,91,84,.08); }
+.pc-del svg { width: 15px; height: 15px; }
+@media (max-width: 640px) {
+  .pc-row { flex-wrap: wrap; }
+  .pc-acoes { width: 100%; justify-content: flex-end; }
+}
 .pos { color: var(--ok); font-weight: 700; }
 .neg { color: var(--danger); font-weight: 700; }
 
