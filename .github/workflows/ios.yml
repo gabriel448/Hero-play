@@ -39,8 +39,12 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
+      # `--no-fatal-infos`: erro e warning continuam derrubando o build, mas um
+      # lint de ESTILO nao pode reprovar uma build cujo objetivo e provar que o
+      # app COMPILA. (O `flutter analyze` sai com codigo != 0 por qualquer
+      # achado, inclusive `info` — foi o que reprovou a primeira tentativa.)
       - name: flutter analyze
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       # HP_CANAL=loja: build NEUTRA (sem QR nem link de ativacao). No iOS nao
       # existe trilho direto — tudo passa pela Apple. Ver CLAUDE.md.

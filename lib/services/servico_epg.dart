@@ -28,7 +28,12 @@ class ServicoEpg extends ChangeNotifier {
   ServicoEpg({
     required Armazenamento armazenamento,
     CarregadorEpg? carregador,
-  })  : _armazenamento = armazenamento,
+  })
+      // O `prefer_initializing_formals` sugere `required this._armazenamento`,
+      // mas parametro NOMEADO nao pode comecar com underscore em Dart — a
+      // sugestao simplesmente nao compila. Silenciado por isso.
+      // ignore: prefer_initializing_formals
+      : _armazenamento = armazenamento,
         _carregador = carregador ?? CarregadorEpg();
 
   // ===== ESTADO =====
