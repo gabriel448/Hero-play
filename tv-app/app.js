@@ -994,6 +994,7 @@ const PlayerNativo = (function () {
       try { document.documentElement.classList.add('video-nativo'); } catch (_) {}
       sincronizarArea();
       try { HeroPlayAndroid.abrir(url, posicaoSeg || 0, !!mudo); } catch (_) {}
+      _mudoNativo = !!mudo;
       iniciarTick();
       emitir('loadstart');
     },
@@ -1122,7 +1123,24 @@ function escolherVariante(vars, pref) {
   const abaixo = arr.filter((x) => x.r <= cap).sort((a, b) => b.r - a.r);
   return (abaixo[0] || arr.slice().sort((a, b) => a.r - b.r)[0]).v;
 }
-function videoMutedAtual() { const v = document.getElementById('tv-prev-video'); return v ? v.muted : true; }
+// No Android o som e do ExoPlayer: o `muted` do <video> (que nem toca nada la)
+// nao significa nada. Guardamos o estado a parte.
+let _mudoNativo = true;
+function videoMutedAtual() {
+  if (TEM_PLAYER_NATIVO) return _mudoNativo;
+  const v = document.getElementById('tv-prev-video');
+  return v ? v.muted : true;
+}
+/** Liga/desliga o som da reproducao ao vivo, no player que estiver valendo. */
+function definirMudo(mudo) {
+  if (TEM_PLAYER_NATIVO) {
+    _mudoNativo = !!mudo;
+    try { HeroPlayAndroid.mudo(!!mudo); } catch (_) {}
+    return;
+  }
+  const v = document.getElementById('tv-prev-video');
+  if (v) v.muted = !!mudo;
+}
 
 let _qAtual = null;   // { canal, fontes, fi, vi } — reprodução ativa (p/ auto-switch)
 function tocarCanalAuto(canal, muted) {
@@ -2682,8 +2700,9 @@ function abrirLive(canal) {
   const pv = document.getElementById('tv-prev-video');
   const tela = document.querySelector('.tv-tela');
   if (tela) tela.classList.add('cheia');
-  if (pv) {
-    pv.muted = false;
+  // Som LIGADO ao entrar em tela cheia (a preview fica muda de proposito).
+  definirMudo(false);
+  if (pv && !TEM_PLAYER_NATIVO) {
     pv.play().catch(() => { pv.muted = true; pv.play().catch(() => {}); });
   }
 
@@ -2725,7 +2744,8 @@ function fecharLive() {
   const v = document.getElementById('tv-prev-video');
   const tela = document.querySelector('.tv-tela');
   if (tela) tela.classList.remove('cheia');
-  if (v) v.muted = true;
+  definirMudo(true);
+  if (v && !TEM_PLAYER_NATIVO) v.muted = true;
   const ov = document.getElementById('live-overlay');
   if (ov) ov.remove();
   const alvo = document.querySelector('.tv-tela') || document.querySelector('#conteudo .focusable');
@@ -2867,7 +2887,10 @@ function mostrarOnboarding() {
     ob.className = 'nav-modal';
     document.body.appendChild(ob);
   }
-  ob._onVoltar = () => {}; // sem "voltar" no onboarding (e a raiz)
+  // O onboarding E a raiz do app: o Voltar aqui nao tem para onde ir, entao
+  // pergunta se quer SAIR (as lojas exigem que o Back na raiz devolva ao
+  // launcher). Antes era um no-op e o usuario ficava preso no app.
+  ob._onVoltar = () => confirmarSairApp();
   ob.innerHTML = `
     <div class="ob-wrap ob-grid">
       <div class="ob-top">

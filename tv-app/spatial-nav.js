@@ -44,6 +44,11 @@ const SpatialNav = (() => {
     if (el.closest('.jogos-datas')) return 'jg-datas';// Jogos: abas de data (topo)
     if (el.closest('.jogos-ligas')) return 'jg-ligas';// Jogos: coluna de ligas (esq.)
     if (el.closest('#jogos-jogos')) return 'jg-jogos';// Jogos: lista de jogos/canais (dir.)
+    // Onboarding: QR/Recarregar (esq.) e formulario (dir.) sao areas SEPARADAS.
+    // Na mesma area o ←/→ exige estar na mesma LINHA, e o Recarregar fica ABAIXO
+    // dos campos — sem isto nao dava para chegar nele indo para a esquerda.
+    if (el.closest('.ob-left')) return 'ob-esq';
+    if (el.closest('.ob-right')) return 'ob-dir';
     return 'main';
   };
 
