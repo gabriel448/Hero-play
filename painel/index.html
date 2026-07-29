@@ -4,6 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hero Play — Painel de Revenda</title>
+  <!-- Ícone da aba. PNG primeiro (todo navegador entende) e SVG depois, que os
+       modernos preferem e fica nítido em qualquer densidade. Os arquivos vivem
+       aqui dentro de propósito: a pasta `painel/` é copiada inteira pro site no
+       build (ver vercel.json), então não pode depender de /assets do site. -->
+  <link rel="icon" type="image/png" sizes="192x192" href="heroplay-icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="heroplay-icon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="heroplay-icon-180.png">
+  <meta name="theme-color" content="#0b0b0c">
   <link rel="stylesheet" href="painel.css">
 </head>
 <body>
