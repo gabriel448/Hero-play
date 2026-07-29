@@ -82,8 +82,12 @@ ativação de novo. O Keychain sobrevive à desinstalação. É o análogo do
 1. **Mac** — `.ipa` só compila com Xcode. Alternativa sem comprar: build na
    nuvem ([`codemagic.yaml`](../codemagic.yaml) já está pronto no repo; é o
    equivalente ao EAS Build do Expo).
-2. **Apple Developer Program** (US$ 99/ano) — sem certificado não existe `.ipa`
-   instalável, em nenhum caminho. Build na nuvem resolve o Mac, não a Apple.
+2. **Conta Apple.** Cuidado com a confusão aqui: assinar exige uma conta, mas
+   **não** necessariamente a paga. Com **Apple ID grátis** dá para instalar no
+   *seu próprio* aparelho (Sideloadly/AltStore/Xcode), com validade de **7 dias**
+   e no máximo 3 apps por aparelho. O **Developer Program (US$ 99/ano)** é o que
+   libera **distribuir**: TestFlight, Ad Hoc e App Store. Build na nuvem resolve
+   o Mac; a conta Apple é outra coisa.
 3. `pod install` na primeira build (o Podfile nasce lá) e ícones no
    `Assets.xcassets`.
 

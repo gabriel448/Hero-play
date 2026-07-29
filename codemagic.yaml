@@ -4,11 +4,14 @@
 # Existe por um motivo só: `.ipa` de iOS não compila no Windows, e este projeto
 # é desenvolvido no Windows. Aqui o Codemagic empresta um Mac com Xcode.
 #
-# ⚠️ Build na nuvem resolve o MAC, não resolve a APPLE. Para um `.ipa` que
-# INSTALA em iPhone é obrigatório o Apple Developer Program (US$ 99/ano) — nem
-# Codemagic nem EAS contornam a assinatura. Sem conta, dá pra usar o workflow
-# `ios-sem-assinatura`: ele confirma que o app COMPILA para iOS (o que já é o
-# que mais quebra ao portar), mas o resultado não instala em aparelho.
+# ⚠️ Build na nuvem resolve o MAC, não a conta APPLE — e aqui há dois níveis:
+#   • Apple ID GRÁTIS: instala no SEU aparelho (Sideloadly/AltStore/Xcode), app
+#     válido por 7 dias, até 3 apps por aparelho. Serve pra testar.
+#   • Developer Program (US$ 99/ano): é o que libera DISTRIBUIR — TestFlight,
+#     Ad Hoc e App Store. É o que o workflow `ios-ipa` daqui exige.
+# O workflow `ios-sem-assinatura` não precisa de conta nenhuma: confirma que o
+# app COMPILA para iOS (o que mais quebra ao portar) e cospe um .ipa cru, que
+# você assina depois com a Apple ID grátis.
 #
 # Como usar: codemagic.io → New application → aponta pro repo → escolhe o
 # workflow. O plano grátis dá 500 min/mês de macOS.
