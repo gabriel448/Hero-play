@@ -39,6 +39,9 @@ class PlayerVod {
     native.setProperty('demuxer-readahead-secs', '10');
     native.setProperty('demuxer-max-bytes', '32MiB');
     native.setProperty('network-timeout', '5');
+    // Decodificação por HARDWARE: sem isto o 4K/HEVC vai pra CPU, derruba a
+    // bateria e engasga. Cada sistema tem o seu — `videotoolbox` é o do iOS.
     if (Platform.isAndroid) native.setProperty('hwdec', 'mediacodec-copy');
+    if (Platform.isIOS) native.setProperty('hwdec', 'videotoolbox');
   }
 }

@@ -81,13 +81,19 @@ class Dispositivo {
   }
 
   /// ID de hardware por plataforma. Android: `Settings.Secure.ANDROID_ID`
-  /// (via MethodChannel na MainActivity). Windows: `MachineGuid` do registro,
-  /// exposto pelo device_info_plus. null quando nao for possivel.
+  /// (via MethodChannel na MainActivity). iOS: UUID guardado no Keychain,
+  /// semeado pelo `identifierForVendor` (ver AppDelegate.swift) — o Keychain
+  /// sobrevive a desinstalar o app, o identifierForVendor sozinho nao.
+  /// Windows: `MachineGuid` do registro, exposto pelo device_info_plus.
+  /// null quando nao for possivel.
   Future<String?> _idPlataforma() async {
     try {
       if (defaultTargetPlatform == TargetPlatform.android) {
         final id = await _canalNativo.invokeMethod<String>('androidId');
         if (id != null && id.isNotEmpty) return 'aid:$id';
+      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final id = await _canalNativo.invokeMethod<String>('iosId');
+        if (id != null && id.isNotEmpty) return 'ios:$id';
       } else if (defaultTargetPlatform == TargetPlatform.windows) {
         final info = await DeviceInfoPlugin().windowsInfo;
         if (info.deviceId.isNotEmpty) return 'win:${info.deviceId}';

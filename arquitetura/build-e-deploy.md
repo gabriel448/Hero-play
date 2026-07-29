@@ -56,6 +56,54 @@ instalação. Nome do app: "Hero Play"; instala em `{autopf}\Hero Play`.
 > `C:\src\flutter\bin\cache\artifacts\engine\windows-x64\cpp_client_wrapper\*.cc`.
 > Precisa refazer após `flutter clean`.
 
+## iOS (.ipa) — preparado, **nunca compilado**
+
+O projeto `ios/` existe e o código Dart está pronto (os 9 plugins que o app usa
+têm implementação iOS, inclusive o `media_kit`). O que **não** foi feito: nenhuma
+build jamais rodou — falta máquina Apple e conta de desenvolvedor.
+
+### O que já está no repo
+| Item | Onde |
+|---|---|
+| Projeto Xcode | [`ios/`](../ios/) (`flutter create --platforms=ios`) |
+| Nome sob o ícone ("Hero Play") | `CFBundleDisplayName` no [Info.plist](../ios/Runner/Info.plist) |
+| HTTP puro liberado | `NSAppTransportSecurity` → `NSAllowsArbitraryLoads` |
+| Áudio em segundo plano | `UIBackgroundModes: audio` |
+| Identidade estável do aparelho | [AppDelegate.swift](../ios/Runner/AppDelegate.swift) — UUID no **Keychain** |
+| `hwdec` de hardware | `videotoolbox` em `player_ao_vivo`/`player_vod` |
+
+**Por que Keychain e não `identifierForVendor`:** o IDFV desaparece quando o
+usuário desinstala todos os apps do mesmo desenvolvedor — e aí o aparelho pediria
+ativação de novo. O Keychain sobrevive à desinstalação. É o análogo do
+`ANDROID_ID` (Android) e do `LGUDID` (webOS). Ver `_idPlataforma()` em
+[dispositivo.dart](../lib/services/dispositivo.dart).
+
+### O que falta (não dá para fazer no Windows)
+1. **Mac** — `.ipa` só compila com Xcode. Alternativa sem comprar: build na
+   nuvem ([`codemagic.yaml`](../codemagic.yaml) já está pronto no repo; é o
+   equivalente ao EAS Build do Expo).
+2. **Apple Developer Program** (US$ 99/ano) — sem certificado não existe `.ipa`
+   instalável, em nenhum caminho. Build na nuvem resolve o Mac, não a Apple.
+3. `pod install` na primeira build (o Podfile nasce lá) e ícones no
+   `Assets.xcassets`.
+
+```bash
+flutter build ipa --release --dart-define=HP_CANAL=loja   # só no macOS
+```
+
+### Distribuição: **não existe equivalente ao APK direto**
+| Caminho | Custo | Limite |
+|---|---|---|
+| Personal team (Xcode) | grátis | **expira em 7 dias**, só por cabo |
+| Ad Hoc | US$ 99/ano | 100 aparelhos/ano, UDID cadastrado |
+| TestFlight | US$ 99/ano | revisão leve; testadores por convite |
+| App Store | US$ 99/ano | revisão completa |
+
+⚠️ **O trilho duplo do CLAUDE.md não vale no iOS**: tudo passa pela Apple, então
+a build de iOS é sempre a **neutra** (`HP_CANAL=loja`). A Apple é a loja que mais
+rejeita player de M3U — os motivos típicos são 4.3 (app genérico) e 5.2.1
+(direitos sobre o conteúdo, quando a ficha dá a entender que o app entrega canais).
+
 ## Releases no GitHub
 
 Repositório: `gabriel448/Hero-play` (o remote `IPTV` foi movido para lá).

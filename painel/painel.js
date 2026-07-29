@@ -31,7 +31,7 @@ const MODELO_INFO = {
 }
 const modeloNome = (m) => (MODELO_INFO[m] && MODELO_INFO[m].nome) || (m || '—')
 const modeloIcone = (m) => (MODELO_INFO[m] && MODELO_INFO[m].icone) || '❓'
-const ATIVADO_POR_PT = { reseller: 'Revendedor', qr: 'QR (auto)', codigo: 'Código', admin: 'Admin' }
+const ATIVADO_POR_PT = { reseller: 'Revendedor', qr: 'QR (auto)', codigo: 'Código', admin: 'Admin', parceiro: 'Domínio parceiro' }
 
 const app = document.getElementById('app')
 let me = null // { id, nome, usuario, papel, saldo_creditos }

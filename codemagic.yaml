@@ -1,0 +1,77 @@
+# ============================================================================
+# Build na NUVEM (Codemagic) — o equivalente ao EAS Build do Expo.
+#
+# Existe por um motivo só: `.ipa` de iOS não compila no Windows, e este projeto
+# é desenvolvido no Windows. Aqui o Codemagic empresta um Mac com Xcode.
+#
+# ⚠️ Build na nuvem resolve o MAC, não resolve a APPLE. Para um `.ipa` que
+# INSTALA em iPhone é obrigatório o Apple Developer Program (US$ 99/ano) — nem
+# Codemagic nem EAS contornam a assinatura. Sem conta, dá pra usar o workflow
+# `ios-sem-assinatura`: ele confirma que o app COMPILA para iOS (o que já é o
+# que mais quebra ao portar), mas o resultado não instala em aparelho.
+#
+# Como usar: codemagic.io → New application → aponta pro repo → escolhe o
+# workflow. O plano grátis dá 500 min/mês de macOS.
+# ============================================================================
+
+workflows:
+  # ── 1) Só valida que compila (não precisa de conta Apple) ─────────────────
+  ios-sem-assinatura:
+    name: iOS — build sem assinatura
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Dependências
+        script: flutter pub get
+      # O .env não é versionado (tem chave de API). Sem ele o dotenv falha no
+      # boot, então criamos um vazio: os valores têm default embutido no código.
+      - name: .env vazio (os defaults estão no código)
+        script: touch .env
+      - name: Análise
+        script: flutter analyze
+      - name: Build iOS (sem assinar)
+        script: flutter build ios --release --no-codesign --dart-define=HP_CANAL=loja
+    artifacts:
+      - build/ios/iphoneos/*.app
+      - flutter_drive.log
+
+  # ── 2) .ipa de verdade (exige conta Apple configurada no Codemagic) ───────
+  # Antes de rodar: Codemagic → Teams → Integrations → Apple Developer Portal,
+  # e crie o grupo de variáveis `apple` com APP_STORE_APP_ID.
+  ios-ipa:
+    name: iOS — .ipa assinado (TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: hero-play          # nome da integração criada no Codemagic
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      groups:
+        - apple
+      ios_signing:
+        distribution_type: app_store        # ou ad_hoc, p/ instalar em aparelhos cadastrados
+        bundle_identifier: com.iptv.iptvApp # tem que casar com o PRODUCT_BUNDLE_IDENTIFIER do Xcode
+    scripts:
+      - name: Dependências
+        script: flutter pub get
+      - name: .env vazio (os defaults estão no código)
+        script: touch .env
+      - name: Perfis de assinatura
+        script: xcode-project use-profiles
+      # HP_CANAL=loja: build NEUTRA (sem QR, sem link de ativação). No iOS não
+      # existe trilho direto — tudo passa pela Apple. Ver CLAUDE.md.
+      - name: Build .ipa
+        script: flutter build ipa --release --dart-define=HP_CANAL=loja --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false         # ligar quando o app já existir no App Store Connect
