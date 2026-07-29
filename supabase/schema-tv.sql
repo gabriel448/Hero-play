@@ -257,6 +257,33 @@ revoke all on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text) fro
 grant execute on function public.rpc_transferir_creditos(uuid, uuid, int, uuid, text, text) to service_role;
 grant execute on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text) to service_role;
 
+-- ── TICKETS: topico pre-definido ──────────────────────────────────────────────
+-- O revendedor nao escreve mais o assunto: escolhe entre Financeiro/Tecnico/
+-- Login e so descreve o problema. O `assunto` continua sendo gravado (o rotulo
+-- do topico) para nao quebrar nada que ja o exibe.
+alter table public.tickets add column if not exists topico text;
+create index if not exists idx_tickets_topico on public.tickets(topico, atualizado_em desc);
+
+-- ── CAIXA DE ENTRADA (notificacoes do painel) ────────────────────────────────
+-- Uma linha por aviso recebido. Hoje nascem de: ticket respondido, ticket novo
+-- (p/ o admin), creditos recebidos, revendedor novo na rede e aviso do admin.
+-- `ref` guarda o id do que originou (ticket, por exemplo) p/ o clique abrir.
+create table if not exists public.notificacoes (
+  id            uuid primary key default gen_random_uuid(),
+  revendedor_id uuid not null references public.revendedores(id) on delete cascade,
+  tipo          text not null,               -- ticket | credito | rede | aviso
+  titulo        text not null,
+  corpo         text,
+  ref           text,                        -- id do ticket/etc, quando houver
+  lida          boolean not null default false,
+  criado_em     timestamptz not null default now()
+);
+create index if not exists idx_notif_rev on public.notificacoes(revendedor_id, criado_em desc);
+create index if not exists idx_notif_nao_lida on public.notificacoes(revendedor_id, lida);
+alter table public.notificacoes enable row level security;
+revoke all on public.notificacoes from anon, authenticated;
+grant all on public.notificacoes to service_role;
+
 notify pgrst, 'reload schema';
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -89,6 +89,8 @@ const IC = {
   zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
   listv: '<path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/><path d="m16 12 5 3-5 3v-6Z"/>',
   ticket: '<path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   lifebuoy: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
   menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
@@ -123,6 +125,7 @@ const NAV = [
   { grupo: '', itens: [
     { id: 'dashboard', rotulo: 'Dashboard', ic: 'dashboard' },
     { id: 'suporte', rotulo: 'Suporte', ic: 'lifebuoy' },
+    { id: 'caixa', rotulo: 'Caixa de entrada', ic: 'inbox' },
   ] },
   { grupo: 'Conteúdo', itens: [
     { id: 'clientes', rotulo: 'Clientes', ic: 'users' },
@@ -191,7 +194,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros }[v]
   if (fn) fn(param)
 }
 
@@ -441,7 +444,7 @@ async function vCliente(cliente_id) {
 // ── Revendedores (downline DIRETO; admin promove/rebaixa o tier Master) ───────
 async function vRevendedores() {
   const ehAdmin = me.papel === 'admin'
-  view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Revendedores</h1><p id="dl-sub">Sua rede direta</p></div>
+  view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Revendedores</h1><p id="dl-sub">${ehAdmin ? 'Todos os revendedores da plataforma' : 'Sua rede direta'}</p></div>
     <button class="btn-sec" id="ir-indicacao">${svg('link')} Meu link de indicação</button></div>
     <div class="tbl-wrap" id="dl-tbl"><div class="vazio">Carregando…</div></div></div>`
   document.getElementById('ir-indicacao').onclick = () => irPara('indicacao')
@@ -449,12 +452,17 @@ async function vRevendedores() {
   try {
     const { revendedores } = await pega('downline', () => api('listar_revendedores'))
     if (meu !== viewAtual()) return
-    document.getElementById('dl-sub').textContent = `${revendedores.length} revendedor(es) direto(s)`
+    document.getElementById('dl-sub').textContent = ehAdmin
+      ? `${revendedores.length} revendedor(es) na plataforma`
+      : `${revendedores.length} revendedor(es) direto(s)`
     const el = document.getElementById('dl-tbl')
     if (!revendedores.length) { el.innerHTML = '<div class="vazio">Ninguém se cadastrou pelo seu link ainda. Compartilhe seu link em <b>Indicação</b>.</div>'; return }
-    el.innerHTML = `<table><thead><tr><th>Nome</th><th>Tier</th><th>Créditos</th><th>Status</th><th></th></tr></thead><tbody>
+    el.innerHTML = `<table><thead><tr><th>Nome</th>${ehAdmin ? '<th>Indicado por</th>' : ''}<th>Tier</th><th>Créditos</th><th>Status</th><th></th></tr></thead><tbody>
       ${revendedores.map((r) => `<tr>
         <td><b>${esc(r.nome || '—')}</b><div class="row-sub">@${esc(r.usuario || "—")}</div></td>
+        ${ehAdmin ? `<td>${r.indicado_por
+          ? `${esc(r.indicado_por)}<div class="row-sub mono">${esc(r.indicado_por_codigo || '—')}</div>`
+          : '<span class="row-sub">— cadastro direto</span>'}</td>` : ''}
         <td><span class="badge badge-${r.papel === 'master' ? 'master' : 'reseller'}">${r.papel === 'master' ? 'Master' : 'Comum'}</span></td>
         <td class="tnum">${r.saldo_creditos ?? 0}</td>
         <td><span class="badge badge-${r.ativo ? 'ativo' : 'expirado'}">${r.ativo ? 'ativo' : 'inativo'}</span></td>
@@ -497,6 +505,98 @@ async function vCreditos() {
   } catch (e) { toast(e.message, true) }
 }
 
+// ── Caixa de entrada ─────────────────────────────────────────────────────────
+// Tudo o que chega para este usuário: ticket respondido, crédito recebido,
+// revendedor novo na rede e aviso do admin. Para o admin, é aqui que caem os
+// tickets abertos pelos revendedores (e, no futuro, os e-mails).
+const NOTIF_IC = { ticket: 'lifebuoy', credito: 'coins', rede: 'userplus', aviso: 'bell' }
+const NOTIF_COR = { ticket: '#4f8ef7', credito: '#E53935', rede: '#9b7bff', aviso: '#d9a23e' }
+
+async function vCaixa() {
+  const admin = me.papel === 'admin'
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head"><div><h1>Caixa de entrada</h1><p id="cx-sub">Carregando…</p></div>
+      <div class="pg-acoes">
+        ${admin ? `<button class="btn-sec" id="cx-aviso">${svg('bell')} Enviar aviso</button>` : ''}
+        <button class="btn-sec" id="cx-ler">Marcar tudo como lido</button>
+      </div></div>
+    <div class="lista" id="cx-lista"><div class="vazio">Carregando…</div></div>
+  </div>`
+
+  const meu = viewAtual()
+  const carregar = async () => {
+    try {
+      const { notificacoes, nao_lidas } = await api('listar_notificacoes')
+      if (meu !== viewAtual()) return
+      atualizarBadgeCaixa(nao_lidas)
+      const sub = document.getElementById('cx-sub')
+      if (sub) sub.textContent = nao_lidas ? `${nao_lidas} não lida(s)` : 'Tudo lido'
+      const l = document.getElementById('cx-lista'); if (!l) return
+      if (!notificacoes.length) {
+        l.innerHTML = '<div class="vazio">Nada por aqui ainda. Avisos de tickets, créditos e novos revendedores aparecem nesta caixa.</div>'
+        return
+      }
+      l.innerHTML = notificacoes.map((n) => {
+        const cor = NOTIF_COR[n.tipo] || '#8a8a8a'
+        return `<button class="row cx-row${n.lida ? '' : ' cx-nova'}" data-id="${esc(n.id)}" data-tipo="${esc(n.tipo)}" data-ref="${esc(n.ref || '')}">
+          <div class="cx-ic" style="background:${cor}1f;color:${cor}">${svg(NOTIF_IC[n.tipo] || 'bell')}</div>
+          <div style="min-width:0;flex:1">
+            <div class="row-nome">${n.lida ? '' : '<span class="cx-dot"></span>'}${esc(n.titulo)}</div>
+            <div class="row-sub">${esc(n.corpo || '')}</div>
+          </div>
+          <div class="row-sub cx-quando">${fmtDataHora(n.criado_em)}</div>
+        </button>`
+      }).join('')
+      l.querySelectorAll('.cx-row').forEach((b) => {
+        b.onclick = async () => {
+          try { await api('ler_notificacoes', { id: b.dataset.id }) } catch (_) { /* marcar lida nao e critico */ }
+          // Aviso de ticket abre o próprio ticket — sem isso o usuário teria
+          // que caçar o ticket na aba do lado.
+          if (b.dataset.tipo === 'ticket' && b.dataset.ref) abrirTicket(b.dataset.ref, carregar)
+          else carregar()
+        }
+      })
+    } catch (e) {
+      if (meu !== viewAtual()) return
+      const l = document.getElementById('cx-lista'); if (l) l.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+
+  document.getElementById('cx-ler').onclick = async () => {
+    try { await api('ler_notificacoes'); toast('Tudo marcado como lido'); carregar() } catch (e) { toast(e.message, true) }
+  }
+  const bAviso = document.getElementById('cx-aviso')
+  if (bAviso) bAviso.onclick = () => abrirModal({
+    titulo: 'Enviar aviso', okLabel: 'Enviar',
+    aviso: 'O aviso cai na caixa de entrada de <b>todos os revendedores ativos</b>.',
+    campos: [
+      { id: 'titulo', label: 'Título', placeholder: 'Ex.: Manutenção programada' },
+      { id: 'corpo', label: 'Mensagem', type: 'textarea', placeholder: 'Detalhe o aviso…' },
+    ],
+    onOk: async (v) => {
+      if (!v.titulo) return 'Informe o título'
+      const r = await api('enviar_aviso', { titulo: v.titulo, corpo: v.corpo })
+      toast(`Aviso enviado para ${r.enviados} revendedor(es)`); return null
+    },
+  })
+  carregar()
+}
+
+/** Bolinha com o número de não lidas no item do menu. */
+function atualizarBadgeCaixa(n) {
+  const item = document.querySelector('.nav-item[data-view="caixa"]')
+  if (!item) return
+  let b = item.querySelector('.nav-badge')
+  if (!n) { if (b) b.remove(); return }
+  if (!b) { b = document.createElement('span'); b.className = 'nav-badge'; item.appendChild(b) }
+  b.textContent = n > 99 ? '99+' : String(n)
+}
+
+/** Consulta o total de não lidas (sem abrir a caixa) para o menu já nascer certo. */
+async function checarCaixa() {
+  try { const { nao_lidas } = await api('listar_notificacoes'); atualizarBadgeCaixa(nao_lidas) } catch (_) { /* silencioso */ }
+}
+
 // ── Suporte (tickets) — real: revendedor abre; admin vê todos, responde e encerra
 const TICKET_ST = { aberto: 'Aberto', respondido: 'Respondido', fechado: 'Fechado' }
 async function vSuporte() {
@@ -504,16 +604,21 @@ async function vSuporte() {
   view().innerHTML = `<div class="pg">
     <div class="pg-head"><div><h1>Suporte</h1><p id="sup-sub">${admin ? 'Todos os tickets — responda e encerre' : 'Seus tickets de suporte'}</p></div>
       <button class="btn" id="novo-ticket">${svg('plus')} Novo ticket</button></div>
-    <div class="filtros"><div class="pills" id="sup-fst">${pills('Status', [['', 'Todos'], ['aberto', 'Abertos'], ['respondido', 'Respondidos'], ['fechado', 'Fechados']])}</div></div>
+    <div class="filtros">
+      <div class="pills" id="sup-fst">${pills('Status', [['', 'Todos'], ['aberto', 'Abertos'], ['respondido', 'Respondidos'], ['fechado', 'Fechados']])}</div>
+      <div class="pills" id="sup-ftp">${pills('Assunto', [['', 'Todos'], ['financeiro', 'Financeiro'], ['tecnico', 'Técnico'], ['login', 'Login']])}</div>
+    </div>
     <div class="lista" id="sup-lista"><div class="vazio">Carregando…</div></div>
   </div>`
   document.getElementById('novo-ticket').onclick = novoTicket
-  const st = { status: '' }
+  const st = { status: '', topico: '' }
   const meu = viewAtual()
   const carregar = async () => {
     const el = document.getElementById('sup-lista'); if (el) el.innerHTML = '<div class="vazio">Carregando…</div>'
     try {
-      const { tickets } = await api('listar_tickets', { status: st.status })
+      let { tickets } = await api('listar_tickets', { status: st.status })
+      // O filtro de assunto e local: a lista ja vem inteira e e curta.
+      if (st.topico) tickets = tickets.filter((t) => (t.topico || '') === st.topico)
       if (meu !== viewAtual()) return
       const l = document.getElementById('sup-lista'); if (!l) return
       if (!tickets.length) { l.innerHTML = '<div class="vazio">Nenhum ticket aqui.</div>'; return }
@@ -529,16 +634,29 @@ async function vSuporte() {
     } catch (e) { if (meu !== viewAtual()) return; const l = document.getElementById('sup-lista'); if (l) l.innerHTML = `<div class="vazio">${esc(e.message)}</div>` }
   }
   wirePills(document.getElementById('sup-fst'), (v) => { st.status = v; carregar() })
+  wirePills(document.getElementById('sup-ftp'), (v) => { st.topico = v; carregar() })
   carregar()
 }
+
+// Assunto deixou de ser texto livre: o revendedor escolhe o TOPICO e so
+// descreve o problema. Isso deixa o suporte triar por categoria e acaba com
+// assunto vago do tipo "ajuda".
+const TICKET_TOPICOS = [
+  { v: 'financeiro', t: 'Financeiro — créditos, cobrança, pagamento' },
+  { v: 'tecnico', t: 'Técnico — app, dispositivo, playlist' },
+  { v: 'login', t: 'Login — acesso à conta do painel' },
+]
 
 function novoTicket() {
   abrirModal({
     titulo: 'Novo ticket', okLabel: 'Abrir ticket',
-    campos: [{ id: 'assunto', label: 'Assunto', placeholder: 'Resumo do problema' }, { id: 'msg', label: 'Mensagem', type: 'textarea', placeholder: 'Descreva sua dúvida ou problema…' }],
+    campos: [
+      { id: 'topico', label: 'Assunto', options: TICKET_TOPICOS },
+      { id: 'msg', label: 'Descrição', type: 'textarea', placeholder: 'Conte o que está acontecendo…' },
+    ],
     onOk: async (v) => {
-      if (!v.assunto || !v.msg) return 'Informe assunto e mensagem'
-      await api('criar_ticket', { assunto: v.assunto, mensagem: v.msg })
+      if (!v.msg) return 'Descreva o problema'
+      await api('criar_ticket', { topico: v.topico, mensagem: v.msg })
       toast('Ticket aberto'); vSuporte(); return null
     },
   })
@@ -796,6 +914,8 @@ async function iniciar() {
   cache.clear()
   try { me = await api('me') } catch (e) { viewLogin('Não foi possível entrar: ' + (e && e.message ? e.message : e)); return }
   renderShell()
+  // Badge de não lidas já no primeiro render, sem abrir a caixa.
+  checarCaixa()
 }
 ;(async () => {
   const { data: { session } } = await sb.auth.getSession()

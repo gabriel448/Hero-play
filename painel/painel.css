@@ -339,3 +339,16 @@ tbody tr:first-child td { border-top: none; }
   .modal-card { width: min(460px, 94vw); padding: 24px 20px; }
   .mdev-info { grid-template-columns: 1fr; }
 }
+
+/* ── Caixa de entrada ─────────────────────────────────────────────────────── */
+.pg-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.cx-row { display: flex; align-items: center; gap: 14px; text-align: left; }
+.cx-ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+.cx-ic svg { width: 18px; height: 18px; }
+.cx-quando { white-space: nowrap; flex: none; }
+/* Não lida: fundo levemente destacado + bolinha antes do título. */
+.cx-nova { background: rgba(229,57,53,.06); }
+.cx-nova .row-nome { font-weight: 700; }
+.cx-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #E53935; margin-right: 8px; vertical-align: middle; }
+/* Contador de não lidas no menu lateral. */
+.nav-badge { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #E53935; color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; }

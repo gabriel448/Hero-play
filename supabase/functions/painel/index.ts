@@ -108,7 +108,32 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}))
     const acao = body.acao
 
+    // ── Caixa de entrada: grava um aviso p/ um ou varios revendedores ────────
+    // Best-effort de proposito: falhar em notificar NUNCA pode derrubar a acao
+    // que a originou (transferir credito, responder ticket...).
+    async function notificar(
+      destinos: string[],
+      tipo: string,
+      titulo: string,
+      corpo?: string,
+      ref?: string,
+    ) {
+      const alvos = [...new Set(destinos.filter(Boolean))]
+      if (!alvos.length) return
+      try {
+        await sb.from('notificacoes').insert(
+          alvos.map((id) => ({ revendedor_id: id, tipo, titulo, corpo: corpo || null, ref: ref || null })),
+        )
+      } catch (_) { /* nao quebra a acao principal */ }
+    }
+
     // ── PÚBLICO (sem login): cadastro de revendedor por LINK DE INDICAÇÃO ──────
+    const idsAdmins = async (): Promise<string[]> => {
+      const { data } = await sb.from('revendedores').select('id').eq('papel', 'admin')
+      // deno-lint-ignore no-explicit-any
+      return (data || []).map((r: any) => r.id)
+    }
+
     if (acao === 'registrar_indicacao') {
       const ref = (body.ref || '').trim()
       const usuario = normUsuario(body.usuario)
@@ -128,6 +153,8 @@ Deno.serve(async (req: Request) => {
         id: novo.user.id, nome, usuario, papel: 'reseller', criado_por: dono.id, codigo_indicacao: await gerarCodigoUnico(),
       })
       if (e2) { await sb.auth.admin.deleteUser(novo.user.id).catch(() => {}); return erro(e2.message) }
+      await notificar([dono.id], 'rede', 'Novo revendedor na sua rede',
+        `${nome || usuario} se cadastrou pelo seu link.`)
       return json({ ok: true })
     }
 
@@ -177,10 +204,76 @@ Deno.serve(async (req: Request) => {
 
     // Downline DIRETO (contas que EU criei). Todos têm downline (revendedor cria revendedor).
     if (acao === 'listar_revendedores') {
-      const { data } = await sb.from('revendedores')
-        .select('id, nome, usuario, papel, ativo, saldo_creditos, criado_em').eq('criado_por', rev.id)
+      // Revendedor ve a rede DIRETA dele; ADMIN ve a plataforma inteira, com o
+      // codigo de indicacao de quem trouxe cada um (foi o pedido: saber de quem
+      // veio cada revenda).
+      let q = sb.from('revendedores')
+        .select('id, nome, usuario, papel, ativo, saldo_creditos, criado_em, criado_por')
         .order('criado_em', { ascending: false })
-      return json({ revendedores: data || [] })
+      if (ehAdmin) q = q.neq('papel', 'admin'); else q = q.eq('criado_por', rev.id)
+      const { data } = await q
+      const lista = data || []
+      if (!ehAdmin) return json({ revendedores: lista, admin: false })
+
+      // Resolve o "indicado por" (nome + codigo) num unico select.
+      // deno-lint-ignore no-explicit-any
+      const paisIds = [...new Set(lista.map((r: any) => r.criado_por).filter(Boolean))]
+      // deno-lint-ignore no-explicit-any
+      const pai = new Map<string, any>()
+      if (paisIds.length) {
+        const { data: ps } = await sb.from('revendedores')
+          .select('id, nome, usuario, codigo_indicacao').in('id', paisIds)
+        // deno-lint-ignore no-explicit-any
+        ;(ps || []).forEach((p: any) => pai.set(p.id, p))
+      }
+      // deno-lint-ignore no-explicit-any
+      const revendedores = lista.map((r: any) => {
+        const p = pai.get(r.criado_por)
+        return {
+          ...r,
+          indicado_por: p ? (p.nome || p.usuario) : null,
+          indicado_por_codigo: p ? (p.codigo_indicacao || null) : null,
+        }
+      })
+      return json({ revendedores, admin: true })
+    }
+
+    // ── Caixa de entrada ──────────────────────────────────────────────────────
+    if (acao === 'listar_notificacoes') {
+      const { data } = await sb.from('notificacoes')
+        .select('id, tipo, titulo, corpo, ref, lida, criado_em')
+        .eq('revendedor_id', rev.id)
+        .order('criado_em', { ascending: false }).limit(200)
+      const nao_lidas = (data || []).filter((n) => !n.lida).length
+      return json({ notificacoes: data || [], nao_lidas })
+    }
+
+    // Marca uma (`id`) ou TODAS como lidas.
+    if (acao === 'ler_notificacoes') {
+      const id = (body.id || '').trim()
+      let q = sb.from('notificacoes').update({ lida: true }).eq('revendedor_id', rev.id)
+      if (id) q = q.eq('id', id); else q = q.eq('lida', false)
+      await q
+      return json({ ok: true })
+    }
+
+    // Admin manda um aviso para TODOS os revendedores (ou para um so).
+    if (acao === 'enviar_aviso') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const titulo = (body.titulo || '').trim()
+      const corpo = (body.corpo || '').trim()
+      const alvo = (body.revendedor_id || '').trim()
+      if (!titulo) return erro('informe o titulo do aviso')
+      let destinos: string[] = []
+      if (alvo) {
+        destinos = [alvo]
+      } else {
+        const { data } = await sb.from('revendedores').select('id').neq('id', rev.id).eq('ativo', true)
+        // deno-lint-ignore no-explicit-any
+        destinos = (data || []).map((r: any) => r.id)
+      }
+      await notificar(destinos, 'aviso', titulo, corpo, undefined)
+      return json({ ok: true, enviados: destinos.length })
     }
 
     // Admin promove/rebaixa o TIER de um revendedor (reseller ↔ master).
@@ -213,6 +306,8 @@ Deno.serve(async (req: Request) => {
         if ((eT.message || '').includes('SALDO_INSUFICIENTE')) return erro('saldo insuficiente')
         return erro('falha na transferencia')
       }
+      await notificar([alvo_id], 'credito', `Voce recebeu ${qtd} credito(s)`,
+        `De ${rev.nome || rev.usuario}.`)
       return json({ ok: true, saldo: novoSaldo })
     }
 
@@ -433,13 +528,27 @@ Deno.serve(async (req: Request) => {
     // Revendedor abre; ADMIN vê TODOS, responde e encerra. Owner vê/responde os seus.
     const ehAdmin = rev.papel === 'admin'
 
+
     if (acao === 'criar_ticket') {
-      const assunto = (body.assunto || '').trim()
+      // O assunto deixou de ser texto livre: e um TOPICO fechado. Assim o
+      // suporte tria por categoria e o revendedor so descreve o problema.
+      const TOPICOS: Record<string, string> = {
+        financeiro: 'Financeiro',
+        tecnico: 'Tecnico',
+        login: 'Login',
+      }
+      const topico = (body.topico || '').trim().toLowerCase()
+      const rotulo = TOPICOS[topico]
       const mensagem = (body.mensagem || '').trim()
-      if (!assunto || !mensagem) return erro('informe assunto e mensagem')
-      const { data: tk, error } = await sb.from('tickets').insert({ revendedor_id: rev.id, assunto }).select('id').single()
+      if (!rotulo) return erro('escolha um topico (financeiro, tecnico ou login)')
+      if (!mensagem) return erro('descreva o problema')
+      const { data: tk, error } = await sb.from('tickets')
+        .insert({ revendedor_id: rev.id, assunto: rotulo, topico }).select('id').single()
       if (error) return erro(error.message)
       await sb.from('ticket_mensagens').insert({ ticket_id: tk.id, autor_id: rev.id, do_admin: ehAdmin, corpo: mensagem })
+      // Admin recebe na caixa de entrada — e o que faz o ticket ser VISTO.
+      await notificar(await idsAdmins(), 'ticket', `Novo ticket · ${rotulo}`,
+        `${rev.nome || rev.usuario}: ${mensagem.slice(0, 140)}`, tk.id)
       return json({ ok: true, id: tk.id })
     }
 
@@ -475,13 +584,22 @@ Deno.serve(async (req: Request) => {
       const id = (body.ticket_id || '').trim()
       const mensagem = (body.mensagem || '').trim()
       if (!mensagem) return erro('mensagem vazia')
-      const { data: tk } = await sb.from('tickets').select('id, revendedor_id').eq('id', id).maybeSingle()
+      const { data: tk } = await sb.from('tickets').select('id, revendedor_id, assunto').eq('id', id).maybeSingle()
       if (!tk) return erro('ticket nao encontrado', 404)
       if (!ehAdmin && tk.revendedor_id !== rev.id) return erro('sem acesso', 403)
       await sb.from('ticket_mensagens').insert({ ticket_id: id, autor_id: rev.id, do_admin: ehAdmin, corpo: mensagem })
       // admin responde → 'respondido'; dono responde → 'aberto' (volta pra fila do admin)
       const novo = ehAdmin ? 'respondido' : 'aberto'
       await sb.from('tickets').update({ status: novo, atualizado_em: new Date().toISOString() }).eq('id', id)
+      // Avisa o OUTRO lado: o dono quando o suporte responde; os admins quando
+      // o dono responde (senao a resposta dele passa despercebida).
+      if (ehAdmin) {
+        await notificar([tk.revendedor_id], 'ticket', `Suporte respondeu · ${tk.assunto}`,
+          mensagem.slice(0, 140), id)
+      } else {
+        await notificar(await idsAdmins(), 'ticket', `Resposta do revendedor · ${tk.assunto}`,
+          `${rev.nome || rev.usuario}: ${mensagem.slice(0, 140)}`, id)
+      }
       return json({ ok: true, status: novo })
     }
 
