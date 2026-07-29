@@ -437,6 +437,29 @@ function focarPoster(el) {
   }
 }
 
+// Foco num item do DETALHE (títulos semelhantes / elenco).
+//
+// O `scrollIntoView('nearest')` do SpatialNav encosta o item na borda do
+// recorte: embaixo ele alinha a base do pôster com a base da tela, e na
+// horizontal alinha com a borda da fila. Só que o anel de foco (box-shadow) e o
+// crescimento de 8% ficam FORA da caixa que ele considera — e é justamente
+// isso que aparecia cortado embaixo, à direita e à esquerda. Aqui o item nunca
+// chega na borda: centraliza na fila e traz a seção inteira pro topo.
+function focarItemDetalhe(el) {
+  const fila = el.closest('.det2-fila');
+  if (fila) {
+    const r = el.getBoundingClientRect(), fr = fila.getBoundingClientRect();
+    fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: 'smooth' });
+  }
+  const sc = document.getElementById('det2-scroll');
+  const sec = el.closest('.det2-secao');
+  if (sc && sec) {
+    // 40px de folga acima do título da seção.
+    const alvo = sc.scrollTop + (sec.getBoundingClientRect().top - sc.getBoundingClientRect().top) - 40;
+    sc.scrollTo({ top: Math.max(0, alvo), behavior: 'smooth' });
+  }
+}
+
 const _aquece = (u) => { if (u) { const im = new Image(); im.src = u; } };
 
 // Itens INICIAIS (primeiros de cada trilho) de TODAS as seções com hero
@@ -3611,6 +3634,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       // depois deste callback, e ele rolaria só o mínimo, deixando a tela no meio.
       const sc = document.getElementById('det2-scroll');
       if (sc && sc.scrollTop > 0) requestAnimationFrame(() => sc.scrollTo({ top: 0, behavior: 'smooth' }));
+    } else if (el.classList.contains('rec-poster') || el.classList.contains('ator')) {
+      requestAnimationFrame(() => focarItemDetalhe(el));   // idem: depois do SpatialNav
     }
     if (el.classList.contains('poster')) {
       if (el.closest('.bsc-grid')) {
