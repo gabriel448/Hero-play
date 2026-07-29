@@ -3,6 +3,11 @@
   --divider: #232327; --outline: #34343a; --text: #f2f0ee; --text2: #b9b6b2; --muted: #8b8f98;
   --accent: #E53935; --accent2: #ff5b54; --accent-dim: rgba(229,57,53,.12);
   --ok: #34c759; --warn: #e8b23a; --danger: #ff5b54; --info: #4f8ef7; --violet: #9b7bff;
+  /* O painel é escuro: avisa o navegador. Controles que o SISTEMA desenha fora
+     da página — a lista que abre no <select>, barras de rolagem, calendário —
+     nascem escuros em vez de brancos. Só isso já resolve metade do "select
+     parece sem CSS". */
+  color-scheme: dark;
 }
 * { box-sizing: border-box; margin: 0; }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", Roboto, Manrope, system-ui, sans-serif; min-height: 100vh; }
@@ -203,6 +208,45 @@ tbody tr:first-child td { border-top: none; }
 .modal-card label { font-size: 13px; color: var(--muted); font-weight: 600; margin: 14px 0 7px; }
 .modal-card input, .modal-card select, .modal-card textarea { background: var(--surface2); border: 1px solid var(--divider); border-radius: 11px; padding: 14px 16px; color: var(--text); font-size: 16px; font-family: inherit; }
 .modal-card textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
+/* SELECT: sem `appearance: none` o navegador desenha o controle DELE por cima —
+   seta cinza do sistema, altura fora do padrão dos outros campos, cara de
+   formulário de 2005. Aqui ele vira um campo igual aos demais, com a seta
+   desenhada por nós (SVG inline, sem arquivo). */
+.modal-card select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding-right: 44px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b8f98' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  text-overflow: ellipsis;
+}
+.modal-card select:hover { border-color: var(--outline); }
+/* A lista que abre é desenhada pelo sistema: dá pra pintar item por item, e o
+   `color-scheme: dark` do :root cuida do resto (fundo e barra de rolagem). */
+.modal-card select option { background: var(--surface2); color: var(--text); }
+
+/* ── Escolha em CARTÕES (assunto do ticket) ─────────────────────────────────
+   Poucas opções, fixas e com descrição: um <select> obrigaria a abrir a lista
+   pra ler cada uma. Aqui as três ficam à vista e a escolhida é evidente. */
+.opc { display: flex; flex-direction: column; gap: 8px; }
+.opc-item {
+  display: flex; align-items: center; gap: 13px; text-align: left; width: 100%;
+  background: var(--surface2); border: 1px solid var(--divider); border-radius: 12px;
+  padding: 13px 15px; color: var(--text2); font-family: inherit;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.opc-item:hover { border-color: var(--outline); color: var(--text); }
+.opc-ic { flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--surface3); color: var(--muted); }
+.opc-ic svg { width: 18px; height: 18px; }
+.opc-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.opc-txt b { font-size: 15px; font-weight: 700; color: var(--text); }
+.opc-txt span { font-size: 12.5px; color: var(--muted); }
+/* Marcador da escolhida: o "check" só aparece na que está ligada. */
+.opc-check { margin-left: auto; flex-shrink: 0; width: 20px; height: 20px; color: var(--accent2); opacity: 0; transition: opacity .12s; }
+.opc-check svg { width: 20px; height: 20px; }
+.opc-item.on { border-color: var(--accent); background: var(--accent-dim); color: var(--text); }
+.opc-item.on .opc-ic { background: rgba(229,57,53,.18); color: var(--accent2); }
+.opc-item.on .opc-check { opacity: 1; }
 .modal-card input:focus, .modal-card select:focus, .modal-card textarea:focus { outline: none; border-color: var(--accent); }
 .modal-mac { letter-spacing: .6px; font-variant-numeric: tabular-nums; }
 .modal-erro { color: var(--accent2); font-size: 14px; min-height: 18px; margin-top: 10px; }

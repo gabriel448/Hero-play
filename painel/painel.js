@@ -94,6 +94,7 @@ const IC = {
   lifebuoy: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
   menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
+  check: '<path d="m5 12.5 5 5 9-11"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff: '<path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.1 6.1A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 3.4-.66"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="2" x2="22" y1="2" y2="22"/>',
 }
@@ -258,7 +259,14 @@ function abrirModal({ titulo, campos, okLabel = 'Salvar', onOk, aviso }) {
   ov.innerHTML = `<div class="modal-card"><h2>${esc(titulo)}</h2>
     ${aviso ? `<div class="modal-aviso">${aviso}</div>` : ''}
     ${campos.map((c) => `<label>${esc(c.label)}</label>${
-      c.options
+      c.escolhas
+        ? `<div class="opc" id="f-${c.id}" data-v="${esc(c.escolhas[0].v)}">${c.escolhas.map((o, i) => `
+            <button type="button" class="opc-item${i === 0 ? ' on' : ''}" data-v="${esc(o.v)}">
+              <span class="opc-ic">${svg(o.ic)}</span>
+              <span class="opc-txt"><b>${esc(o.t)}</b>${o.d ? `<span>${esc(o.d)}</span>` : ''}</span>
+              <span class="opc-check">${svg('check')}</span>
+            </button>`).join('')}</div>`
+        : c.options
         ? `<select id="f-${c.id}">${c.options.map((o) => `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join('')}</select>`
         : c.type === 'textarea'
           ? `<textarea id="f-${c.id}" rows="4" placeholder="${esc(c.placeholder || '')}" autocomplete="off" spellcheck="false"></textarea>`
@@ -273,16 +281,31 @@ function abrirModal({ titulo, campos, okLabel = 'Salvar', onOk, aviso }) {
   ov.querySelector('#m-cancel').onclick = fechar
   ov.onclick = (e) => { if (e.target === ov) fechar() }
   campos.forEach((c) => { if (c.format === 'mac') { const el = ov.querySelector('#f-' + c.id); el.addEventListener('input', () => { el.value = formatarMac(el.value) }) } })
+  // Escolha em cartões: o valor vive no `data-v` do grupo (div não tem .value).
+  ov.querySelectorAll('.opc').forEach((g) => {
+    g.querySelectorAll('.opc-item').forEach((b) => {
+      b.onclick = () => {
+        g.dataset.v = b.dataset.v
+        g.querySelectorAll('.opc-item').forEach((x) => x.classList.toggle('on', x === b))
+      }
+    })
+  })
   const ok = async () => {
     const btn = ov.querySelector('#m-ok'); if (btn.disabled) return
-    const vals = {}; campos.forEach((c) => { vals[c.id] = ov.querySelector('#f-' + c.id).value.trim() })
+    const vals = {}
+    campos.forEach((c) => {
+      const el = ov.querySelector('#f-' + c.id)
+      vals[c.id] = el.value !== undefined ? el.value.trim() : (el.dataset.v || '')
+    })
     const rot = btn.innerHTML
     btn.disabled = true; btn.classList.add('is-loading'); btn.innerHTML = '<span class="spin"></span> Processando…'
     const restaurar = () => { btn.disabled = false; btn.classList.remove('is-loading'); btn.innerHTML = rot }
     try { const e = await onOk(vals); if (e) { err(e); restaurar() } else fechar() } catch (ex) { err(ex.message); restaurar() }
   }
   ov.querySelector('#m-ok').onclick = ok
-  const primeiro = ov.querySelector('input, select'); if (primeiro) primeiro.focus()
+  // textarea entra na conta: no ticket o assunto já vem escolhido, então o
+  // cursor tem que cair direto na descrição.
+  const primeiro = ov.querySelector('input, select, textarea'); if (primeiro) primeiro.focus()
 }
 function formatarMac(v) { const h = String(v).toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 12); return h.replace(/(.{2})(?=.)/g, '$1:') }
 
@@ -642,16 +665,18 @@ async function vSuporte() {
 // descreve o problema. Isso deixa o suporte triar por categoria e acaba com
 // assunto vago do tipo "ajuda".
 const TICKET_TOPICOS = [
-  { v: 'financeiro', t: 'Financeiro — créditos, cobrança, pagamento' },
-  { v: 'tecnico', t: 'Técnico — app, dispositivo, playlist' },
-  { v: 'login', t: 'Login — acesso à conta do painel' },
+  { v: 'financeiro', t: 'Financeiro', d: 'Créditos, cobrança, pagamento', ic: 'coins' },
+  { v: 'tecnico', t: 'Técnico', d: 'App, dispositivo, playlist', ic: 'zap' },
+  { v: 'login', t: 'Login', d: 'Acesso à conta do painel', ic: 'shield' },
 ]
 
 function novoTicket() {
   abrirModal({
     titulo: 'Novo ticket', okLabel: 'Abrir ticket',
     campos: [
-      { id: 'topico', label: 'Assunto', options: TICKET_TOPICOS },
+      // `escolhas` (não `options`): são três opções fixas e com descrição — cabem
+      // na tela inteiras, sem obrigar a abrir uma lista pra ler cada uma.
+      { id: 'topico', label: 'Assunto', escolhas: TICKET_TOPICOS },
       { id: 'msg', label: 'Descrição', type: 'textarea', placeholder: 'Conte o que está acontecendo…' },
     ],
     onOk: async (v) => {
