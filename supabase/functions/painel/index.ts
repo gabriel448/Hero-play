@@ -55,6 +55,16 @@ async function cifrar(texto: string): Promise<string> {
   out.set(iv); out.set(new Uint8Array(cif), 16)
   return btoa(String.fromCharCode(...out))
 }
+// Par do `cifrar` — faltava neste arquivo (só existia na `ativacao`). Como as
+// chamadas ficam dentro de try/catch, o ReferenceError era ENGOLIDO: a tela de
+// Playlists mostrava a URL em branco e a migração de domínio em massa não
+// encontrava nada pra trocar, sem erro nenhum na tela.
+async function decifrar(dado: string): Promise<string> {
+  const chave = await obterChave()
+  const b = Uint8Array.from(atob(dado), (c) => c.charCodeAt(0))
+  const dec = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: b.slice(0, 16) }, chave, b.slice(16))
+  return new TextDecoder().decode(dec)
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function json(data: unknown, status = 200) {
@@ -166,6 +176,13 @@ Deno.serve(async (req: Request) => {
 
     const { data: rev } = await sb.from('revendedores').select('*').eq('id', user.id).maybeSingle()
     if (!rev || !rev.ativo) return erro('conta invalida ou inativa', 403)
+
+    // Declarado AQUI, junto do `rev`: várias ações abaixo dependem dele (rede do
+    // admin, tickets, avisos). Estava lá embaixo, no bloco de suporte, e como
+    // `const` não é içado, `listar_revendedores` estourava
+    // "Cannot access 'ehAdmin' before initialization" — e o Dashboard, que chama
+    // essa ação, não carregava nenhum número.
+    const ehAdmin = rev.papel === 'admin'
 
     // valida que o cliente pertence a este revendedor
     async function clienteDoRev(cliente_id: string): Promise<boolean> {
@@ -526,9 +543,6 @@ Deno.serve(async (req: Request) => {
 
     // ── SUPORTE (tickets) ──────────────────────────────────────────────────────
     // Revendedor abre; ADMIN vê TODOS, responde e encerra. Owner vê/responde os seus.
-    const ehAdmin = rev.papel === 'admin'
-
-
     if (acao === 'criar_ticket') {
       // O assunto deixou de ser texto livre: e um TOPICO fechado. Assim o
       // suporte tria por categoria e o revendedor so descreve o problema.
