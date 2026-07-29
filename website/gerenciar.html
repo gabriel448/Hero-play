@@ -26,7 +26,7 @@
             <div class="campo"><label for="mac" data-i18n="ger.mac">Endereço MAC</label>
               <div class="inp">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-                <input class="in" type="text" id="mac" placeholder="00:00:00:00:00:00" autocomplete="off" spellcheck="false">
+                <input class="in" type="text" id="mac" placeholder="00:00:00:00:00:00" autocomplete="off" spellcheck="false" data-mac>
               </div>
             </div>
             <div class="campo"><label for="key" data-i18n="ger.key">Device Key</label>
@@ -53,7 +53,7 @@
     const $ = (id) => document.getElementById(id);
     const t = (k) => window.HP_t ? window.HP_t(k) : k;
     const p = new URLSearchParams(location.search);
-    if (p.get('mac')) $('mac').value = p.get('mac');
+    if (p.get('mac')) $('mac').value = HP_mac(p.get('mac'));
     if (p.get('key')) $('key').value = p.get('key');
 
     async function consultar(mac, key) {
@@ -66,7 +66,7 @@
     $('form-login').addEventListener('submit', async (e) => {
       e.preventDefault();
       $('erro').classList.remove('show');
-      const mac = ($('mac').value || '').trim(), key = ($('key').value || '').trim();
+      const mac = HP_mac($('mac').value), key = ($('key').value || '').trim();
       if (!mac || !key) { $('erro').textContent = t('ger.err'); $('erro').classList.add('show'); return; }
       const b = $('btn-entrar'); b.disabled = true; b.textContent = t('ger.loading');
       try {

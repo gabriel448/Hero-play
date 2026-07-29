@@ -284,6 +284,36 @@
       <div class="footer-bottom"><p data-i18n="footer.rights"></p></div>`;
   }
 
+  // ── Campo de MAC: formata enquanto digita (mesma regra do painel) ──────────
+  // Não é só estética: o backend procura o aparelho por igualdade EXATA
+  // (`eq('mac', mac)`), então "aabbccddeeff", "aa-bb-cc-…" ou minúsculo
+  // simplesmente não acham nada. O campo aceita o que a pessoa digitar ou colar
+  // e devolve sempre AA:BB:CC:DD:EE:FF.
+  const macFmt = (v) => String(v == null ? '' : v)
+    .toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 12).replace(/(.{2})(?=.)/g, '$1:');
+  function ligarMac(el) {
+    if (!el || el._macLigado) return;
+    el._macLigado = true;
+    el.maxLength = 17;
+    el.classList.add('in-mac');
+    el.value = macFmt(el.value);
+    el.addEventListener('input', () => {
+      // Preserva o cursor: conta quantos HEX existem antes dele, formata, e
+      // reposiciona depois do mesmo número de HEX. Sem isso o cursor pula pro
+      // fim toda vez que se corrige um dígito no meio.
+      const hexAntes = el.value.slice(0, el.selectionStart || 0).replace(/[^0-9A-Fa-f]/g, '').length;
+      el.value = macFmt(el.value);
+      let i = 0, n = 0;
+      while (i < el.value.length && n < hexAntes) { if (el.value[i] !== ':') n++; i++; }
+      if (i < el.value.length && el.value[i] === ':') i++;   // passa o ":" recém-inserido
+      try { el.setSelectionRange(i, i); } catch (_) { /* input sem seleção */ }
+    });
+    el.addEventListener('blur', () => { el.value = macFmt(el.value); });
+  }
+  window.HP_mac = macFmt;
+  window.HP_ligarMac = ligarMac;
+  document.querySelectorAll('input[data-mac]').forEach(ligarMac);
+
   // ── Fundo minimalista + marca animada da Hero Play ──────────────────────────
   const bg = document.createElement('div');
   bg.className = 'bg-min';

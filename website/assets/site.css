@@ -189,6 +189,9 @@ input.in, textarea.in, select.in { width: 100%; padding: 14px 16px; border-radiu
 input.in::placeholder, textarea.in::placeholder { color: var(--text-3); }
 input.in:focus, textarea.in:focus, select.in:focus { border-color: var(--accent-bright); box-shadow: 0 0 0 3px rgba(255,45,55,.28); }
 textarea.in { resize: vertical; min-height: 120px; }
+/* Campo de MAC (mesmo tratamento do painel): dígito de largura fixa, pra não
+   "dançar" enquanto os dois-pontos vão sendo inseridos. */
+input.in-mac { letter-spacing: .6px; font-variant-numeric: tabular-nums; }
 
 .abas { display: flex; border-bottom: 1px solid var(--divider); margin-bottom: 18px; }
 .aba { flex: 1; padding: 13px 0; background: none; border: none; border-bottom: 3px solid transparent; color: var(--text-2); font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; transition: color .15s, border-color .15s; }

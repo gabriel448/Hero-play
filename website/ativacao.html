@@ -72,7 +72,7 @@
         <h3 id="modal-plano">Plano</h3>
         <p class="sub" id="modal-preco">R$ —</p>
         <div class="campo" style="text-align:left"><label for="m-mac" data-i18n="ativ.mac">MAC do dispositivo</label>
-          <input class="in" type="text" id="m-mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"></div>
+          <input class="in" type="text" id="m-mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false" data-mac></div>
         <div class="msg erro" id="m-erro"></div>
         <button class="btn btn-primary btn-bloco" id="ir-pagamento" data-i18n="ativ.ir">Ir para o pagamento</button>
         <button class="btn btn-ghost btn-bloco" id="cancelar" style="margin-top:8px" data-i18n="ativ.cancelar">Cancelar</button>
@@ -94,7 +94,8 @@
     const $ = (id) => document.getElementById(id);
     const p = new URLSearchParams(location.search);
     let plano = null;
-    if (p.get('mac')) $('m-mac').value = p.get('mac').trim();
+    // MAC que veio no link também entra formatado (HP_mac vem do site.js).
+    if (p.get('mac')) $('m-mac').value = HP_mac(p.get('mac'));
     const fecharModal = () => $('modal').classList.remove('show');
 
     document.querySelectorAll('[data-preco]').forEach((b) => b.addEventListener('click', () => {

@@ -29,7 +29,7 @@
             </div>
             <div id="manual" style="display:none">
               <div class="campo"><label for="in-mac" data-i18n="up.mac">MAC do dispositivo</label>
-                <input class="in" type="text" id="in-mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"></div>
+                <input class="in" type="text" id="in-mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false" data-mac></div>
               <div class="campo"><label for="in-key" data-i18n="up.key">Key</label>
                 <input class="in" type="text" id="in-key" placeholder="123456" inputmode="numeric" autocomplete="off"></div>
             </div>
@@ -82,10 +82,12 @@
     const t = (k) => window.HP_t ? window.HP_t(k) : k;
     const p = new URLSearchParams(location.search);
     let modo = 'xtream';
-    let dev = { mac: (p.get('mac') || '').trim(), key: (p.get('key') || '').trim() };
+    // MAC sempre normalizado (HP_mac vem do site.js): o backend acha o aparelho
+    // por igualdade exata, então minúsculo/sem ":" não encontraria nada.
+    let dev = { mac: HP_mac(p.get('mac')), key: (p.get('key') || '').trim() };
     if (dev.mac && dev.key) { $('chips').style.display = 'flex'; $('c-mac').textContent = dev.mac; $('c-key').textContent = dev.key; }
     else { $('manual').style.display = 'block'; }
-    const lerDev = () => (dev.mac && dev.key) ? dev : { mac: ($('in-mac').value || '').trim(), key: ($('in-key').value || '').trim() };
+    const lerDev = () => (dev.mac && dev.key) ? dev : { mac: HP_mac($('in-mac').value), key: ($('in-key').value || '').trim() };
 
     function montarXtream(host, user, pass) {
       let base = (host || '').trim();
