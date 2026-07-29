@@ -214,7 +214,7 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 /* ── Mídia (Início/Filmes/Séries): hero FIXO menor + trilhos ──────────────── */
 .hero2 {
   position: sticky; top: 0; z-index: 3;
-  height: 42vh; min-height: 300px; max-height: 420px;
+  height: 45vh; min-height: 330px; max-height: 460px;
   overflow: visible; display: flex; align-items: center;   /* texto centralizado */
   padding: 0 var(--safe);
   /* Base OPACA: os trilhos rolam sob o hero (z-index menor). Sem este fundo, no
@@ -242,12 +242,12 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 }
 .hero2-conteudo { position: relative; z-index: 2; max-width: 46%; }
 /* Logo-título PNG do TMDB (estilo Netflix). Escondido até carregar; some no fundo. */
-.hero2-logo { display: none; max-height: 132px; max-width: 460px; object-fit: contain; object-position: left bottom; margin-bottom: 14px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
-.hero2-titulo { font-size: 52px; font-weight: 800; letter-spacing: -1.4px; line-height: 1.02; margin-bottom: 12px; text-wrap: balance; }
-.hero2-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 16px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; min-height: 22px; }
+.hero2-logo { display: none; max-height: 176px; max-width: 560px; object-fit: contain; object-position: left bottom; margin-bottom: 16px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
+.hero2-titulo { font-size: 56px; font-weight: 800; letter-spacing: -1.4px; line-height: 1.02; margin-bottom: 12px; text-wrap: balance; }
+.hero2-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 19px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; min-height: 24px; }
 .hero2-meta .nota { color: var(--accent-bright); }
-.hero2-meta .selo { padding: 3px 10px; border: 1px solid var(--outline); border-radius: 7px; font-size: 13px; }
-.hero2-sinopse { font-size: 17px; color: var(--text-secondary); line-height: 1.5; max-width: 620px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.hero2-meta .selo { padding: 3px 11px; border: 1px solid var(--outline); border-radius: 7px; font-size: 15px; }
+.hero2-sinopse { font-size: 21px; color: var(--text-secondary); line-height: 1.5; max-width: 660px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 @media (prefers-reduced-motion: no-preference) {
   .hero-anim { animation: heroIn .42s cubic-bezier(.22,.61,.36,1); }
   @keyframes heroIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }

@@ -195,10 +195,20 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         // "cru" o FrameLayout estoura ClassCastException no onMeasure e o app
         // FECHA no instante em que a midia comeca — foi exatamente esse o bug.
         val lp = if (cheio) {
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            )
+            // Tela cheia = TELA inteira, inclusive por cima da margem de
+            // seguranca do container (margens negativas): a borda preta so pode
+            // vir do enquadramento do filme, nunca de nos.
+            if (raiz.width > 0 && raiz.height > 0) {
+                FrameLayout.LayoutParams(raiz.width, raiz.height).apply {
+                    leftMargin = -raiz.paddingLeft
+                    topMargin = -raiz.paddingTop
+                }
+            } else {
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                )
+            }
         } else {
             FrameLayout.LayoutParams((w * ex).toInt(), (h * ey).toInt()).apply {
                 leftMargin = (x * ex).toInt()

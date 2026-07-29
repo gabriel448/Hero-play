@@ -35,8 +35,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nativo: PlayerNativo
 
     companion object {
-        /** Fracao de cada borda reservada contra o overscan da TV. */
-        private const val MARGEM_SEGURA = 0.02f
+        /**
+         * Fracao de cada borda reservada contra o overscan da TV.
+         *
+         * DESLIGADA (0f). Ficou 2% por uma versao e o resultado foi pior que o
+         * problema: a TV testada NAO corta nada, entao a margem virou so uma
+         * moldura preta em volta do app. Fica aqui, documentada, pra quando
+         * aparecer uma TV que realmente corte — e ai basta 0.02f.
+         */
+        private const val MARGEM_SEGURA = 0f
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -122,6 +129,11 @@ class MainActivity : AppCompatActivity() {
      * borda preta de 2% que some no fundo do app.
      */
     private fun aplicarMargemDeSeguranca() {
+        if (MARGEM_SEGURA <= 0f) return
+        // O video IGNORA a margem (ver `PlayerNativo.area`): filme em tela cheia
+        // nunca pode ganhar borda preta nossa — quem decide o enquadramento e o
+        // proprio filme. Por isso o container nao recorta o que passa do padding.
+        raiz.clipToPadding = false
         raiz.post {
             if (raiz.width <= 0 || raiz.height <= 0) return@post
             val px = (raiz.width * MARGEM_SEGURA).toInt()
