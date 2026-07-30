@@ -939,10 +939,29 @@ async function vParceiros() {
       <div><h1>Parceiros</h1><p id="pc-sub">Carregando…</p></div>
       <button class="btn" id="pc-novo">${svg('plus')} Adicionar domínio</button>
     </div>
-    <div class="stats" id="pc-stats"></div>
-    <div class="lista" id="pc-lista"><div class="vazio">Carregando…</div></div>
+    <div class="tabs" id="pc-tabs">
+      <button class="tab on" data-t="lista">Parceiros</button>
+      <button class="tab" data-t="faturas">Faturas</button>
+      <button class="tab" data-t="config">Configurações</button>
+    </div>
+    <div id="pc-aba-lista">
+      <div class="stats" id="pc-stats"></div>
+      <div class="lista" id="pc-lista"><div class="vazio">Carregando…</div></div>
+    </div>
+    <div id="pc-aba-faturas" class="oculto"></div>
+    <div id="pc-aba-config" class="oculto"></div>
   </div>`
   document.getElementById('pc-novo').onclick = () => modalParceiro(carregar)
+  // Abas: só a ativa fica visível (o botão "Adicionar domínio" é da lista).
+  const abas = ['lista', 'faturas', 'config']
+  const trocarAba = (t) => {
+    abas.forEach((x) => document.getElementById('pc-aba-' + x).classList.toggle('oculto', x !== t))
+    document.querySelectorAll('#pc-tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.t === t))
+    document.getElementById('pc-novo').classList.toggle('oculto', t !== 'lista')
+    if (t === 'faturas') abaFaturas(document.getElementById('pc-aba-faturas'))
+    if (t === 'config') abaConfigParceiros(document.getElementById('pc-aba-config'))
+  }
+  document.querySelectorAll('#pc-tabs .tab').forEach((b) => { b.onclick = () => trocarAba(b.dataset.t) })
   const meu = viewAtual()
 
   async function carregar() {
@@ -1001,6 +1020,27 @@ async function vParceiros() {
     }
   }
   carregar()
+}
+
+// ── Abas Faturas / Configurações (Parceiros) ─────────────────────────────────
+// ⚠️ AGUARDANDO O LAYOUT DE REFERÊNCIA. O HTML do GTV que temos traz só a aba
+// ATIVA (é React: as outras nem existem no DOM), então destas duas conhecemos
+// apenas os títulos. A estrutura de abas já está pronta — quando o markup
+// chegar, é só preencher estas duas funções; nada mais precisa mudar.
+function abaFaturas(el) {
+  el.innerHTML = `<div class="vazio" style="padding:70px 20px">
+    <div style="opacity:.4;margin-bottom:12px">${svg('coins', ' width="30" height="30"')}</div>
+    Faturas dos parceiros — em breve.
+    <div style="font-size:13px;color:var(--muted);margin-top:8px">
+      Depende da API de pagamento e do layout de referência.
+    </div>
+  </div>`
+}
+function abaConfigParceiros(el) {
+  el.innerHTML = `<div class="vazio" style="padding:70px 20px">
+    <div style="opacity:.4;margin-bottom:12px">${svg('globe', ' width="30" height="30"')}</div>
+    Configurações de parceiros — em breve.
+  </div>`
 }
 
 function modalParceiro(recarregar) {
