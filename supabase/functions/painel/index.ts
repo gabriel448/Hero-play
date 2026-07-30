@@ -98,6 +98,25 @@ function normalizarDominio(entrada: string): string {
     return h.replace(/^www\./, '')
   } catch { return '' }
 }
+/**
+ * Configuracao do programa de parceiros (linha unica, id=1).
+ *
+ * Se a tabela ainda nao existir (schema nao rodado), devolve os MESMOS padroes
+ * do banco em vez de estourar — a tela abre e mostra os valores default.
+ */
+async function lerConfigParceiros() {
+  const padrao = {
+    modelo_mensal: true, modelo_por_device: false,
+    preco_mensal: 0, preco_device: 0, dia_cobranca: 5,
+    carencia_dias: 3, carencia_extra_max: 7, carencia_extensoes: 2,
+    programa_ativo: true, banner_texto: '',
+  }
+  try {
+    const { data } = await sb.from('parceiros_config').select('*').eq('id', 1).maybeSingle()
+    return data ? { ...padrao, ...data } : padrao
+  } catch { return padrao }
+}
+
 /** Parceiro ATIVO deste host (ou null). Ver tabela `parceiros` no schema. */
 async function parceiroDoHost(host: string | null) {
   if (!host) return null
@@ -363,6 +382,149 @@ Deno.serve(async (req: Request) => {
       // Suspender NÃO desativa quem já está ativo: só para de valer p/ listas
       // novas. Tirar o acesso de quem já usa é outra decisão, e manual.
       const { error } = await sb.from('parceiros').update({ ativo }).eq('id', id)
+      if (error) return erro(error.message)
+      return json({ ok: true })
+    }
+
+    // ── FATURAS dos parceiros ────────────────────────────────────────────────
+    if (acao === 'listar_faturas') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data } = await sb.from('parceiro_faturas').select('*')
+        .order('periodo_ini', { ascending: false }).limit(300)
+      const faturas = data || []
+      // deno-lint-ignore no-explicit-any
+      const ids = [...new Set(faturas.map((f: any) => f.parceiro_id))]
+      const nomes = new Map<string, string>()
+      if (ids.length) {
+        const { data: ps } = await sb.from('parceiros').select('id, dominio, nome').in('id', ids)
+        // deno-lint-ignore no-explicit-any
+        for (const p of (ps || []) as any[]) nomes.set(p.id, p.dominio)
+      }
+      // deno-lint-ignore no-explicit-any
+      return json({ faturas: faturas.map((f: any) => ({ ...f, dominio: nomes.get(f.parceiro_id) || '—' })) })
+    }
+
+    /**
+     * "Executar cobrança": fecha o período corrente de cada parceiro pagante.
+     *
+     * IDEMPOTENTE de propósito — o índice único (parceiro_id, periodo_ini) faz
+     * rodar duas vezes no mesmo mês não gerar nada novo. O admin pode apertar o
+     * botão sem medo, que é o comportamento que se espera de um botão desses.
+     * Parceiro `gratuito` não gera fatura.
+     */
+    if (acao === 'gerar_faturas') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const cfg = await lerConfigParceiros()
+      const { data: ps } = await sb.from('parceiros').select('*').eq('ativo', true).neq('cobranca', 'gratuito')
+      const parceiros = ps || []
+      if (!parceiros.length) return json({ ok: true, criadas: 0 })
+
+      // Período: do dia de fechamento do mês passado até o deste mês.
+      const hoje = new Date()
+      const dia = Math.min(Math.max(cfg.dia_cobranca || 1, 1), 28)
+      const fim = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), dia))
+      if (fim > hoje) fim.setUTCMonth(fim.getUTCMonth() - 1)
+      const ini = new Date(fim); ini.setUTCMonth(ini.getUTCMonth() - 1)
+      const venc = new Date(fim)
+      const iso = (d: Date) => d.toISOString().slice(0, 10)
+
+      // Devices por domínio (mesma contagem da aba Parceiros).
+      // deno-lint-ignore no-explicit-any
+      const hosts = parceiros.map((p: any) => p.dominio)
+      const contagem: Record<string, number> = {}
+      const { data: pls } = await sb.from('playlists').select('id, host').in('host', hosts)
+      // deno-lint-ignore no-explicit-any
+      const porId = new Map((pls || []).map((p: any) => [p.id, p.host]))
+      if (porId.size) {
+        const { data: vins } = await sb.from('dispositivo_playlists')
+          .select('playlist_id, dispositivo_id').eq('selecionada', true).in('playlist_id', [...porId.keys()])
+        const vistos = new Set<string>()
+        for (const v of (vins || [])) {
+          // deno-lint-ignore no-explicit-any
+          const vv = v as any
+          if (vistos.has(vv.dispositivo_id)) continue
+          vistos.add(vv.dispositivo_id)
+          const h = porId.get(vv.playlist_id)
+          if (h) contagem[h] = (contagem[h] || 0) + 1
+        }
+      }
+
+      let criadas = 0
+      for (const p of parceiros) {
+        // deno-lint-ignore no-explicit-any
+        const pp = p as any
+        const devices = contagem[pp.dominio] || 0
+        // Valor do PARCEIRO quando houver; senão o padrão da configuração.
+        const unit = Number(pp.valor) || (pp.cobranca === 'mensal' ? cfg.preco_mensal : cfg.preco_device) || 0
+        const valor = pp.cobranca === 'mensal' ? unit : unit * devices
+        const { error } = await sb.from('parceiro_faturas').insert({
+          parceiro_id: pp.id,
+          tipo: pp.cobranca === 'mensal' ? 'mensal' : 'por_device',
+          periodo_ini: iso(ini), periodo_fim: iso(fim),
+          devices, valor,
+          vencimento: iso(venc),
+        })
+        if (!error) criadas++      // erro aqui = já existia a fatura do período
+      }
+      return json({ ok: true, criadas, periodo: [iso(ini), iso(fim)] })
+    }
+
+    if (acao === 'fatura_acao') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      const oque = body.oque
+      if (!id) return erro('id obrigatorio')
+      const { data: f } = await sb.from('parceiro_faturas').select('*').eq('id', id).maybeSingle()
+      if (!f) return erro('fatura nao encontrada', 404)
+
+      if (oque === 'pago') {
+        await sb.from('parceiro_faturas')
+          .update({ status: 'pago', pago_em: new Date().toISOString() }).eq('id', id)
+        return json({ ok: true })
+      }
+      if (oque === 'cancelar') {
+        await sb.from('parceiro_faturas').update({ status: 'cancelado' }).eq('id', id)
+        return json({ ok: true })
+      }
+      if (oque === 'carencia') {
+        const cfg = await lerConfigParceiros()
+        if (f.extensoes >= cfg.carencia_extensoes) {
+          return erro(`limite de ${cfg.carencia_extensoes} extensão(ões) atingido para esta fatura`)
+        }
+        const dias = Math.min(Number(body.dias) || cfg.carencia_dias, cfg.carencia_extra_max)
+        const base = f.carencia_ate ? new Date(f.carencia_ate) : new Date(f.vencimento)
+        base.setUTCDate(base.getUTCDate() + dias)
+        await sb.from('parceiro_faturas')
+          .update({ carencia_ate: base.toISOString().slice(0, 10), extensoes: f.extensoes + 1 }).eq('id', id)
+        return json({ ok: true, carencia_ate: base.toISOString().slice(0, 10), dias })
+      }
+      return erro('acao de fatura desconhecida')
+    }
+
+    // ── Configuração do programa de parceiros ────────────────────────────────
+    if (acao === 'parceiros_config') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      return json({ config: await lerConfigParceiros() })
+    }
+
+    if (acao === 'salvar_parceiros_config') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const c = body.config || {}
+      const num = (v: unknown, pad = 0) => { const n = Number(v); return Number.isFinite(n) ? n : pad }
+      const { error } = await sb.from('parceiros_config').update({
+        modelo_mensal: !!c.modelo_mensal,
+        modelo_por_device: !!c.modelo_por_device,
+        preco_mensal: num(c.preco_mensal),
+        preco_device: num(c.preco_device),
+        // Limites do próprio banco (dia 1-28 para existir em todo mês).
+        dia_cobranca: Math.min(Math.max(num(c.dia_cobranca, 1), 1), 28),
+        carencia_dias: Math.min(Math.max(num(c.carencia_dias), 0), 30),
+        carencia_extra_max: Math.min(Math.max(num(c.carencia_extra_max), 0), 30),
+        carencia_extensoes: Math.min(Math.max(num(c.carencia_extensoes, 1), 1), 10),
+        programa_ativo: !!c.programa_ativo,
+        banner_texto: (c.banner_texto || '').trim() || null,
+        atualizado_em: new Date().toISOString(),
+      }).eq('id', 1)
       if (error) return erro(error.message)
       return json({ ok: true })
     }

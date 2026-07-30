@@ -311,6 +311,55 @@ grant all on public.parceiros to service_role;
 alter table public.playlists add column if not exists host text;
 create index if not exists idx_playlists_host on public.playlists(host);
 
+-- ── FATURAS DOS PARCEIROS ────────────────────────────────────────────────────
+-- Uma linha por parceiro POR PERIODO. Nasce em "aguardando" quando o admin roda
+-- a cobranca; vira "pago" (por ora na mao — nao ha gateway ainda) ou
+-- "cancelado". `carencia_ate` e `extensoes` sustentam o "+ Carencia": apos o
+-- vencimento o parceiro tem uns dias antes de ser suspenso, e o admin pode
+-- estender um numero limitado de vezes (limites em `parceiros_config`).
+create table if not exists public.parceiro_faturas (
+  id           uuid primary key default gen_random_uuid(),
+  parceiro_id  uuid not null references public.parceiros(id) on delete cascade,
+  tipo         text not null,                       -- mensal | por_device
+  periodo_ini  date not null,
+  periodo_fim  date not null,
+  devices      int  not null default 0,             -- devices contados no fechamento
+  valor        numeric(12,2) not null default 0,
+  status       text not null default 'aguardando',  -- aguardando | pago | cancelado
+  vencimento   date not null,
+  carencia_ate date,
+  extensoes    int not null default 0,
+  pago_em      timestamptz,
+  criado_em    timestamptz not null default now()
+);
+-- Uma fatura por parceiro por periodo: e o que torna "Executar cobranca"
+-- IDEMPOTENTE (rodar duas vezes no mesmo mes nao duplica nada).
+create unique index if not exists idx_fatura_periodo on public.parceiro_faturas(parceiro_id, periodo_ini);
+create index if not exists idx_fatura_status on public.parceiro_faturas(status, vencimento);
+alter table public.parceiro_faturas enable row level security;
+revoke all on public.parceiro_faturas from anon, authenticated;
+grant all on public.parceiro_faturas to service_role;
+
+-- ── CONFIGURACAO DO PROGRAMA DE PARCEIROS (linha unica) ──────────────────────
+create table if not exists public.parceiros_config (
+  id                 int primary key default 1 check (id = 1),
+  modelo_mensal      boolean not null default true,   -- pre-pago: valor fixo/mes
+  modelo_por_device  boolean not null default false,  -- pos-pago: por device ativo
+  preco_mensal       numeric(12,2) not null default 0,
+  preco_device       numeric(12,2) not null default 0,
+  dia_cobranca       int not null default 5,          -- dia do mes do fechamento
+  carencia_dias      int not null default 3,
+  carencia_extra_max int not null default 7,
+  carencia_extensoes int not null default 2,
+  programa_ativo     boolean not null default true,
+  banner_texto       text,
+  atualizado_em      timestamptz not null default now()
+);
+insert into public.parceiros_config (id) values (1) on conflict (id) do nothing;
+alter table public.parceiros_config enable row level security;
+revoke all on public.parceiros_config from anon, authenticated;
+grant all on public.parceiros_config to service_role;
+
 notify pgrst, 'reload schema';
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -95,6 +95,7 @@ const IC = {
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
   menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
   check: '<path d="m5 12.5 5 5 9-11"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff: '<path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.1 6.1A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 3.4-.66"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="2" x2="22" y1="2" y2="22"/>',
@@ -1027,20 +1028,165 @@ async function vParceiros() {
 // ATIVA (é React: as outras nem existem no DOM), então destas duas conhecemos
 // apenas os títulos. A estrutura de abas já está pronta — quando o markup
 // chegar, é só preencher estas duas funções; nada mais precisa mudar.
-function abaFaturas(el) {
-  el.innerHTML = `<div class="vazio" style="padding:70px 20px">
-    <div style="opacity:.4;margin-bottom:12px">${svg('coins', ' width="30" height="30"')}</div>
-    Faturas dos parceiros — em breve.
-    <div style="font-size:13px;color:var(--muted);margin-top:8px">
-      Depende da API de pagamento e do layout de referência.
-    </div>
-  </div>`
+const FAT_ST = {
+  aguardando: { rot: 'Aguard. pagamento', cor: 'warn' },
+  pago: { rot: 'Pago', cor: 'ok' },
+  cancelado: { rot: 'Cancelado', cor: 'cinza' },
 }
-function abaConfigParceiros(el) {
-  el.innerHTML = `<div class="vazio" style="padding:70px 20px">
-    <div style="opacity:.4;margin-bottom:12px">${svg('globe', ' width="30" height="30"')}</div>
-    Configurações de parceiros — em breve.
-  </div>`
+const fmtBRL = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+
+// FATURAS: uma linha por parceiro por período. Sem gateway de pagamento ainda —
+// "Marcar pago" é manual, e é assim que fica até a API existir.
+async function abaFaturas(el) {
+  el.innerHTML = `
+    <div class="pg-acoes" style="justify-content:flex-end">
+      <button class="btn-sec" id="ft-cobrar">${svg('refresh')} Executar cobrança</button>
+    </div>
+    <div class="tbl-wrap" id="ft-tbl"><div class="vazio">Carregando…</div></div>`
+  const meu = viewAtual()
+
+  document.getElementById('ft-cobrar').onclick = async () => {
+    if (!confirm('Fechar o período atual e gerar as faturas dos parceiros pagantes?\n\nPode rodar mais de uma vez: fatura já existente no período não é duplicada.')) return
+    try {
+      const r = await api('gerar_faturas')
+      toast(r.criadas ? `${r.criadas} fatura(s) gerada(s)` : 'Nenhuma fatura nova — o período já estava fechado')
+      carregar()
+    } catch (e) { toast(e.message, true) }
+  }
+
+  async function carregar() {
+    const t = document.getElementById('ft-tbl'); if (!t) return
+    t.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const { faturas } = await api('listar_faturas')
+      if (meu !== viewAtual()) return
+      const alvo = document.getElementById('ft-tbl'); if (!alvo) return
+      if (!faturas.length) { alvo.innerHTML = '<div class="vazio">Nenhuma fatura ainda. Use "Executar cobrança" para fechar o período.</div>'; return }
+      alvo.innerHTML = `<table><thead><tr>
+          <th>#</th><th>Parceiro</th><th>Tipo</th><th>Período</th><th>Devices</th>
+          <th>Valor</th><th>Status</th><th>Vencimento / carência</th><th>Ações</th>
+        </tr></thead><tbody>
+        ${faturas.map((f, i) => {
+          const st = FAT_ST[f.status] || FAT_ST.aguardando
+          const acoes = f.status === 'aguardando' ? `
+            <button class="ft-ac ft-pago" data-id="${esc(f.id)}" data-o="pago">Marcar pago</button>
+            <button class="ft-ac ft-car" data-id="${esc(f.id)}" data-o="carencia">+ Carência</button>
+            <button class="ft-ac ft-canc" data-id="${esc(f.id)}" data-o="cancelar">Cancelar</button>` : ''
+          return `<tr>
+            <td class="tnum">${i + 1}</td>
+            <td class="mono">${esc(f.dominio)}</td>
+            <td>${f.tipo === 'mensal' ? 'Mensal' : 'Por device'}</td>
+            <td class="tnum" style="white-space:nowrap">${fmtData(f.periodo_ini)}<br>${fmtData(f.periodo_fim)}</td>
+            <td class="tnum">${f.devices}</td>
+            <td class="tnum"><b>${fmtBRL(f.valor)}</b></td>
+            <td><span class="badge badge-${st.cor}">${st.rot}</span></td>
+            <td class="tnum" style="white-space:nowrap">${fmtData(f.vencimento)}
+              ${f.carencia_ate ? `<div class="ft-car-ate">carência até ${fmtData(f.carencia_ate)}${f.extensoes ? ` (${f.extensoes}x)` : ''}</div>` : ''}</td>
+            <td><div class="ft-acoes">${acoes}</div></td>
+          </tr>`
+        }).join('')}</tbody></table>`
+      alvo.querySelectorAll('.ft-ac').forEach((b) => {
+        b.onclick = async () => {
+          const o = b.dataset.o
+          if (o === 'cancelar' && !confirm('Cancelar esta fatura?')) return
+          try {
+            const r = await api('fatura_acao', { id: b.dataset.id, oque: o })
+            toast(o === 'pago' ? 'Fatura marcada como paga'
+              : o === 'cancelar' ? 'Fatura cancelada'
+              : `Carência estendida em ${r.dias} dia(s)`)
+            carregar()
+          } catch (e) { toast(e.message, true) }
+        }
+      })
+    } catch (e) {
+      if (meu !== viewAtual()) return
+      const alvo = document.getElementById('ft-tbl'); if (alvo) alvo.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+  carregar()
+}
+
+// Configuração do PROGRAMA de parceiros: modelos de cobrança, preços padrão,
+// regras de carência e o convite que os revendedores veem.
+async function abaConfigParceiros(el) {
+  el.innerHTML = '<div class="vazio">Carregando…</div>'
+  const meu = viewAtual()
+  let cfg
+  try { cfg = (await api('parceiros_config')).config } catch (e) { el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`; return }
+  if (meu !== viewAtual()) return
+
+  const toggle = (id, on, titulo, desc) => `
+    <div class="cfg-linha${on ? ' on' : ''}">
+      <div><p class="cfg-t">${esc(titulo)}</p><p class="cfg-d">${esc(desc)}</p></div>
+      <button type="button" class="sw${on ? ' on' : ''}" id="tg-${id}" aria-pressed="${on}"><span></span></button>
+    </div>`
+  const campo = (id, rot, valor, extra, hint) => `
+    <div class="cfg-campo">
+      <label for="cf-${id}">${esc(rot)}</label>
+      <input id="cf-${id}" value="${esc(valor)}" ${extra || ''}>
+      ${hint ? `<p class="cfg-hint">${esc(hint)}</p>` : ''}
+    </div>`
+
+  el.innerHTML = `<form class="cfg-form" id="pc-form">
+    <p class="sec-label">Modelos de cobrança</p>
+    ${toggle('mensal', cfg.modelo_mensal, 'Mensalidade fixa (pré-pago)', 'Parceiro paga um valor fixo por mês para ativação ilimitada de devices')}
+    ${toggle('device', cfg.modelo_por_device, 'Pós-pago (por device)', 'Parceiro paga por device ativo ao final de cada período de faturamento')}
+
+    <p class="sec-label">Preços padrão</p>
+    <div class="cfg-grid2">
+      ${campo('preco_mensal', 'Mensalidade fixa (R$)', cfg.preco_mensal, 'inputmode="decimal" placeholder="0,00"')}
+      ${campo('preco_device', 'Pós-pago por device (R$)', cfg.preco_device, 'inputmode="decimal" placeholder="0,00"')}
+    </div>
+    ${campo('dia_cobranca', 'Dia do mês em que o período fecha', cfg.dia_cobranca, 'type="number" min="1" max="28"', 'De 1 a 28 — para existir em todo mês, inclusive fevereiro.')}
+
+    <p class="sec-label">Regras de carência</p>
+    <div class="cfg-aviso">
+      <b>Como funciona</b>
+      <p>Depois do vencimento o parceiro entra em carência. Se não pagar até o fim dela, é suspenso. O admin pode conceder dias extras, com limite.</p>
+    </div>
+    <div class="cfg-grid3">
+      ${campo('carencia_dias', 'Dias de carência padrão', cfg.carencia_dias, 'type="number" min="0" max="30"', 'Automáticos após o vencimento')}
+      ${campo('carencia_extra_max', 'Máximo de dias extras', cfg.carencia_extra_max, 'type="number" min="0" max="30"', 'Limite por concessão do admin')}
+      ${campo('carencia_extensoes', 'Limite de extensões', cfg.carencia_extensoes, 'type="number" min="1" max="10"', 'Quantas vezes pode estender')}
+    </div>
+
+    <p class="sec-label">Programa de parceiros</p>
+    ${toggle('programa', cfg.programa_ativo, 'Programa de parceiros ativo', 'Exibe o convite de parceria para os revendedores')}
+    <div class="cfg-campo">
+      <label for="cf-banner">Texto do convite (o revendedor vê)</label>
+      <textarea id="cf-banner" rows="3" placeholder="Torne-se um parceiro…">${esc(cfg.banner_texto || '')}</textarea>
+    </div>
+
+    <div class="pg-acoes"><button class="btn" id="cf-salvar" type="submit">${svg('check')} Salvar configurações</button></div>
+  </form>`
+
+  el.querySelectorAll('.sw').forEach((b) => {
+    b.onclick = () => {
+      const on = !b.classList.contains('on')
+      b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on))
+      b.closest('.cfg-linha').classList.toggle('on', on)
+    }
+  })
+  // Aceita "2.500,00" e "2500.00": tira o separador de milhar e usa ponto decimal.
+  const num = (id) => Number(String(document.getElementById('cf-' + id).value).replace(/\./g, '').replace(',', '.')) || 0
+  document.getElementById('pc-form').onsubmit = async (ev) => {
+    ev.preventDefault()
+    const btn = document.getElementById('cf-salvar')
+    btn.disabled = true
+    try {
+      await api('salvar_parceiros_config', { config: {
+        modelo_mensal: document.getElementById('tg-mensal').classList.contains('on'),
+        modelo_por_device: document.getElementById('tg-device').classList.contains('on'),
+        preco_mensal: num('preco_mensal'), preco_device: num('preco_device'),
+        dia_cobranca: num('dia_cobranca'),
+        carencia_dias: num('carencia_dias'), carencia_extra_max: num('carencia_extra_max'),
+        carencia_extensoes: num('carencia_extensoes'),
+        programa_ativo: document.getElementById('tg-programa').classList.contains('on'),
+        banner_texto: document.getElementById('cf-banner').value,
+      } })
+      toast('Configurações salvas')
+    } catch (e) { toast(e.message, true) } finally { btn.disabled = false }
+  }
 }
 
 function modalParceiro(recarregar) {
