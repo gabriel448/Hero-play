@@ -201,7 +201,12 @@ img.logo-mark { background: none; object-fit: contain; border-radius: 11px; }
 .trilho-titulo.is-focused .trilho-tudo { opacity: 1; transform: none; }
 
 /* ── Tela de CATEGORIA (todos os itens de um gênero) ───────────────────────── */
-.cat-tela { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 320; background: var(--bg); display: flex; flex-direction: column; animation: fadeIn .2s ease; }
+/* ⚠️ z-index 200: ACIMA da sidebar (100) e ABAIXO da pilha do detalhe
+   (detalhe 300 · episódios 310 · créditos 320 · player 400). Estava em 320 e o
+   detalhe abria ATRÁS desta tela: o Enter parecia não fazer nada, o foco ia pro
+   detalhe invisível e o Enter seguinte caía no "Assistir" — o filme começava com
+   a grade ainda por cima. Ordem de camada aqui não é estética, é navegação. */
+.cat-tela { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 200; background: var(--bg); display: flex; flex-direction: column; animation: fadeIn .2s ease; }
 .cat-cab { flex-shrink: 0; padding: 84px var(--safe) 0; }
 .cat-titulo { font-size: 46px; font-weight: 800; letter-spacing: -1px; }
 .cat-sub { font-size: 20px; color: var(--text-secondary); margin-top: 6px; }
@@ -521,9 +526,18 @@ html.video-nativo #tv-prev-video { visibility: hidden; }
    pelo fundo preto do player e aparece DESENHADO POR CIMA do vídeo (sidebar,
    trilhos, listas). Enquanto o vídeo nativo ocupa a tela toda, escondemos tudo
    o que está atrás — sobram só os controles do player. */
-html.video-nativo-cheio #app > *:not(#player-overlay) { visibility: hidden !important; }
-html.video-nativo-cheio #conteudo,
-html.video-nativo-cheio #sidebar { visibility: hidden !important; }
+/* Tudo o que fica ATRÁS do vídeo tem que sumir — e "atrás" inclui as telas de
+   nível de seção, que são filhas de BODY (não de #app): a grade de categoria, a
+   busca, o detalhe e os episódios. A regra antiga só alcançava `#app > *`, então
+   uma tela dessas continuava desenhada, opaca, POR CIMA do vídeo nativo.
+   Não entram aqui, de propósito, as camadas que devem ficar visíveis durante a
+   reprodução: #player-overlay, #live-overlay, .menu-opcoes (qualidade, áudio,
+   legendas, programação) e o #toast. */
+html.video-nativo-cheio #app,
+html.video-nativo-cheio .cat-tela,
+html.video-nativo-cheio .busca-secao,
+html.video-nativo-cheio #detalhe-overlay,
+html.video-nativo-cheio .ep { visibility: hidden !important; }
 /* A moldura maximizada da TV ao vivo fica visível, mas só ela e os seus filhos
    de controle (o vídeo em si é a superfície nativa, por baixo). */
 html.video-nativo-cheio .tv-tela.cheia { visibility: visible !important; }

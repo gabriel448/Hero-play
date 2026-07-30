@@ -2247,8 +2247,7 @@ function fecharDetalhe() {
   if (ov) ov.remove();
   // Volta ao item que abriu (ex.: resultado dentro da busca de seção); senão, conteúdo.
   if (volta && document.contains(volta)) { SpatialNav.setFocus(volta); return; }
-  const f = document.querySelector('#conteudo .focusable');
-  if (f) SpatialNav.setFocus(f);
+  focarTopo();
 }
 
 // Modal "Continuar assistindo?": retomar de onde parou × ver desde o início.
@@ -2795,6 +2794,23 @@ function revelarControles() {
   }, 4000);
 }
 
+// Foco de volta ao FECHAR uma camada: vale a tela do topo da pilha, não o
+// `#conteudo`. Sem isto, sair do player aberto de dentro da grade de categoria
+// (ou da busca) devolvia o foco para a seção que está ATRÁS: o usuário via a
+// grade e navegava, invisível, no que estava por baixo.
+function focarTopo() {
+  const modais = document.querySelectorAll('.nav-modal');
+  const topo = modais.length ? modais[modais.length - 1] : null;
+  const alvo = (topo || document.getElementById('conteudo'));
+  if (!alvo) return;
+  // Volta pro item de onde o usuário saiu (guardado no aoFocar), não pro
+  // primeiro da lista — numa grade de categoria com 200 títulos, recomeçar do
+  // topo depois de cada filme é insuportável.
+  const ult = alvo._ultimoFoco;
+  const f = (ult && document.contains(ult) && alvo.contains(ult)) ? ult : alvo.querySelector('.focusable');
+  if (f) SpatialNav.setFocus(f);
+}
+
 function fecharPlayer() {
   clearTimeout(_hideTimer);
   // Salva o ponto final ao sair (continuar assistindo / concluir → recomendação).
@@ -2821,8 +2837,7 @@ function fecharPlayer() {
   }
   const ov = document.getElementById('player-overlay');
   if (ov) ov.remove();
-  const f = document.querySelector('#conteudo .focusable');
-  if (f) SpatialNav.setFocus(f);
+  focarTopo();
 }
 
 // Sair do app (exigência de QA da LG/Samsung: Back na raiz devolve ao launcher).
@@ -3874,6 +3889,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Hero reage ao item em foco (Início/Filmes/Séries).
   SpatialNav.aoFocar((el) => {
     if (!el || !el.classList) return;
+    // Lembra o último foco DE CADA camada: é o que permite voltar ao mesmo item
+    // ao fechar o player/detalhe (ver focarTopo).
+    try { const m = el.closest('.nav-modal'); if (m) m._ultimoFoco = el; } catch (_) {}
     // Campo de texto (onboarding / adicionar playlist): a moldura de destaque é
     // do WRAPPER (.ob-campo) e vinha do `:focus-within`, ou seja, do foco nativo
     // do <input> — que no TV Box deixou de existir de propósito. Marcamos o
