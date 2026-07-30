@@ -2924,10 +2924,7 @@ function abrirLive(canal) {
         <span class="live-num">${canal.num}</span>
         <span class="live-canal-nome">${escapar(canal.nome)}</span>
       </div>
-      <div class="live-bar-centro">
-        <div class="live-prog-atual">${escapar(canal.agora)}</div>
-        <div class="live-prog-prox">A seguir: <b>${escapar(canal.prox)}</b> · ${canal.proxIni}</div>
-      </div>
+      <div class="live-bar-centro" id="live-prog-centro">${htmlBarraProg(canal)}</div>
       <div class="live-bar-dir">
         <div class="live-relogio" id="live-relogio">--:--</div>
         <div class="live-logo" style="background:${gradiente(canal.nome, true)}">${logoCanalInner(canal.nome, canal.logo)}</div>
@@ -2976,7 +2973,20 @@ function abrirLive(canal) {
   });
   q('epg').addEventListener('click', () => abrirModalEpg(canal));
 
-  const tick = () => { const r = document.getElementById('live-relogio'); if (r) r.textContent = hhmm(new Date()); };
+  // Relógio a cada segundo e, de carona, a barra de programação: ela precisa
+  // virar sozinha quando o programa acaba (a pessoa pode ficar horas no canal) e
+  // quando o EPG termina de baixar em 2º plano. Só reescreve o DOM se o HTML
+  // MUDOU — comparar duas strings 1x por segundo é barato; repintar não é.
+  let _progHtml = '';
+  const tick = () => {
+    const r = document.getElementById('live-relogio');
+    if (r) r.textContent = hhmm(new Date());
+    const c = document.getElementById('live-prog-centro');
+    if (!c) return;
+    const novo = htmlBarraProg(canal);
+    if (novo !== _progHtml) { c.innerHTML = novo; _progHtml = novo; }
+  };
+  _progHtml = htmlBarraProg(canal);
   tick();
   _relogioInt = setInterval(tick, 1000);
 
@@ -2999,6 +3009,24 @@ function fecharLive() {
 
 // Menu de seleção (qualidade/fonte) sobreposto ao player. D-pad: cima/baixo +
 // OK; Voltar fecha. onPick recebe o índice escolhido.
+/**
+ * "AGORA" + "A seguir" da barra do ao vivo em tela cheia.
+ *
+ * A fonte é o EPG (`EPG.agora` devolve `{atual, prox}`), NÃO o canal: os campos
+ * `canal.prox`/`canal.proxIni` nascem string vazia no parse da lista e nunca são
+ * preenchidos — era por isso que o espaço do "A seguir:" ficava em branco.
+ * Sem EPG casado para o canal, a linha do "A seguir" simplesmente não aparece:
+ * melhor não ter a linha do que ter uma prometendo um dado que não existe.
+ */
+function htmlBarraProg(canal) {
+  const ag = (typeof EPG !== 'undefined') ? EPG.agora(canal) : { atual: null, prox: null };
+  const atual = (ag.atual && ag.atual.titulo) || canal.agora || t('Ao vivo');
+  const linhaProx = ag.prox
+    ? `<div class="live-prog-prox">${escapar(t('A seguir'))}: <b>${escapar(ag.prox.titulo)}</b> · ${hhmm(new Date(ag.prox.ini))}</div>`
+    : '';
+  return `<div class="live-prog-atual">${escapar(atual)}</div>${linhaProx}`;
+}
+
 // Programação do canal em TELA CHEIA. Antes era um `toast('em breve')` — mas a
 // grade já existe e é a MESMA que a coluna direita da TV ao vivo mostra
 // (`htmlEpg`), então aqui é só trazê-la para um modal com a cara dos outros.

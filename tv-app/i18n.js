@@ -37,7 +37,7 @@ const I18N = {
     // TV ao vivo
     'Favoritos': 'Favorites', 'Favoritar': 'Favorite', 'Ao vivo': 'Live', 'Categorias': 'Categories', 'Canais ao vivo': 'Live channels',
     'Selecione uma categoria e um canal': 'Select a category and a channel', 'Programação': 'Schedule',
-    'AGORA': 'NOW', 'Programa seguinte': 'Next program', 'Mais tarde': 'Later',
+    'AGORA': 'NOW', 'Programa seguinte': 'Next program', 'Mais tarde': 'Later', 'A seguir': 'Up next',
     'Abrir em tela cheia': 'Open fullscreen', 'Nenhum canal favoritado ainda': 'No favorite channels yet',
     'Adicionado aos favoritos': 'Added to favorites', 'Removido dos favoritos': 'Removed from favorites',
     'Qualidade': 'Quality', 'Fontes': 'Sources', 'Fonte': 'Source',
@@ -222,7 +222,7 @@ const I18N = {
     // TV ao vivo
     'Favoritos': 'Favoritos', 'Favoritar': 'Favorito', 'Ao vivo': 'En vivo', 'Categorias': 'Categorías', 'Canais ao vivo': 'Canales en vivo',
     'Selecione uma categoria e um canal': 'Selecciona una categoría y un canal', 'Programação': 'Programación',
-    'AGORA': 'AHORA', 'Programa seguinte': 'Programa siguiente', 'Mais tarde': 'Más tarde',
+    'AGORA': 'AHORA', 'Programa seguinte': 'Programa siguiente', 'Mais tarde': 'Más tarde', 'A seguir': 'A continuación',
     'Abrir em tela cheia': 'Abrir en pantalla completa', 'Nenhum canal favoritado ainda': 'Aún no hay canales favoritos',
     'Adicionado aos favoritos': 'Añadido a favoritos', 'Removido dos favoritos': 'Eliminado de favoritos',
     'Qualidade': 'Calidad', 'Fontes': 'Fuentes', 'Fonte': 'Fuente',
