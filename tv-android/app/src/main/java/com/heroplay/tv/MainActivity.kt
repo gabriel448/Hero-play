@@ -296,5 +296,19 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun estado(): String =
             try { nativo.estado() } catch (_: Throwable) { """{"pos":0,"dur":0,"tocando":false,"buffering":false}""" }
+
+        /**
+         * JSON com as faixas de audio e legenda do que esta tocando:
+         * `{"audio":[{i,rotulo,sel}],"texto":[…]}`. E o que permite ao TV Box ter
+         * o mesmo seletor de CC/audio que o app de celular — no `<video>` do
+         * WebView essas faixas simplesmente nao existiam.
+         */
+        @JavascriptInterface
+        fun faixas(): String =
+            try { nativo.faixas() } catch (_: Throwable) { """{"audio":[],"texto":[]}""" }
+
+        /** Escolhe faixa: tipo "audio"|"texto"; indice < 0 em "texto" desliga. */
+        @JavascriptInterface
+        fun faixa(tipo: String, indice: Int) = naUi { nativo.selecionarFaixa(tipo, indice) }
     }
 }

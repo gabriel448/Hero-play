@@ -116,10 +116,85 @@ function _logoParaTmdb(img) {
 
 // ── Render: trilho ──────────────────────────────────────────────────────────
 function trilhoHTML(t) {
+  // O TÍTULO é focável: selecionar a categoria abre a tela com TODOS os itens
+  // dela (abrirCategoria). O trilho mostra só os primeiros — antes não havia
+  // como ver o resto de uma categoria.
   return `<section class="trilho">
-    <h2 class="trilho-titulo">${escapar(t.titulo)}</h2>
+    <h2 class="trilho-titulo focusable" data-cat="${escapar(t.titulo)}">
+      ${escapar(t.titulo)}
+      <span class="trilho-tudo">${escapar(t('Ver tudo'))} ${IC_CHEVRON}</span>
+    </h2>
     <div class="trilho-fila">${t.itens.map((it) => posterHTML(it)).join('')}</div>
   </section>`;
+}
+const IC_CHEVRON = '<svg class="tr-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/**
+ * Tela de CATEGORIA: grade com todos os itens de um gênero/categoria.
+ *
+ * Reaproveita a grade da busca (`.bsc-grid` + aplicarResultados) — mesmo pôster,
+ * mesmo carregamento lazy de capa. Sem teclado: aqui não se digita, só se navega.
+ * Os itens entram em LOTES (requestAnimationFrame), do mesmo jeito que a lista de
+ * canais: uma categoria grande tem centenas de títulos e montar tudo de uma vez
+ * congela a TV.
+ */
+const CAT_LOTE = 24;
+let _catTok = 0;
+function abrirCategoria(escopo, titulo) {
+  // No Início os trilhos misturam filme e série, então não há lista-base para
+  // filtrar por gênero: ali vale o próprio trilho (o fallback abaixo).
+  const base = escopo === 'series' ? (LISTA.series || [])
+    : escopo === 'filmes' ? (LISTA.filmes || []) : [];
+  // Mesma regra de filtro da busca por seção: 1º gênero do item = categoria.
+  let itens = base.filter((it) => (it.generos && it.generos[0]) === titulo);
+  // Categoria que não casa por gênero (trilho especial, ex.: "Lançamentos") →
+  // cai para os itens do próprio trilho, que é o que o usuário viu na tela.
+  if (!itens.length) {
+    const tr = (((LISTA.catalogo || {})[escopo] || {}).trilhos || []).find((x) => x.titulo === titulo);
+    itens = (tr && tr.itens) || [];
+  }
+  const meu = ++_catTok;
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal cat-tela';
+  ov.innerHTML = `
+    ${htmlVoltar()}
+    <div class="cat-cab">
+      <h1 class="cat-titulo">${escapar(titulo)}</h1>
+      <div class="cat-sub">${itens.length} ${escapar(itens.length === 1 ? t('título') : t('títulos'))}</div>
+    </div>
+    <div class="cat-grade" id="cat-grade"></div>`;
+  document.body.appendChild(ov);
+  const anterior = SpatialNav.atual;
+  ov._onVoltar = () => {
+    ++_catTok;
+    ov.remove();
+    const cont = document.getElementById('conteudo');
+    if (cont) ligarPostersSerie(cont);   // re-observa os pôsteres da seção por baixo
+    if (anterior && document.contains(anterior)) SpatialNav.setFocus(anterior);
+  };
+
+  const grade = ov.querySelector('#cat-grade');
+  if (!itens.length) {
+    grade.innerHTML = `<div class="cat-vazio">${escapar(t('Nada por aqui'))}</div>`;
+    SpatialNav.setFocus(ov.querySelector('.tela-voltar') || grade);
+    return;
+  }
+  grade.innerHTML = '<div class="bsc-grid"></div>';
+  const grid = grade.querySelector('.bsc-grid');
+  let i = 0;
+  const lote = () => {
+    if (meu !== _catTok || !document.body.contains(ov)) return;
+    let html = '';
+    for (let n = 0; n < CAT_LOTE && i < itens.length; n++, i++) html += posterHTML(itens[i], true);
+    grid.insertAdjacentHTML('beforeend', html);
+    ligarPostersSerie(grade);            // capas lazy só do que entrou
+    if (i < itens.length) requestAnimationFrame(lote);
+  };
+  lote();
+  requestAnimationFrame(() => {
+    const p = grid.querySelector('.poster');
+    if (p) SpatialNav.setFocus(p);
+  });
 }
 
 // Pôster com barra de progresso (trilho "Continuar assistindo").
@@ -418,13 +493,17 @@ function aplicarHero(item) {
   }, 180);
 }
 
+// Scroll INSTANTÂNEO na TV, suave no desktop — ver `rolagem()` em spatial-nav.js.
+// Segurando o D-pad, scroll animado a cada 150 ms se atropela e a tela pula.
+const _rolagem = () => { try { return window.HP_rolagem ? window.HP_rolagem() : 'smooth'; } catch (_) { return 'smooth'; } };
+
 // Foco num pôster: scroll horizontal (fila) + vertical (título do trilho sob o
 // hero fixo) — sem isso o primeiro trilho não subia e o título sumia.
 function focarPoster(el) {
   const fila = el.closest('.trilho-fila');
   if (fila) {
     const r = el.getBoundingClientRect(), fr = fila.getBoundingClientRect();
-    fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: 'smooth' });
+    fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: _rolagem() });
   }
   const cont = document.getElementById('conteudo');
   const trilho = el.closest('.trilho');
@@ -433,7 +512,7 @@ function focarPoster(el) {
     const heroH = hero ? hero.offsetHeight : 0;
     // +60: deixa o título ABAIXO do gradiente de transição (não escurecido).
     const delta = trilho.getBoundingClientRect().top - cont.getBoundingClientRect().top - heroH - 60;
-    cont.scrollBy({ top: delta, behavior: 'smooth' });
+    cont.scrollBy({ top: delta, behavior: _rolagem() });
   }
 }
 
@@ -449,14 +528,14 @@ function focarItemDetalhe(el) {
   const fila = el.closest('.det2-fila');
   if (fila) {
     const r = el.getBoundingClientRect(), fr = fila.getBoundingClientRect();
-    fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: 'smooth' });
+    fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: _rolagem() });
   }
   const sc = document.getElementById('det2-scroll');
   const sec = el.closest('.det2-secao');
   if (sc && sec) {
     // 40px de folga acima do título da seção.
     const alvo = sc.scrollTop + (sec.getBoundingClientRect().top - sc.getBoundingClientRect().top) - 40;
-    sc.scrollTo({ top: Math.max(0, alvo), behavior: 'smooth' });
+    sc.scrollTo({ top: Math.max(0, alvo), behavior: _rolagem() });
   }
 }
 
@@ -1048,6 +1127,12 @@ const PlayerNativo = (function () {
     },
     /** Código do último erro do ExoPlayer (ex.: ERROR_CODE_IO_BAD_HTTP_STATUS). */
     erro() { return ultimoErro; },
+    /** Faixas do que está tocando: `{audio:[{i,rotulo,sel}], texto:[…]}`. */
+    faixas() {
+      try { return JSON.parse(HeroPlayAndroid.faixas()); } catch (_) { return { audio: [], texto: [] }; }
+    },
+    /** Escolhe faixa. tipo: 'audio'|'texto'; i < 0 em 'texto' desliga a legenda. */
+    selFaixa(tipo, i) { try { HeroPlayAndroid.faixa(tipo, i); } catch (_) {} },
     /** Objeto com cara de <video> para a interface existente. */
     fachada(el) {
       return {
@@ -1060,8 +1145,21 @@ const PlayerNativo = (function () {
         set muted(v) { try { HeroPlayAndroid.mudo(!!v); } catch (_) {} },
         get textTracks() { return []; },
         get audioTracks() { return undefined; },
-        play() { pausadoManual = false; try { HeroPlayAndroid.retomar(); } catch (_) {} return Promise.resolve(); },
-        pause() { pausadoManual = true; try { HeroPlayAndroid.pausar(); } catch (_) {} },
+        // ⚠️ `ultimo.tocando` é atualizado OTIMISTA aqui. `paused` é lido do
+        // retrato, que só se renova a cada 500 ms — então quem clicasse em
+        // play/pause e perguntasse `paused` no mesmo instante recebia o valor
+        // ANTIGO, e o ícone do botão ficava trocado (só acertava quando outro
+        // evento chegava, tipo o de avançar). Assumir a intenção aqui deixa a
+        // resposta correta na hora; o tick confirma logo depois.
+        play() {
+          pausadoManual = false; ultimo.tocando = true;
+          try { HeroPlayAndroid.retomar(); } catch (_) {}
+          return Promise.resolve();
+        },
+        pause() {
+          pausadoManual = true; ultimo.tocando = false;
+          try { HeroPlayAndroid.pausar(); } catch (_) {}
+        },
         addEventListener(nome, fn) { (ouvintes[nome] = ouvintes[nome] || []).push(fn); },
         removeEventListener(nome, fn) {
           const l = ouvintes[nome]; if (!l) return;
@@ -1253,7 +1351,13 @@ function _hlsDoVideo(v) {
   if (_hlsPrev && v === document.getElementById('tv-prev-video')) return _hlsPrev;
   return null;
 }
+// ⚠️ ANDROID (TV Box/Fire TV) entra ANTES de tudo nestes seis helpers: lá quem
+// toca é o ExoPlayer, atrás do WebView, e o <video> da página não tem faixa
+// nenhuma para expor (era por isso que o CC no TV Box dizia sempre "este
+// conteúdo não oferece legendas", enquanto no celular funcionava). As faixas
+// vêm da ponte nativa — ver PlayerNativo.faixas() e PlayerNativo.kt.
 function faixasLegenda(v) {
+  if (TEM_PLAYER_NATIVO) return PlayerNativo.faixas().texto.map((f) => ({ i: f.i, rotulo: f.rotulo }));
   const hls = _hlsDoVideo(v);
   if (hls && hls.subtitleTracks && hls.subtitleTracks.length) {
     return hls.subtitleTracks.map((tr, i) => ({ i, rotulo: tr.name || tr.lang || (t('Legenda') + ' ' + (i + 1)) }));
@@ -1267,6 +1371,7 @@ function faixasLegenda(v) {
   return out;
 }
 function legendaAtual(v) {
+  if (TEM_PLAYER_NATIVO) { const s = PlayerNativo.faixas().texto.find((f) => f.sel); return s ? s.i : -1; }
   const hls = _hlsDoVideo(v);
   if (hls && hls.subtitleTracks && hls.subtitleTracks.length) return hls.subtitleDisplay === false ? -1 : hls.subtitleTrack;
   const tt = v.textTracks || [];
@@ -1274,6 +1379,7 @@ function legendaAtual(v) {
   return -1;
 }
 function selecionarLegenda(v, i) {          // i = -1 → desativar
+  if (TEM_PLAYER_NATIVO) { PlayerNativo.selFaixa('texto', i); return; }
   const hls = _hlsDoVideo(v);
   if (hls && hls.subtitleTracks && hls.subtitleTracks.length) {
     hls.subtitleDisplay = i >= 0; hls.subtitleTrack = i; return;
@@ -1282,6 +1388,7 @@ function selecionarLegenda(v, i) {          // i = -1 → desativar
   for (let k = 0; k < tt.length; k++) tt[k].mode = (k === i) ? 'showing' : 'disabled';
 }
 function faixasAudio(v) {
+  if (TEM_PLAYER_NATIVO) return PlayerNativo.faixas().audio.map((f) => ({ i: f.i, rotulo: f.rotulo }));
   const hls = _hlsDoVideo(v);
   if (hls && hls.audioTracks && hls.audioTracks.length) {
     return hls.audioTracks.map((tr, i) => ({ i, rotulo: tr.name || tr.lang || (t('Áudio') + ' ' + (i + 1)) }));
@@ -1292,6 +1399,7 @@ function faixasAudio(v) {
   return out;
 }
 function audioAtual(v) {
+  if (TEM_PLAYER_NATIVO) { const s = PlayerNativo.faixas().audio.find((f) => f.sel); return s ? s.i : -1; }
   const hls = _hlsDoVideo(v);
   if (hls && hls.audioTracks && hls.audioTracks.length) return hls.audioTrack;
   const at = v.audioTracks;
@@ -1299,6 +1407,7 @@ function audioAtual(v) {
   return -1;
 }
 function selecionarAudio(v, i) {
+  if (TEM_PLAYER_NATIVO) { PlayerNativo.selFaixa('audio', i); return; }
   const hls = _hlsDoVideo(v);
   if (hls && hls.audioTracks && hls.audioTracks.length) { hls.audioTrack = i; return; }
   const at = v.audioTracks;
@@ -1517,7 +1626,11 @@ async function abrirMenuAudio(v) {
 }
 
 function carregarPreviewVideo() {
-  if (_tvCanalPreview) tocarCanalAuto(_tvCanalPreview, true);
+  // COM SOM já no preview: escolher um canal é um gesto do usuário, então não há
+  // trava de autoplay a respeitar — e ouvir na hora é o comportamento de quem
+  // está zapeando (era mudo, e só ligava em tela cheia).
+  // O stream de TESTE (nenhum canal escolhido) segue mudo: ninguém pediu por ele.
+  if (_tvCanalPreview) tocarCanalAuto(_tvCanalPreview, false);
   else tocarNoPreview(TEST_HLS, true);
 }
 
@@ -2111,7 +2224,10 @@ function modalContinuarAssistir(item, pr, aoContinuar, aoInicio) {
     <div class="cont-pos">${escapar(sub)}</div>
     <div class="cont-acoes">
       <button class="btn btn-primario focusable" data-c="1"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> ${escapar(t('Continuar'))}</button>
-      <button class="btn btn-secundario focusable" data-i="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/></svg> ${escapar(t('Do início'))}</button>
+      <!-- fill="none" em CADA path, não no svg: a regra ".btn svg { fill:
+           currentColor }" vence o atributo posto no svg (mas perde para o
+           atributo do próprio path). Era isso que enchia o arco de sólido. -->
+      <button class="btn btn-secundario focusable" data-i="1"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" fill="none"/><path d="M3 3v5h5" fill="none"/></svg> ${escapar(t('Do início'))}</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -2436,7 +2552,26 @@ function abrirPlayer(item, ctx, reiniciar) {
   q('legendas').addEventListener('click', () => { abrirMenuLegendas(video); revelarControles(); });
   q('audio').addEventListener('click', () => { abrirMenuAudio(video); revelarControles(); });
 
+  const sincIcone = () => { q('playpause').innerHTML = video.paused ? IC_PLAY : IC_PAUSE; };
+  video.addEventListener('play', sincIcone);
+  video.addEventListener('pause', sincIcone);
+  video.addEventListener('playing', sincIcone);
+
+  // ── Reconciliação por ESTADO (não só por evento) ──────────────────────────
+  // O spinner e o ícone eram controlados só por eventos ('playing', 'canplay'…).
+  // Se um evento se perde — e com o ExoPlayer atrás de uma ponte JS isso
+  // acontece — o spinner ficava girando sobre um filme que já estava rodando, e
+  // só saía quando um pause/play forçava o evento. Aqui, a cada tick, o que
+  // manda é a REALIDADE: se está tocando e o tempo anda, não há o que carregar.
+  let _tUltimo = -1;
+  const reconciliar = () => {
+    const andando = video.currentTime > 0 && video.currentTime !== _tUltimo;
+    _tUltimo = video.currentTime;
+    if (!video.paused && andando) spinner(false);
+    sincIcone();
+  };
   video.addEventListener('timeupdate', () => {
+    reconciliar();
     // Salva o progresso a cada ~5s (continuar assistindo por perfil).
     if (_playerCtx && video.duration && Date.now() - _lastProgSave > 5000) {
       _lastProgSave = Date.now();
@@ -2449,9 +2584,6 @@ function abrirPlayer(item, ctx, reiniciar) {
     document.getElementById('pc-atual').textContent = fmtTempo(video.currentTime);
     document.getElementById('pc-total').textContent = fmtTempo(video.duration);
   });
-  const sincIcone = () => { q('playpause').innerHTML = video.paused ? IC_PLAY : IC_PAUSE; };
-  video.addEventListener('play', sincIcone);
-  video.addEventListener('pause', sincIcone);
 
   revelarControles();
   SpatialNav.setFocus(q('playpause'));
@@ -2766,7 +2898,7 @@ function abrirLive(canal) {
       tocarNoPreview((v || f).url, false);
     });
   });
-  q('epg').addEventListener('click', () => toast(t('Programação — em breve')));
+  q('epg').addEventListener('click', () => abrirModalEpg(canal));
 
   const tick = () => { const r = document.getElementById('live-relogio'); if (r) r.textContent = hhmm(new Date()); };
   tick();
@@ -2779,12 +2911,10 @@ function abrirLive(canal) {
 function fecharLive() {
   clearTimeout(_hideTimer);
   clearInterval(_relogioInt); _relogioInt = null;
-  // Volta ao tamanho de preview (o vídeo nunca saiu do lugar) e remuda.
-  const v = document.getElementById('tv-prev-video');
+  // Volta ao tamanho de preview — o vídeo nunca saiu do lugar e CONTINUA com
+  // som (a preview passou a ter áudio; antes voltava mudo aqui).
   const tela = document.querySelector('.tv-tela');
   if (tela) tela.classList.remove('cheia');
-  definirMudo(true);
-  if (v && !TEM_PLAYER_NATIVO) v.muted = true;
   const ov = document.getElementById('live-overlay');
   if (ov) ov.remove();
   const alvo = document.querySelector('.tv-tela') || document.querySelector('#conteudo .focusable');
@@ -2793,6 +2923,36 @@ function fecharLive() {
 
 // Menu de seleção (qualidade/fonte) sobreposto ao player. D-pad: cima/baixo +
 // OK; Voltar fecha. onPick recebe o índice escolhido.
+// Programação do canal em TELA CHEIA. Antes era um `toast('em breve')` — mas a
+// grade já existe e é a MESMA que a coluna direita da TV ao vivo mostra
+// (`htmlEpg`), então aqui é só trazê-la para um modal com a cara dos outros.
+function abrirModalEpg(canal) {
+  const ov = document.createElement('div');
+  ov.className = 'nav-modal menu-opcoes epg-modal';
+  ov.innerHTML = `
+    <div class="mo-card epg-card">
+      <div class="epg-cab">
+        <div class="live-logo epg-logo" style="background:${gradiente(canal.nome, true)}">${logoCanalInner(canal.nome, canal.logo)}</div>
+        <div>
+          <div class="epg-canal">${canal.num} · ${escapar(canal.nome)}</div>
+          <div class="epg-agora">${rotuloAgora(canal)}</div>
+        </div>
+      </div>
+      <div class="epg-lista">${htmlEpg(canal)}</div>
+      <button class="btn btn-secundario focusable" data-acao="epg-fechar">${escapar(t('Fechar'))}</button>
+    </div>`;
+  document.body.appendChild(ov);
+  const anterior = SpatialNav.atual;
+  const fechar = () => {
+    ov.remove();
+    if (anterior && document.contains(anterior)) SpatialNav.setFocus(anterior);
+    revelarControles();   // o modal come o timer de esconder os controles
+  };
+  ov._onVoltar = fechar;
+  ov.querySelector('[data-acao="epg-fechar"]').addEventListener('click', fechar);
+  SpatialNav.setFocus(ov.querySelector('[data-acao="epg-fechar"]'));
+}
+
 function abrirMenu(titulo, rotulos, onPick) {
   const ov = document.createElement('div');
   ov.className = 'nav-modal menu-opcoes';
@@ -3329,6 +3489,13 @@ document.addEventListener('click', (e) => {
   if (tela) { if (_tvCanalPreview) abrirLive(_tvCanalPreview); return; }
   const favBtn = e.target.closest('.tv-fav-btn');
   if (favBtn) { if (_tvCanalPreview) alternarFavorito(_tvCanalPreview.id); return; }
+  // Título de trilho → tela da categoria (todos os itens dela).
+  const trTit = e.target.closest('.trilho-titulo[data-cat]');
+  if (trTit) {
+    const sec = (document.querySelector('.nav-item.ativo') || {}).dataset || {};
+    abrirCategoria(sec.secao || 'filmes', trTit.dataset.cat);
+    return;
+  }
   const poster = e.target.closest('.poster');
   if (poster) {
     const item = LISTA.indice[poster.dataset.id];
@@ -3666,13 +3833,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       // No frame seguinte: o SpatialNav dá um scrollIntoView('nearest') logo
       // depois deste callback, e ele rolaria só o mínimo, deixando a tela no meio.
       const sc = document.getElementById('det2-scroll');
-      if (sc && sc.scrollTop > 0) requestAnimationFrame(() => sc.scrollTo({ top: 0, behavior: 'smooth' }));
+      if (sc && sc.scrollTop > 0) requestAnimationFrame(() => sc.scrollTo({ top: 0, behavior: _rolagem() }));
     } else if (el.classList.contains('rec-poster') || el.classList.contains('ator')) {
       requestAnimationFrame(() => focarItemDetalhe(el));   // idem: depois do SpatialNav
     }
     if (el.classList.contains('poster')) {
       if (el.closest('.bsc-grid')) {
-        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // grade da busca rola sozinha
+        el.scrollIntoView({ block: 'nearest', behavior: _rolagem() }); // grade da busca rola sozinha
       } else {
         focarPoster(el);                       // scroll (fila + título sob o hero)
         const fila = el.closest('.trilho-fila'); // lembra a posição neste carrossel

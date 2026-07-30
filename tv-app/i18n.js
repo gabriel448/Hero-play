@@ -31,6 +31,7 @@ const I18N = {
     'Gêneros': 'Genres', 'Sinopse': 'Synopsis', 'Informações': 'Information',
     'Sem informações adicionais.': 'No additional information.', 'Minha Lista — em breve': 'My List — coming soon',
     // Placeholders / seções
+    'Ver tudo': 'See all', 'título': 'title', 'títulos': 'titles',
     'Nada por aqui': 'Nothing here', 'Sua lista não tem itens nesta seção.': 'Your list has no items in this section.',
     'Agenda de jogos + onde assistir (próxima fase).': 'Match schedule + where to watch (next phase).',
     // TV ao vivo
@@ -211,6 +212,7 @@ const I18N = {
     'Gêneros': 'Géneros', 'Sinopse': 'Sinopsis', 'Informações': 'Información',
     'Sem informações adicionais.': 'Sin información adicional.', 'Minha Lista — em breve': 'Mi Lista — próximamente',
     // Placeholders
+    'Ver tudo': 'Ver todo', 'título': 'título', 'títulos': 'títulos',
     'Nada por aqui': 'Nada por aquí', 'Sua lista não tem itens nesta seção.': 'Tu lista no tiene elementos en esta sección.',
     'Agenda de jogos + onde assistir (próxima fase).': 'Agenda de partidos + dónde ver (próxima fase).',
     // TV ao vivo

@@ -54,6 +54,22 @@ const SpatialNav = (() => {
 
   let aoFocarCb = null; // callback externo (ex.: atualizar hero ao focar poster)
 
+  /**
+   * Como rolar: INSTANTÂNEO na TV, suave no desktop.
+   *
+   * Segurando o D-pad o foco anda a cada ~150 ms, e cada troca pedia um scroll
+   * ANIMADO. As animações se atropelavam: a próxima posição era calculada com a
+   * lista ainda em movimento, o delta saía errado e a tela "pulava" — é o
+   * travamento que se vê ao segurar a direção. O CSS do modo TV já dizia
+   * `scroll-behavior: auto` justamente por isso, mas a opção `behavior` do
+   * scrollTo/scrollIntoView do JS ignora o CSS. Aqui a intenção é respeitada.
+   */
+  const rolagem = () => {
+    try { return document.documentElement.classList.contains('tv') ? 'auto' : 'smooth'; }
+    catch (_) { return 'smooth'; }
+  };
+  window.HP_rolagem = rolagem;   // app.js usa a mesma decisão nos scrolls dele
+
   function aoMudarFoco(el) {
     const sb = document.getElementById('sidebar');
     // Expande a sidebar ao focar QUALQUER item dela (menu OU o botão de perfil).
@@ -83,7 +99,7 @@ const SpatialNav = (() => {
     // — assim focar uma tecla já visível não "desce a tela"; só rola onde há
     // overflow real (ex.: menu de categorias).
     if (!el.classList.contains('poster')) {
-      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: rolagem() });
     }
   }
 
@@ -155,8 +171,19 @@ const SpatialNav = (() => {
     if (alvo) setFocus(alvo);
   }
 
+  // Enter. Com PROTEÇÃO contra disparo duplo: no controle de TV é comum o OK
+  // registrar dois eventos (ou o usuário apertar rápido duas vezes), e aí abria
+  // DOIS overlays de detalhe empilhados, ou dois streams de canal em sequência.
+  // Uma janela curta por elemento resolve sem atrasar nada perceptível: o 1º
+  // toque age na hora, o eco é engolido.
+  let _ultAtivar = 0, _ultAlvo = null;
+  const ATIVAR_MIN_MS = 400;
   function ativar() {
-    if (atual) atual.click();
+    if (!atual) return;
+    const agora = Date.now();
+    if (atual === _ultAlvo && agora - _ultAtivar < ATIVAR_MIN_MS) return;
+    _ultAtivar = agora; _ultAlvo = atual;
+    atual.click();
   }
 
   function focarPrimeiro(selector) {

@@ -6,9 +6,14 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.FrameLayout
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -16,6 +21,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import java.util.Locale
 
 /**
  * Player NATIVO (ExoPlayer) que roda ATRAS do WebView.
@@ -62,6 +68,89 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         retrato = """{"pos":$pos,"dur":$dur,"tocando":$tocando,"buffering":$buff}"""
     }
 
+    // ── FAIXAS de audio e legenda ────────────────────────────────────────────
+    //
+    // Mesma restricao de thread do `retrato`: a lista de faixas SO pode ser lida
+    // na thread principal, e o JS pergunta pela ponte. Entao mantemos um retrato
+    // em JSON + o mapa de volta (indice plano -> grupo/faixa do ExoPlayer), os
+    // dois refeitos em `onTracksChanged` (que roda na thread certa).
+    private class Alvo(val tipo: Int, val grupo: TrackGroup, val indice: Int)
+
+    @Volatile
+    private var faixasJson = FAIXAS_VAZIO
+    private var mapaAudio = listOf<Alvo>()
+    private var mapaTexto = listOf<Alvo>()
+
+    private fun atualizarFaixas() {
+        val p = player
+        if (p == null) { faixasJson = FAIXAS_VAZIO; mapaAudio = listOf(); mapaTexto = listOf(); return }
+        val audio = mutableListOf<Alvo>()
+        val texto = mutableListOf<Alvo>()
+        val jsonAudio = StringBuilder()
+        val jsonTexto = StringBuilder()
+        for (g in p.currentTracks.groups) {
+            val ehAudio = g.type == C.TRACK_TYPE_AUDIO
+            val ehTexto = g.type == C.TRACK_TYPE_TEXT
+            if (!ehAudio && !ehTexto) continue
+            for (k in 0 until g.length) {
+                // Faixa que este aparelho NAO decodifica nao entra na lista: o
+                // usuario escolheria e nada aconteceria.
+                if (!g.isTrackSupported(k)) continue
+                val lista = if (ehAudio) audio else texto
+                val json = if (ehAudio) jsonAudio else jsonTexto
+                val i = lista.size
+                lista.add(Alvo(g.type, g.mediaTrackGroup, k))
+                if (json.isNotEmpty()) json.append(',')
+                json.append("""{"i":$i,"rotulo":"${escapar(rotulo(g.getTrackFormat(k), i, ehAudio))}","sel":${g.isTrackSelected(k)}}""")
+            }
+        }
+        mapaAudio = audio
+        mapaTexto = texto
+        faixasJson = """{"audio":[$jsonAudio],"texto":[$jsonTexto]}"""
+    }
+
+    /** Nome amigavel da faixa: rotulo do arquivo > idioma por extenso > numero. */
+    private fun rotulo(f: Format, n: Int, ehAudio: Boolean): String {
+        val label = f.label
+        if (!label.isNullOrBlank()) return label
+        val lang = f.language
+        if (!lang.isNullOrBlank() && lang != "und") {
+            val nome = Locale(lang).displayLanguage
+            if (nome.isNotBlank() && !nome.equals(lang, true)) {
+                return nome.replaceFirstChar { it.uppercase() }
+            }
+            return lang.uppercase()
+        }
+        return (if (ehAudio) "Audio " else "Legenda ") + (n + 1)
+    }
+
+    private fun escapar(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+    /** JSON das faixas disponiveis — lido em polling pelo JS (thread da ponte). */
+    fun faixas(): String = faixasJson
+
+    /**
+     * Escolhe uma faixa. `tipo` = "audio" | "texto"; indice negativo em "texto"
+     * DESLIGA a legenda. So pode rodar na thread principal (a ponte garante).
+     */
+    fun selecionarFaixa(tipo: String, indice: Int) {
+        val p = player ?: return
+        val ehTexto = tipo == "texto"
+        if (ehTexto && indice < 0) {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
+            atualizarFaixas()
+            return
+        }
+        val alvo = (if (ehTexto) mapaTexto else mapaAudio).getOrNull(indice) ?: return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(alvo.tipo, false)
+            .setOverrideForType(TrackSelectionOverride(alvo.grupo, alvo.indice))
+            .build()
+        atualizarFaixas()
+    }
+
     /** Chamado a cada evento relevante — a MainActivity repassa ao JS. */
     var aoEvento: ((String) -> Unit)? = null
 
@@ -102,6 +191,13 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
             override fun onIsPlayingChanged(tocando: Boolean) {
                 aoEvento?.invoke(if (tocando) "playing" else "pause")
             }
+            // A lista de faixas so existe depois de o container ser lido, e muda
+            // quando o usuario troca de faixa. Refeita AQUI porque este callback
+            // roda na thread principal — a ponte JS nao poderia ler dali.
+            override fun onTracksChanged(tracks: Tracks) {
+                atualizarFaixas()
+                aoEvento?.invoke("faixas")
+            }
             override fun onPlayerError(error: PlaybackException) {
                 // O codigo vai junto: e o que permite saber, olhando a TV, se
                 // foi rede, HTTP, container ou codec.
@@ -140,6 +236,8 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
     fun parar() {
         ui.removeCallbacks(tick)
         retrato = ESTADO_VAZIO
+        faixasJson = FAIXAS_VAZIO
+        mapaAudio = listOf(); mapaTexto = listOf()
         area(0f, 0f, 0f, 0f)
         player?.let {
             it.stop()
@@ -228,6 +326,7 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
     fun estado(): String = retrato
 
     companion object {
+        private const val FAIXAS_VAZIO = """{"audio":[],"texto":[]}"""
         private const val ESTADO_VAZIO =
             """{"pos":0,"dur":0,"tocando":false,"buffering":false}"""
     }

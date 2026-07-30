@@ -13,7 +13,7 @@
 // isto era um `'1.0.0-beta'` fixo que nunca mudou em release nenhuma, e por isso
 // não havia como saber, olhando a TV, se o app estava atualizado. O valor aqui é
 // só o do fonte/web (dev).
-const APP_VERSAO = '0.4.10-dev';
+const APP_VERSAO = '0.4.11-dev';
 
 // ── Ícones (pequenos, stroke) ───────────────────────────────────────────────
 const CFG_ICO = {
