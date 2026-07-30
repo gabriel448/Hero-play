@@ -1197,6 +1197,28 @@ function _urlHlsEquivalente(url) {
 // deixar o vídeo parado. Um `play()` recusado deixa o <video> pausado, e o que
 // aparece na tela é o botão de play CINZA do sistema — foi o que voltou quando a
 // preview passou a ter som.
+/**
+ * Mensagem HONESTA por código de erro do ExoPlayer.
+ *
+ * Antes tudo caía em "o formato pode exigir o player nativo da TV" — e num 403
+ * do provedor isso manda o usuário investigar a coisa errada. Os códigos que
+ * importam são poucos e dizem exatamente o que aconteceu.
+ */
+function mensagemErroPlayer(cod) {
+  const c = String(cod || '');
+  if (/BAD_HTTP_STATUS/.test(c)) {
+    return t('O servidor da sua lista recusou a conexão. Costuma ser limite de telas simultâneas — feche o app nos outros aparelhos e tente de novo em alguns segundos.');
+  }
+  if (/IO_NETWORK|CONNECT_TIMEOUT|READ_TIMEOUT|NO_INTERNET/.test(c)) {
+    return t('Falha de rede ao abrir o vídeo. Verifique a conexão da TV.');
+  }
+  if (/FILE_NOT_FOUND|INVALID_HTTP_CONTENT_TYPE/.test(c)) {
+    return t('Este item não está mais disponível no servidor da sua lista.');
+  }
+  return t('Não foi possível reproduzir. O formato pode exigir o player nativo da TV.')
+    + (c ? '  [' + c + ']' : '');
+}
+
 function tocarVideo(v, mudo) {
   if (!v) return;
   v.muted = !!mudo;
@@ -2461,6 +2483,11 @@ let _playerCtx = null, _lastProgSave = 0;   // contexto p/ "continuar assistindo
 // ponto) usa isto — nunca o getElementById direto.
 let _videoVod = null;
 function abrirPlayer(item, ctx, reiniciar) {
+  // Encerra o AO VIVO antes de abrir o VOD. No Android é um só ExoPlayer (o
+  // `abrir` já derruba o anterior), mas na LG/Samsung são DOIS <video>: o do
+  // preview continuaria com `src` e o provedor contaria DUAS sessões — é assim
+  // que se chega no 403 sem o usuário ter aberto nada em outro aparelho.
+  try { pararPreview(); } catch (_) {}
   _playerCtx = ctx || null; _lastProgSave = 0;
   _playerItem = item;                 // p/ buscar legenda externa (Xtream get_vod_info)
   _legendaReset();
@@ -2517,11 +2544,28 @@ function abrirPlayer(item, ctx, reiniciar) {
   video.addEventListener('loadstart', () => spinner(true));
   video.addEventListener('playing', () => spinner(false));
   video.addEventListener('canplay', () => spinner(false));
+  let _inicioVod = 0;   // posição de retomada (usada também na retentativa)
+  let _tUltimo = -1;    // último tempo visto (reconciliação + retentativa)
+  // ── Erro de reprodução ────────────────────────────────────────────────────
+  // O 403 do provedor (BAD_HTTP_STATUS) merece tratamento próprio: quase sempre
+  // é a sessão ANTERIOR ainda sendo contada do lado dele. O socket já fechou
+  // aqui (ver `parar()` no PlayerNativo e o `Connection: close`), mas o painel
+  // do provedor leva alguns segundos pra liberar a "tela" — e nesse intervalo
+  // qualquer abertura é recusada. Uma única retentativa depois de 2s resolve o
+  // caso comum sem o usuário precisar fazer nada.
+  let _reTentou = false;
   video.addEventListener('error', () => {
-    // O código do ExoPlayer diz se foi rede, formato ou codec — sem ele, na TV,
-    // qualquer falha vira "não deu" e não há como investigar.
     const cod = TEM_PLAYER_NATIVO ? PlayerNativo.erro() : '';
-    erroPlayer(t('Não foi possível reproduzir. O formato pode exigir o player nativo da TV.') + (cod ? '  [' + cod + ']' : ''));
+    if (/BAD_HTTP_STATUS/.test(cod) && !_reTentou && TEM_PLAYER_NATIVO) {
+      _reTentou = true;
+      spinner(true);
+      setTimeout(() => {
+        if (!document.getElementById('player-overlay')) return;   // usuário já saiu
+        PlayerNativo.abrir(elVideo, fonte, _tUltimo > 0 ? _tUltimo : _inicioVod, false);
+      }, 2000);
+      return;
+    }
+    erroPlayer(mensagemErroPlayer(cod));
   });
 
   const fonte = item.url || TEST_HLS;     // URL real do item (fallback: teste)
@@ -2538,12 +2582,11 @@ function abrirPlayer(item, ctx, reiniciar) {
   if (TEM_PLAYER_NATIVO) {
     // Retoma de onde parou já na abertura: o ExoPlayer aceita a posição no
     // prepare, então não precisamos esperar o 'loadedmetadata' para buscar.
-    let inicio = 0;
     if (!reiniciar && _playerCtx) {
       const pr = Biblioteca.progressoDe(_playerCtx.id);
-      if (pr && pr.url === fonte && pr.pos > 15 && (!pr.dur || pr.pos < pr.dur - 20)) inicio = pr.pos;
+      if (pr && pr.url === fonte && pr.pos > 15 && (!pr.dur || pr.pos < pr.dur - 20)) _inicioVod = pr.pos;
     }
-    PlayerNativo.abrir(elVideo, fonte, inicio, false);
+    PlayerNativo.abrir(elVideo, fonte, _inicioVod, false);
   } else if (ehHls && window.Hls && Hls.isSupported()) {
     _hls = new Hls();
     _hls.on(Hls.Events.ERROR, (_e, d) => { if (d && d.fatal) erroPlayer(t('Não foi possível reproduzir este conteúdo.')); });
@@ -2582,7 +2625,6 @@ function abrirPlayer(item, ctx, reiniciar) {
   // acontece — o spinner ficava girando sobre um filme que já estava rodando, e
   // só saía quando um pause/play forçava o evento. Aqui, a cada tick, o que
   // manda é a REALIDADE: se está tocando e o tempo anda, não há o que carregar.
-  let _tUltimo = -1;
   const reconciliar = () => {
     const andando = video.currentTime > 0 && video.currentTime !== _tUltimo;
     _tUltimo = video.currentTime;

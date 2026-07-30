@@ -165,6 +165,14 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
             .setAllowCrossProtocolRedirects(true)   // http -> https no meio do caminho
             .setConnectTimeoutMs(20000)
             .setReadTimeoutMs(20000)
+            // ⚠️ `Connection: close` — nao e detalhe. O DefaultHttpDataSource usa
+            // HttpURLConnection, que mantem POOL de keep-alive: no `close()` o
+            // socket pode voltar pro pool em vez de morrer, e o provedor de IPTV
+            // continua vendo aquela conexao aberta (ele conta SESSAO por socket).
+            // Resultado: fechar um filme e abrir outro somava "telas" ate o
+            // servidor recusar com 403 — o ERROR_CODE_IO_BAD_HTTP_STATUS que
+            // aparecia "as vezes". Sem keep-alive, fechar fecha de verdade.
+            .setDefaultRequestProperties(mapOf("Connection" to "close"))
         val p = ExoPlayer.Builder(ctx)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(ctx, http)))
             .build()

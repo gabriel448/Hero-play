@@ -59,6 +59,10 @@ const I18N = {
     'Faixas de áudio — em breve': 'Audio tracks — coming soon',
     'Não foi possível reproduzir. O formato pode exigir o player nativo da TV.': "Could not play. The format may require the TV's native player.",
     'Não foi possível reproduzir este conteúdo.': 'Could not play this content.',
+    'O servidor da sua lista recusou a conexão. Costuma ser limite de telas simultâneas — feche o app nos outros aparelhos e tente de novo em alguns segundos.':
+      'Your list server refused the connection. It is usually a simultaneous-screens limit — close the app on other devices and try again in a few seconds.',
+    'Falha de rede ao abrir o vídeo. Verifique a conexão da TV.': 'Network error opening the video. Check the TV connection.',
+    'Este item não está mais disponível no servidor da sua lista.': 'This item is no longer available on your list server.',
     // Busca
     'Buscar…': 'Search…', 'Espaço': 'Space', 'Limpar': 'Clear',
     'Encontre seus filmes e séries': 'Find your movies and series',
@@ -240,6 +244,10 @@ const I18N = {
     'Faixas de áudio — em breve': 'Pistas de audio — próximamente',
     'Não foi possível reproduzir. O formato pode exigir o player nativo da TV.': 'No se pudo reproducir. El formato puede requerir el reproductor nativo del TV.',
     'Não foi possível reproduzir este conteúdo.': 'No se pudo reproducir este contenido.',
+    'O servidor da sua lista recusou a conexão. Costuma ser limite de telas simultâneas — feche o app nos outros aparelhos e tente de novo em alguns segundos.':
+      'El servidor de tu lista rechazó la conexión. Suele ser límite de pantallas simultáneas — cierra la app en los otros dispositivos e inténtalo en unos segundos.',
+    'Falha de rede ao abrir o vídeo. Verifique a conexão da TV.': 'Error de red al abrir el video. Revisa la conexión del televisor.',
+    'Este item não está mais disponível no servidor da sua lista.': 'Este elemento ya no está disponible en el servidor de tu lista.',
     // Busca
     'Buscar…': 'Buscar…', 'Espaço': 'Espacio', 'Limpar': 'Borrar',
     'Encontre seus filmes e séries': 'Encuentra tus películas y series',
