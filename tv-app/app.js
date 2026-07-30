@@ -115,16 +115,21 @@ function _logoParaTmdb(img) {
 }
 
 // ── Render: trilho ──────────────────────────────────────────────────────────
-function trilhoHTML(t) {
+// ⚠️ O parâmetro se chama `tr`, NÃO `t`: `t()` é a função de tradução global, e
+// um parâmetro com esse nome a SOMBREIA dentro da função. Chamar `t('...')` aqui
+// virava "chamar o objeto do trilho como função" — TypeError em todo trilho, com
+// Filmes e Séries sem conseguir montar. (Vários pontos deste arquivo usam `t`
+// como nome de variável local; ao mexer neles, cuidado com isso.)
+function trilhoHTML(tr) {
   // O TÍTULO é focável: selecionar a categoria abre a tela com TODOS os itens
   // dela (abrirCategoria). O trilho mostra só os primeiros — antes não havia
   // como ver o resto de uma categoria.
   return `<section class="trilho">
-    <h2 class="trilho-titulo focusable" data-cat="${escapar(t.titulo)}">
-      ${escapar(t.titulo)}
+    <h2 class="trilho-titulo focusable" data-cat="${escapar(tr.titulo)}">
+      ${escapar(tr.titulo)}
       <span class="trilho-tudo">${escapar(t('Ver tudo'))} ${IC_CHEVRON}</span>
     </h2>
-    <div class="trilho-fila">${t.itens.map((it) => posterHTML(it)).join('')}</div>
+    <div class="trilho-fila">${tr.itens.map((it) => posterHTML(it)).join('')}</div>
   </section>`;
 }
 const IC_CHEVRON = '<svg class="tr-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1187,6 +1192,20 @@ function _urlHlsEquivalente(url) {
   return null;
 }
 
+// Dá play RESPEITANDO a política de autoplay: pede com som e, se a plataforma
+// recusar (webOS/Tizen podem recusar áudio sem gesto), repete MUDO em vez de
+// deixar o vídeo parado. Um `play()` recusado deixa o <video> pausado, e o que
+// aparece na tela é o botão de play CINZA do sistema — foi o que voltou quando a
+// preview passou a ter som.
+function tocarVideo(v, mudo) {
+  if (!v) return;
+  v.muted = !!mudo;
+  try {
+    const p = v.play();
+    if (p && p.catch) p.catch(() => { v.muted = true; const r = v.play(); if (r && r.catch) r.catch(() => {}); });
+  } catch (_) { /* navegador antigo: play() sem Promise */ }
+}
+
 function tocarNoPreview(url, muted) {
   const v = document.getElementById('tv-prev-video');
   if (!v || !url) return;
@@ -1215,20 +1234,20 @@ function tocarNoPreview(url, muted) {
     if (m3u8) { alvo = m3u8; viaHlsJs = true; }
   }
   if (!viaHlsJs && (!ehHls || hlsNativo)) {
-    v.muted = muted; v.src = url;
-    v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
+    v.src = url;
+    v.addEventListener('loadedmetadata', () => tocarVideo(v, muted), { once: true });
   } else if (window.Hls && Hls.isSupported()) {
     const convertida = alvo !== url;   // trocamos p/ o .m3u8 equivalente
     _hlsPrev = new Hls();
-    _hlsPrev.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = muted; v.play().catch(() => {}); });
+    _hlsPrev.on(Hls.Events.MANIFEST_PARSED, () => tocarVideo(v, muted));
     _hlsPrev.on(Hls.Events.ERROR, (_e, d) => {
       if (!d || !d.fatal) return;
       // O provedor pode não servir a variante .m3u8 daquele canal. Antes de
       // desistir e pular de fonte, tenta a URL ORIGINAL no player nativo.
       if (convertida) {
         if (_hlsPrev) { _hlsPrev.destroy(); _hlsPrev = null; }
-        v.muted = muted; v.src = url;
-        v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
+        v.src = url;
+        v.addEventListener('loadedmetadata', () => tocarVideo(v, muted), { once: true });
         return;
       }
       if (autoQualidadeOn() && _qAtual) autoTrocarFonte();
@@ -1236,8 +1255,8 @@ function tocarNoPreview(url, muted) {
     _hlsPrev.attachMedia(v);
     _hlsPrev.loadSource(alvo);
   } else {
-    v.muted = muted; v.src = url;
-    v.addEventListener('loadedmetadata', () => v.play().catch(() => {}), { once: true });
+    v.src = url;
+    v.addEventListener('loadedmetadata', () => tocarVideo(v, muted), { once: true });
   }
 }
 
@@ -2871,11 +2890,11 @@ function abrirLive(canal) {
   const pv = document.getElementById('tv-prev-video');
   const tela = document.querySelector('.tv-tela');
   if (tela) tela.classList.add('cheia');
-  // Som LIGADO ao entrar em tela cheia (a preview fica muda de proposito).
+  // Som ligado em tela cheia. A preview já vem com som; isto garante o caso de
+  // ela ter caído para mudo por recusa de autoplay (ver `tocarVideo`) — aqui há
+  // um gesto do usuário bem recente, então a plataforma aceita.
   definirMudo(false);
-  if (pv && !TEM_PLAYER_NATIVO) {
-    pv.play().catch(() => { pv.muted = true; pv.play().catch(() => {}); });
-  }
+  if (pv && !TEM_PLAYER_NATIVO) tocarVideo(pv, false);
 
   const q = (a) => ov.querySelector(`[data-acao="${a}"]`);
   q('fechar').addEventListener('click', fecharLive);
