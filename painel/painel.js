@@ -94,6 +94,10 @@ const IC = {
   lifebuoy: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
   menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
+  server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
+  pencil: '<path d="M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.63l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>',
+  copy: '<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   check: '<path d="m5 12.5 5 5 9-11"/>',
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
@@ -122,8 +126,11 @@ function ligarOlhos(raiz) {
   })
 }
 
-// ── Navegação (Conteúdo é por papel: admin=Masters+Revendedores+Clientes;
-//    master=Revendedores; reseller=Clientes) ──────────────────────────────────
+// ── Navegação ────────────────────────────────────────────────────────────────
+// Mesmas seções do painel de referência, e elas MUDAM por papel: o revendedor
+// tem um bloco só de "Negócios"; o admin separa Usuários (quem opera) de Sistema
+// (o que é da plataforma). Grupo e item aceitam `papeis` — mas esconder no menu
+// NÃO é segurança: cada ação de admin também confere `ehAdmin` no backend.
 const NAV = [
   { grupo: '', itens: [
     { id: 'dashboard', rotulo: 'Dashboard', ic: 'dashboard' },
@@ -131,22 +138,32 @@ const NAV = [
     { id: 'caixa', rotulo: 'Caixa de entrada', ic: 'inbox' },
   ] },
   { grupo: 'Conteúdo', itens: [
+    // Clientes é NOSSO (o painel é client-centric; o de referência é device-centric).
     { id: 'clientes', rotulo: 'Clientes', ic: 'users' },
     { id: 'dispositivos', rotulo: 'Dispositivos', ic: 'monitor' },
     { id: 'playlists', rotulo: 'Playlists', ic: 'listv' },
   ] },
-  { grupo: 'Negócios', itens: [
-    { id: 'creditos', rotulo: 'Créditos', ic: 'coins' },
-    { id: 'revendedores', rotulo: 'Revendedores', ic: 'userplus' },
+  { grupo: 'Negócios', papeis: ['master', 'reseller'], itens: [
     { id: 'comprar', rotulo: 'Comprar Créditos', ic: 'cart' },
+    { id: 'creditos', rotulo: 'Créditos', ic: 'coins' },
     { id: 'indicacao', rotulo: 'Indicação', ic: 'link' },
-    // Só o admin cadastra domínio parceiro (é acordo comercial da plataforma).
-    { id: 'parceiros', rotulo: 'Parceiros', ic: 'globe', papeis: ['admin'] },
+    { id: 'revendedores', rotulo: 'Revendedores', ic: 'userplus' },
+  ] },
+  { grupo: 'Usuários', papeis: ['admin'], itens: [
+    { id: 'revendedores', rotulo: 'Revendedores', ic: 'userplus' },
+    { id: 'creditos', rotulo: 'Créditos', ic: 'coins' },
+    { id: 'indicacao', rotulo: 'Indicação', ic: 'link' },
+  ] },
+  { grupo: 'Sistema', papeis: ['admin'], itens: [
+    // Acordo comercial da plataforma — quem cadastra domínio parceiro é o admin.
+    { id: 'parceiros', rotulo: 'Parceiros', ic: 'globe' },
+    { id: 'servidores', rotulo: 'Servidores', ic: 'server' },
   ] },
 ]
 
 function renderShell() {
   const nav = NAV.map((g) => {
+    if (g.papeis && !g.papeis.includes(me.papel)) return ''
     const itens = g.itens.filter((i) => !i.papeis || i.papeis.includes(me.papel))
     if (!itens.length) return ''
     return `${g.grupo ? `<div class="nav-grp-label">${esc(g.grupo)}</div>` : ''}
@@ -198,7 +215,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores }[v]
   if (fn) fn(param)
 }
 
@@ -1024,10 +1041,6 @@ async function vParceiros() {
 }
 
 // ── Abas Faturas / Configurações (Parceiros) ─────────────────────────────────
-// ⚠️ AGUARDANDO O LAYOUT DE REFERÊNCIA. O HTML do GTV que temos traz só a aba
-// ATIVA (é React: as outras nem existem no DOM), então destas duas conhecemos
-// apenas os títulos. A estrutura de abas já está pronta — quando o markup
-// chegar, é só preencher estas duas funções; nada mais precisa mudar.
 const FAT_ST = {
   aguardando: { rot: 'Aguard. pagamento', cor: 'warn' },
   pago: { rot: 'Pago', cor: 'ok' },
@@ -1208,6 +1221,141 @@ function modalParceiro(recarregar) {
       const r = await api('criar_parceiro', v)
       invalidar('parceiros', 'dispositivos')
       toast(r.ativados ? `Parceiro adicionado — ${r.ativados} device(s) ativados` : 'Parceiro adicionado')
+      recarregar()
+      return null
+    },
+  })
+}
+
+// ── SERVIDORES (admin) ───────────────────────────────────────────────────────
+// Atalho de login Xtream: em vez de digitar "http://servidor.com:8080" no
+// controle da TV, o cliente digita um CÓDIGO curto e o app resolve pro host.
+// É só facilitador de digitação — não guarda usuário/senha de ninguém.
+async function vServidores() {
+  if (me.papel !== 'admin') { placeholder('Servidores', 'Área restrita ao administrador', 'server'); return }
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head">
+      <div><h1>Servidores</h1><p>Servidores IPTV disponíveis para os devices. O código é usado no app para login rápido.</p></div>
+      <button class="btn" id="sv-novo">${svg('plus')} Novo servidor</button>
+    </div>
+    <div class="busca-wrap">
+      ${svg('search')}
+      <input id="sv-busca" placeholder="Buscar por nome, host ou código…" autocomplete="off">
+      <span class="busca-cont" id="sv-cont"></span>
+    </div>
+    <div class="lista" id="sv-lista"><div class="vazio">Carregando…</div></div>
+  </div>`
+  document.getElementById('sv-novo').onclick = () => modalServidor(null, carregar)
+  const meu = viewAtual()
+  let todos = []
+
+  const filtrar = () => {
+    const q = (document.getElementById('sv-busca').value || '').trim().toLowerCase()
+    const lista = !q ? todos : todos.filter((s) =>
+      [s.codigo, s.host, s.nome].some((x) => String(x || '').toLowerCase().includes(q)))
+    document.getElementById('sv-cont').textContent = `${lista.length}/${todos.length}`
+    pintar(lista)
+  }
+
+  function pintar(lista) {
+    const l = document.getElementById('sv-lista'); if (!l) return
+    if (!lista.length) {
+      l.innerHTML = `<div class="vazio">${todos.length ? 'Nenhum servidor com esse termo.' : 'Nenhum servidor cadastrado. Crie um para o cliente entrar por código.'}</div>`
+      return
+    }
+    l.innerHTML = lista.map((s) => `<div class="sv-card${s.ativo ? '' : ' off'}">
+      <div class="sv-body">
+        <div class="sv-cod">
+          <span class="sv-cod-label">Código</span>
+          <b class="sv-cod-val mono">${esc(s.codigo)}</b>
+          <button class="sv-copiar" data-copiar="${esc(s.codigo)}">Copiar</button>
+        </div>
+        <div class="sv-meta">
+          <div class="sv-linha1">
+            <b class="sv-nome">${esc(s.nome || s.host)}</b>
+            <span class="badge badge-${s.ativo ? 'ok' : 'cinza'}">${s.ativo ? 'Ativo' : 'Inativo'}</span>
+          </div>
+          <p class="sv-host mono">${esc(s.host)}</p>
+          <div class="sv-tags">
+            <span>${svg('monitor')} ${s.devices} device(s)</span>
+            <span>${svg('hash')} ID #${s.id_num ?? '—'}</span>
+            <span>Criado em ${fmtData(s.criado_em)}</span>
+          </div>
+        </div>
+        <div class="sv-acoes">
+          <button class="btn-sec" data-a="editar" data-id="${esc(s.id)}">${svg('pencil')} Editar</button>
+          <button class="btn-sec" data-a="codigo" data-id="${esc(s.id)}">${svg('refresh')} Novo código</button>
+          <button class="sv-perigo" data-a="alternar" data-id="${esc(s.id)}" data-ativo="${s.ativo ? '1' : ''}">${s.ativo ? 'Desativar' : 'Ativar'}</button>
+          <button class="sv-del" data-a="excluir" data-id="${esc(s.id)}" data-cod="${esc(s.codigo)}" title="Excluir">${svg('trash')}</button>
+        </div>
+      </div>
+      <div class="sv-ajuda">
+        <b>Como usar:</b> no app, vá em <span class="mono">Adicionar playlist → Por código</span>,
+        digite <b class="mono">${esc(s.codigo)}</b> e confirme.
+      </div>
+    </div>`).join('')
+
+    l.querySelectorAll('[data-copiar]').forEach((b) => {
+      b.onclick = async () => {
+        try { await navigator.clipboard.writeText(b.dataset.copiar) } catch (_) { /* sem permissão */ }
+        toast('Código copiado')
+      }
+    })
+    l.querySelectorAll('[data-a]').forEach((b) => {
+      b.onclick = async () => {
+        const s = todos.find((x) => x.id === b.dataset.id)
+        const a = b.dataset.a
+        if (a === 'editar') return modalServidor(s, carregar)
+        try {
+          if (a === 'codigo') {
+            if (!confirm(`Gerar um código novo para ${s.host}?\n\nO código atual (${s.codigo}) para de funcionar — quem já usa a lista continua normal, só o atalho muda.`)) return
+            const r = await api('servidor_codigo', { id: s.id })
+            toast('Novo código: ' + r.codigo)
+          } else if (a === 'alternar') {
+            await api('servidor_ativo', { id: s.id, ativo: !b.dataset.ativo })
+            toast(b.dataset.ativo ? 'Servidor desativado' : 'Servidor ativado')
+          } else if (a === 'excluir') {
+            if (!confirm(`Excluir o servidor de código ${b.dataset.cod}?\n\nAs playlists já criadas continuam funcionando — some só o atalho por código.`)) return
+            await api('excluir_servidor', { id: s.id })
+            toast('Servidor excluído')
+          }
+          carregar()
+        } catch (e) { toast(e.message, true) }
+      }
+    })
+  }
+
+  async function carregar() {
+    const l = document.getElementById('sv-lista'); if (l) l.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const { servidores } = await api('listar_servidores')
+      if (meu !== viewAtual()) return
+      todos = servidores
+      filtrar()
+    } catch (e) {
+      if (meu !== viewAtual()) return
+      const el = document.getElementById('sv-lista'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+  document.getElementById('sv-busca').oninput = () => { if (todos.length) filtrar() }
+  carregar()
+}
+
+// Mesmo modal para criar e editar (`s` null = criar).
+function modalServidor(s, recarregar) {
+  abrirModal({
+    titulo: s ? 'Editar servidor' : 'Novo servidor',
+    okLabel: s ? 'Salvar' : 'Criar servidor',
+    aviso: 'O <b>código</b> é o que o cliente digita no app para não precisar escrever o endereço inteiro do servidor. Deixe em branco para gerar um de 4 dígitos.',
+    campos: [
+      { id: 'host', label: 'Host (URL base do servidor)', placeholder: 'http://servidor.com:8080', value: s ? s.host : '' },
+      { id: 'nome', label: 'Nome do servidor (opcional)', placeholder: 'Api', value: s ? (s.nome || '') : '' },
+      { id: 'codigo', label: 'Código de acesso', placeholder: 'Ex.: 1234, 726262, MEUCODIGO', value: s ? s.codigo : '' },
+    ],
+    onOk: async (v) => {
+      if (!v.host) return 'Informe o host do servidor'
+      const r = await api('salvar_servidor', { id: s ? s.id : '', ...v })
+      toast(s ? 'Servidor atualizado' : 'Servidor criado — código ' + r.codigo)
       recarregar()
       return null
     },

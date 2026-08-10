@@ -146,6 +146,20 @@ async function gerarCodigoUnico(): Promise<string> {
   return gerarCodigo().slice(0, 5) + Date.now().toString(36).slice(-3).toUpperCase()
 }
 
+/**
+ * Codigo do SERVIDOR: 4 digitos, como no painel de referencia — o cliente digita
+ * isso no controle da TV, entao numero curto ganha de string aleatoria bonita.
+ * Confere colisao antes (o indice unico garante de verdade).
+ */
+async function gerarCodigoServidorUnico(): Promise<string> {
+  for (let i = 0; i < 12; i++) {
+    const c = String(1000 + Math.floor(Math.random() * 9000))
+    const { data } = await sb.from('servidores').select('id').ilike('codigo', c).maybeSingle()
+    if (!data) return c
+  }
+  return String(Date.now()).slice(-6)     // fallback: praticamente sem colisao
+}
+
 // ── Login por USUÁRIO (sem e-mail) ───────────────────────────────────────────
 // O Supabase Auth exige e-mail; usamos um SINTÉTICO derivado do usuário. Nunca é
 // enviado (contas nascem confirmadas). O mesmo derivador roda no frontend.
@@ -534,6 +548,97 @@ Deno.serve(async (req: Request) => {
       const id = (body.id || '').trim()
       if (!id) return erro('id obrigatorio')
       const { error } = await sb.from('parceiros').delete().eq('id', id)
+      if (error) return erro(error.message)
+      return json({ ok: true })
+    }
+
+    // ── SERVIDORES (só admin) — atalho de login Xtream por código ────────────
+    if (acao === 'listar_servidores') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data } = await sb.from('servidores').select('*').order('host', { ascending: true })
+      const servidores = data || []
+      // Devices por servidor: mesma contagem dos parceiros (host em texto claro
+      // na playlist + vínculo selecionado), então não precisa decifrar nada.
+      const contagem: Record<string, number> = {}
+      if (servidores.length) {
+        // deno-lint-ignore no-explicit-any
+        const hosts = [...new Set(servidores.map((s: any) => hostDe(s.host)).filter(Boolean))] as string[]
+        const { data: pls } = await sb.from('playlists').select('id, host').in('host', hosts)
+        // deno-lint-ignore no-explicit-any
+        const porId = new Map<string, string>((pls || []).map((p: any) => [p.id, p.host]))
+        if (porId.size) {
+          const { data: vins } = await sb.from('dispositivo_playlists')
+            .select('playlist_id, dispositivo_id').eq('selecionada', true).in('playlist_id', [...porId.keys()])
+          const vistos = new Set<string>()
+          for (const v of (vins || [])) {
+            // deno-lint-ignore no-explicit-any
+            const vv = v as any
+            if (vistos.has(vv.dispositivo_id)) continue
+            vistos.add(vv.dispositivo_id)
+            const h = porId.get(vv.playlist_id)
+            if (h) contagem[h] = (contagem[h] || 0) + 1
+          }
+        }
+      }
+      // deno-lint-ignore no-explicit-any
+      return json({ servidores: servidores.map((s: any) => ({ ...s, devices: contagem[hostDe(s.host) || ''] || 0 })) })
+    }
+
+    if (acao === 'salvar_servidor') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      let host = (body.host || '').trim().replace(/\/+$/, '')
+      if (!host) return erro('informe o host do servidor')
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) host = 'http://' + host
+      if (!urlValida(host)) return erro('host inválido (use http/https)')
+      // Código LIVRE (números ou letras, até 64) — é o que o cliente digita no
+      // app. Vazio = gera um de 4 dígitos, como o painel de referência.
+      let codigo = String(body.codigo || '').trim().toUpperCase().replace(/\s+/g, '')
+      if (codigo && !/^[A-Z0-9._-]{2,64}$/.test(codigo)) return erro('código inválido (2-64 letras/números . _ -)')
+      if (!codigo) codigo = await gerarCodigoServidorUnico()
+      const nome = (body.nome || '').trim() || null
+
+      // Código único (o índice do banco garante; aqui é só a mensagem amigável).
+      const { data: ja } = await sb.from('servidores').select('id').ilike('codigo', codigo).maybeSingle()
+      // deno-lint-ignore no-explicit-any
+      if (ja && (ja as any).id !== id) return erro('esse código já está em uso', 409)
+
+      if (id) {
+        const { error } = await sb.from('servidores').update({ host, codigo, nome }).eq('id', id)
+        if (error) return erro(error.message)
+        return json({ ok: true, id, codigo })
+      }
+      const { data, error } = await sb.from('servidores')
+        .insert({ host, codigo, nome }).select('id').single()
+      if (error) return erro(error.message)
+      return json({ ok: true, id: data.id, codigo })
+    }
+
+    // Gera um código novo para um servidor que já existe (o antigo para de valer).
+    if (acao === 'servidor_codigo') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      if (!id) return erro('id obrigatorio')
+      const codigo = await gerarCodigoServidorUnico()
+      const { error } = await sb.from('servidores').update({ codigo }).eq('id', id)
+      if (error) return erro(error.message)
+      return json({ ok: true, codigo })
+    }
+
+    if (acao === 'servidor_ativo') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      if (!id) return erro('id obrigatorio')
+      const { error } = await sb.from('servidores').update({ ativo: !!body.ativo }).eq('id', id)
+      if (error) return erro(error.message)
+      return json({ ok: true })
+    }
+
+    if (acao === 'excluir_servidor') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = (body.id || '').trim()
+      if (!id) return erro('id obrigatorio')
+      const { error } = await sb.from('servidores').delete().eq('id', id)
       if (error) return erro(error.message)
       return json({ ok: true })
     }

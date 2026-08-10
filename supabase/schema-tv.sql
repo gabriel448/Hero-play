@@ -360,6 +360,27 @@ alter table public.parceiros_config enable row level security;
 revoke all on public.parceiros_config from anon, authenticated;
 grant all on public.parceiros_config to service_role;
 
+-- ── SERVIDORES (atalho de login Xtream por CODIGO) ──────────────────────────
+-- Em vez de digitar "http://servidor.com:8080" no aparelho, o usuario digita um
+-- CODIGO curto e o app resolve para o host. E so um facilitador de digitacao —
+-- nao guarda usuario/senha de ninguem.
+--   `id_num` e o numero curto que aparece no painel ("ID #141"); o uuid continua
+--   sendo a chave. `codigo` e case-insensitive (indice sobre upper()).
+create table if not exists public.servidores (
+  id         uuid primary key default gen_random_uuid(),
+  id_num     bigint generated always as identity,
+  codigo     text not null,
+  host       text not null,                  -- URL base: http://servidor.com:8080
+  nome       text,                           -- rotulo interno ("Api", "Razors"…)
+  ativo      boolean not null default true,
+  criado_em  timestamptz not null default now()
+);
+create unique index if not exists idx_servidor_codigo on public.servidores(upper(codigo));
+create index if not exists idx_servidor_host on public.servidores(host);
+alter table public.servidores enable row level security;
+revoke all on public.servidores from anon, authenticated;
+grant all on public.servidores to service_role;
+
 notify pgrst, 'reload schema';
 
 -- ════════════════════════════════════════════════════════════════════════════
