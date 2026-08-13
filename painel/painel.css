@@ -64,8 +64,14 @@ a { color: inherit; text-decoration: none; }
 .side { width: 250px; flex-shrink: 0; background: var(--side); border-right: 1px solid var(--divider); display: flex; flex-direction: column; }
 .side-top { display: flex; align-items: center; justify-content: center; padding: 22px 20px; border-bottom: 1px solid var(--divider); }
 .side-logo { width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0; }
-.side-nav { flex: 1; overflow-y: auto; padding: 16px 13px; display: flex; flex-direction: column; gap: 18px; scrollbar-width: none; }
-.nav-grp-label { padding: 0 13px; margin-bottom: 7px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); opacity: .65; }
+/* ⚠️ O `gap` daqui vale entre TODOS os filhos — e os grupos não têm wrapper, é
+   uma sequência plana de rótulo + botões. Com gap grande, cada ITEM ficava
+   separado como se fosse um grupo, e o menu do admin (11 itens + 3 grupos) não
+   cabia num notebook 1366×768: a sidebar rolava e o Dashboard sumia ao clicar
+   num item de baixo. Itens colados + respiro só antes do rótulo do grupo. */
+.side-nav { flex: 1; overflow-y: auto; padding: 14px 13px; display: flex; flex-direction: column; gap: 3px; scrollbar-width: none; }
+.nav-grp-label { padding: 0 13px; margin: 15px 0 5px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); opacity: .65; }
+.nav-grp-label:first-child { margin-top: 0; }
 .nav-item { position: relative; display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; font-size: 15px; color: var(--muted); font-weight: 500; width: 100%; background: none; border: none; text-align: left; transition: background .12s, color .12s; }
 .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
 .nav-item:hover { color: var(--text); background: rgba(255,255,255,.03); }
@@ -203,7 +209,9 @@ tbody tr:first-child td { border-top: none; }
 .tipo { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--outline); border-radius: 6px; padding: 3px 8px; margin-left: 8px; }
 
 /* Badges */
-.badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border-radius: 7px; padding: 4px 10px; border: 1px solid var(--outline); color: var(--muted); }
+/* `inline-block` + nowrap: um rótulo de duas palavras ("Aguard. pagamento")
+   quebrava em duas linhas DENTRO da borda, e a pílula saía partida na tabela. */
+.badge { display: inline-block; white-space: nowrap; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border-radius: 7px; padding: 4px 10px; border: 1px solid var(--outline); color: var(--muted); }
 .badge-ativo { color: var(--ok); border-color: rgba(52,199,89,.4); background: rgba(52,199,89,.08); }
 .badge-trial { color: var(--warn); border-color: rgba(232,178,58,.4); background: rgba(232,178,58,.08); }
 .badge-sem_lista { color: var(--muted); }
@@ -285,6 +293,9 @@ tbody tr:first-child td { border-top: none; }
 /* ── Faturas dos parceiros ─────────────────────────────────────────────────── */
 .badge-cinza { color: var(--muted); }
 .ft-acoes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Domínio do parceiro: quebra só em separador (ponto/hífen), não no meio da
+   palavra — "servidor-ficticio.com" virava "servidor-" + "ficticio.com". */
+.ft-dom { word-break: normal; overflow-wrap: anywhere; min-width: 130px; }
 .ft-ac { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 6px 10px; border-radius: 8px; border: none; background: none; transition: filter .12s; }
 .ft-ac:hover { filter: brightness(1.25); }
 .ft-pago { background: rgba(52,199,89,.12); color: var(--ok); }

@@ -272,7 +272,6 @@ async function sair() { await sb.auth.signOut(); me = null; cache.clear(); viewL
 // `saldo` null = admin (crédito infinito) → não há número a atualizar.
 function atualizarSaldo(saldo) {
   if (saldo === null || saldo === undefined) return
-  if (saldo == null) return
   me.saldo_creditos = saldo
   const u = document.getElementById('u-saldo'); if (u) u.textContent = saldo
   const cr = document.getElementById('cr-saldo'); if (cr) cr.textContent = saldo
@@ -1172,7 +1171,7 @@ async function abaFaturas(el) {
             <button class="ft-ac ft-canc" data-id="${esc(f.id)}" data-o="cancelar">Cancelar</button>` : ''
           return `<tr>
             <td class="tnum">${i + 1}</td>
-            <td class="mono">${esc(f.dominio)}</td>
+            <td class="mono ft-dom">${esc(f.dominio)}</td>
             <td>${f.tipo === 'mensal' ? 'Mensal' : 'Por device'}</td>
             <td class="tnum" style="white-space:nowrap">${fmtData(f.periodo_ini)}<br>${fmtData(f.periodo_fim)}</td>
             <td class="tnum">${f.devices}</td>
