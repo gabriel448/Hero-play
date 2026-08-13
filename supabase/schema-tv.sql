@@ -218,44 +218,93 @@ begin
   return v_saldo_de;
 end $$;
 
--- Ativa um dispositivo consumindo 1 crédito, atômico. Device já 'ativo' NÃO cobra.
+-- ── PLANO da ativacao (1 ano / vitalicia) ────────────────────────────────────
+-- `plano` guarda o que foi VENDIDO ('ano' | 'vitalicia'; 'semestre' ja previsto
+-- p/ quando for oferecido) e `expira_em` a data em que a assinatura morre —
+-- NULL = vitalicia. Quem le a validade e a Edge Function `ativacao`: passou da
+-- data, o device vira 'expirado' e para de receber a lista.
+alter table public.dispositivos add column if not exists plano text;
+create index if not exists idx_disp_expira on public.dispositivos(expira_em)
+  where expira_em is not null;
+
+-- Ativa/RENOVA um dispositivo consumindo 1 crédito, atômico.
+--
+-- ⚠️ A assinatura da funcao MUDOU (ganhou plano/meses/renovar). No Postgres uma
+-- assinatura nova cria uma SOBRECARGA em vez de substituir — por isso o drop da
+-- versao de 4 argumentos, senao a antiga continuaria existindo e ativando sem
+-- validade nenhuma.
+drop function if exists public.rpc_ativar_dispositivo(uuid, uuid, uuid, text);
+
 create or replace function public.rpc_ativar_dispositivo(
-  p_dispositivo_id uuid, p_cliente_id uuid, p_rev uuid, p_mac text
+  p_dispositivo_id uuid, p_cliente_id uuid, p_rev uuid, p_mac text,
+  p_plano text,            -- 'ano' | 'vitalicia' | 'semestre'
+  p_meses int,             -- NULL = vitalicia (sem data de expiracao)
+  p_renovar boolean default false
 ) returns json
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_ja_ativo boolean;
+  v_status   text;
+  v_exp      timestamptz;
+  v_vigente  boolean;      -- ativo E dentro da validade
+  v_cobra    boolean;
+  v_base     timestamptz;
+  v_nova     timestamptz;
   v_saldo    int;
 begin
-  select (status = 'ativo') into v_ja_ativo from dispositivos where id = p_dispositivo_id for update;
+  select status, expira_em into v_status, v_exp
+    from dispositivos where id = p_dispositivo_id for update;
   if not found then raise exception 'DEVICE_INEXISTENTE'; end if;
 
-  if not v_ja_ativo then
+  -- "Ja ativo" tem que considerar a VALIDADE: um device com status 'ativo' e
+  -- expira_em no passado esta expirado, e re-ativar tem que cobrar de novo.
+  v_vigente := (v_status = 'ativo' and (v_exp is null or v_exp > now()));
+  -- Renovacao sempre cobra (e o que o revendedor esta vendendo de novo).
+  -- Vincular de novo um device VIGENTE nao cobra — protege o duplo-clique.
+  v_cobra := p_renovar or not v_vigente;
+
+  if v_cobra then
     update revendedores set saldo_creditos = saldo_creditos - 1
       where id = p_rev and saldo_creditos >= 1
       returning saldo_creditos into v_saldo;
     if not found then raise exception 'SALDO_INSUFICIENTE'; end if;
 
     insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
-      values (p_rev, 'consumido', -1, v_saldo, p_rev, 'Ativação do dispositivo ' || coalesce(p_mac, ''));
+      values (p_rev, 'consumido', -1, v_saldo,  p_rev,
+              (case when p_renovar then 'Renovação' else 'Ativação' end)
+              || ' do dispositivo ' || coalesce(p_mac, '')
+              || ' (' || coalesce(p_plano, '?') || ')');
   else
     select saldo_creditos into v_saldo from revendedores where id = p_rev;
   end if;
 
+  if p_meses is null then
+    v_nova := null;                                  -- vitalicia
+  else
+    -- Renovar ANTES de vencer SOMA ao que resta (o cliente nao perde os dias
+    -- que ja pagou). Vencido, conta a partir de agora.
+    v_base := case when v_exp is not null and v_exp > now() then v_exp else now() end;
+    v_nova := v_base + (p_meses || ' months')::interval;
+  end if;
+
   update dispositivos
-     set cliente_id = p_cliente_id, status = 'ativo', ativado_por = 'reseller', atualizado_em = now()
+     set cliente_id   = coalesce(p_cliente_id, cliente_id),   -- renovar nao troca de cliente
+         status       = 'ativo',
+         plano        = p_plano,
+         expira_em    = v_nova,
+         ativado_por  = 'reseller',
+         atualizado_em = now()
    where id = p_dispositivo_id;
 
-  return json_build_object('cobrado', not v_ja_ativo, 'saldo', v_saldo);
+  return json_build_object('cobrado', v_cobra, 'saldo', v_saldo, 'expira_em', v_nova);
 end $$;
 
 revoke all on function public.rpc_transferir_creditos(uuid, uuid, int, uuid, text, text) from anon, authenticated;
-revoke all on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text) from anon, authenticated;
+revoke all on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text, text, int, boolean) from anon, authenticated;
 grant execute on function public.rpc_transferir_creditos(uuid, uuid, int, uuid, text, text) to service_role;
-grant execute on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text) to service_role;
+grant execute on function public.rpc_ativar_dispositivo(uuid, uuid, uuid, text, text, int, boolean) to service_role;
 
 -- ── TICKETS: topico pre-definido ──────────────────────────────────────────────
 -- O revendedor nao escreve mais o assunto: escolhe entre Financeiro/Tecnico/

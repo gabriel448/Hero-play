@@ -132,17 +132,25 @@ Deno.serve(async (req: Request) => {
       if (key && d.device_key !== key) return erro('key invalida', 403)
 
       // playlist ATIVA naquele device (via junção dispositivo_playlists)
-      const { data: dp } = await sb.from('dispositivo_playlists').select('playlist_id')
-        .eq('dispositivo_id', d.id).eq('selecionada', true).limit(1).maybeSingle()
+      const status = statusAtual(d)
       let lista_url = '', epg_url = ''
-      if (dp?.playlist_id) {
-        const { data: pl } = await sb.from('playlists').select('url_cifrada, epg_cifrada').eq('id', dp.playlist_id).maybeSingle()
-        if (pl) {
-          try { lista_url = await decifrar(pl.url_cifrada) } catch { /* ignore */ }
-          if (pl.epg_cifrada) { try { epg_url = await decifrar(pl.epg_cifrada) } catch { /* ignore */ } }
+      // ⚠️ ASSINATURA VENCIDA (ou banido) NÃO recebe a lista. É aqui que a
+      // validade do plano vira efeito de verdade: sem URL não há o que tocar, e
+      // o aparelho não consegue nem baixar o catálogo de novo. (O app ainda
+      // bloqueia a tela por conta própria, porque ele guarda um cache local —
+      // as duas camadas juntas é que fecham.)
+      if (status !== 'expirado' && status !== 'banido') {
+        const { data: dp } = await sb.from('dispositivo_playlists').select('playlist_id')
+          .eq('dispositivo_id', d.id).eq('selecionada', true).limit(1).maybeSingle()
+        if (dp?.playlist_id) {
+          const { data: pl } = await sb.from('playlists').select('url_cifrada, epg_cifrada').eq('id', dp.playlist_id).maybeSingle()
+          if (pl) {
+            try { lista_url = await decifrar(pl.url_cifrada) } catch { /* ignore */ }
+            if (pl.epg_cifrada) { try { epg_url = await decifrar(pl.epg_cifrada) } catch { /* ignore */ } }
+          }
         }
       }
-      return json({ status: statusAtual(d), lista_url, epg_url, trial_expira_em: d.trial_expira_em, expira_em: d.expira_em })
+      return json({ status, lista_url, epg_url, trial_expira_em: d.trial_expira_em, expira_em: d.expira_em })
     }
 
     if (req.method !== 'POST') return erro('metodo nao suportado', 405)

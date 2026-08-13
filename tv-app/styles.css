@@ -1018,6 +1018,10 @@ html.video-nativo-cheio .tv-tela.cheia * { visibility: visible; }
 .aviso-rotulo { font-size: 14px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .1em; margin-bottom: -12px; }
 .aviso-card .ob-link { font-size: 24px; }
 .aviso-card .btn { margin-top: 6px; min-width: 260px; justify-content: center; text-align: center; }
+/* Assinatura vencida: mesmo card, selo neutro (cinza) — não é promoção, é aviso. */
+.aviso-badge-off { background: rgba(255,255,255,.07); color: var(--text-secondary); border-color: var(--outline); }
+.exp-ids { display: flex; gap: 32px; font-size: 18px; color: var(--text-tertiary); }
+.exp-ids b { color: var(--text-secondary); font-family: ui-monospace, monospace; }
 
 /* ── Minhas Playlists (lista de linhas: nome + recarregar + excluir) ───────── */
 .secao-pl { padding: 44px var(--safe); }

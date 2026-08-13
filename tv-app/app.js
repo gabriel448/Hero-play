@@ -3425,6 +3425,66 @@ async function recarregarOnboarding() {
   }
 }
 
+/**
+ * ASSINATURA VENCIDA: tela de bloqueio.
+ *
+ * O servidor já para de mandar a lista quando o plano vence — mas o catálogo
+ * fica em cache AQUI, com os links dos streams dentro, então sem esta tela o
+ * aparelho continuaria tocando offline. É ela que faz "1 ano" significar 1 ano.
+ *
+ * NEUTRA de propósito (regra das lojas): diz o que aconteceu e manda falar com
+ * o provedor. Sem preço, sem link de pagamento, sem CTA de compra. O MAC/Key
+ * aparecem porque é como o provedor acha o aparelho.
+ */
+let _expPoll = null;
+function mostrarExpirado() {
+  const app = document.getElementById('app'); if (app) app.classList.add('oculto');
+  document.querySelectorAll('#onboarding, #aviso-teste').forEach((e) => e.remove());
+  let ov = document.getElementById('expirado');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'expirado';
+    ov.className = 'nav-modal';
+    document.body.appendChild(ov);
+  }
+  // Raiz do app: Back pergunta se quer sair (as lojas exigem devolver ao launcher).
+  ov._onVoltar = () => confirmarSairApp();
+  ov.innerHTML = `
+    <div class="aviso-card">
+      <div class="aviso-badge aviso-badge-off">${escapar(t('Ativação expirada'))}</div>
+      <h1 class="aviso-titulo">${escapar(t('Este aparelho não está mais ativo'))}</h1>
+      <p class="aviso-sub">${escapar(t('A ativação deste aparelho venceu. Fale com quem forneceu o seu acesso para renovar — assim que renovarem, o app volta sozinho.'))}</p>
+      <div class="exp-ids">
+        <div>Mac: <b>${escapar(Dispositivo.mac())}</b></div>
+        <div>Key: <b>${escapar(Dispositivo.key())}</b></div>
+      </div>
+      <button class="btn btn-primario focusable" id="exp-check">${escapar(t('Verificar de novo'))}</button>
+      <div class="ob-versao">${escapar(etiquetaVersao())}</div>
+    </div>`;
+  const verificar = async () => {
+    const b = document.getElementById('exp-check');
+    if (b) { b.disabled = true; b.textContent = t('Verificando…'); }
+    try { await Dispositivo.consultar(); } catch (_) { /* offline: segue bloqueado */ }
+    if (!Dispositivo.expirado() && Dispositivo.temLista()) return liberarExpirado();
+    if (b) { b.disabled = false; b.textContent = t('Verificar de novo'); }
+  };
+  document.getElementById('exp-check').addEventListener('click', verificar);
+  SpatialNav.setFocus(document.getElementById('exp-check'));
+  // Renovou no painel? A TV entra sozinha, sem ninguém apertar nada.
+  if (_expPoll) clearInterval(_expPoll);
+  _expPoll = setInterval(async () => {
+    if (!document.getElementById('expirado') || document.hidden) return;
+    try { await Dispositivo.consultar(); } catch (_) { return; }
+    if (!Dispositivo.expirado() && Dispositivo.temLista()) liberarExpirado();
+  }, 30000);
+}
+function liberarExpirado() {
+  if (_expPoll) { clearInterval(_expPoll); _expPoll = null; }
+  const ov = document.getElementById('expirado'); if (ov) ov.remove();
+  toast(t('Ativação renovada! Carregando…'));
+  iniciarApp();
+}
+
 // Aviso grande de periodo de teste (apos a lista ser adicionada e device inativo).
 function mostrarAvisoTeste() {
   if (sessionStorage.getItem('aviso_teste_visto')) return;
@@ -4059,7 +4119,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     await Dispositivo.consultar(); // best-effort (offline-first, com timeout)
   } catch (e) { console.error('[Hero Play] consultar()', e); }
   try {
-    if (Dispositivo.temLista()) iniciarApp();
+    // Ordem importa: VENCIDO manda em tudo. Com lista em cache o app abriria
+    // normalmente e a assinatura não valeria nada.
+    if (Dispositivo.expirado()) mostrarExpirado();
+    else if (Dispositivo.temLista()) iniciarApp();
     else mostrarOnboarding(); // app neutro: abre vazio ate ter lista (conformidade)
   } catch (e) {
     console.error('[Hero Play] boot', e);

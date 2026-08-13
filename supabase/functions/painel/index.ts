@@ -147,6 +147,41 @@ async function gerarCodigoUnico(): Promise<string> {
 }
 
 /**
+ * PLANOS de ativacao: quantos MESES cada um vale. `null` = vitalicia (sem data).
+ *
+ * Meses (e nao dias) porque "1 ano" tem que cair no mesmo dia do ano seguinte —
+ * 365 dias erra em ano bissexto. A conta em si e do Postgres (interval), aqui so
+ * vive a tabela.
+ *
+ * `semestre` fica DEFINIDO mas NAO e oferecido no painel ainda (decisao do
+ * usuario: por enquanto so ano e vitalicia). Quando for, e so mostrar a opcao.
+ */
+const PLANOS: Record<string, number | null> = {
+  semestre: 6,
+  ano: 12,
+  vitalicia: null,
+}
+const planoValido = (p: unknown): string | null => {
+  const s = String(p || '').trim().toLowerCase()
+  return Object.prototype.hasOwnProperty.call(PLANOS, s) ? s : null
+}
+
+/**
+ * Status REAL do device: a coluna `status` continua 'ativo' depois do
+ * vencimento (ninguem passa varrendo o banco), entao quem manda e a DATA.
+ * Mesma regra da Edge Function `ativacao` — as duas TEM que concordar, senao o
+ * painel diz "ativo" e a TV nao abre.
+ */
+// deno-lint-ignore no-explicit-any
+function statusEfetivo(d: any): string {
+  const agora = Date.now()
+  if (d.status === 'banido') return 'banido'
+  if (d.status === 'ativo') return (d.expira_em && new Date(d.expira_em).getTime() < agora) ? 'expirado' : 'ativo'
+  if (d.status === 'trial') return (d.trial_expira_em && new Date(d.trial_expira_em).getTime() < agora) ? 'expirado' : 'trial'
+  return d.status || 'sem_lista'
+}
+
+/**
  * Codigo do SERVIDOR: 4 digitos, como no painel de referencia — o cliente digita
  * isso no controle da TV, entao numero curto ganha de string aleatoria bonita.
  * Confere colisao antes (o indice unico garante de verdade).
@@ -742,9 +777,11 @@ Deno.serve(async (req: Request) => {
       const cliente_id = (body.cliente_id || '').trim()
       if (!(await clienteDoRev(cliente_id))) return erro('cliente nao encontrado', 404)
       const { data: cliente } = await sb.from('clientes').select('id, nome').eq('id', cliente_id).maybeSingle()
-      const { data: dispositivos } = await sb.from('dispositivos')
-        .select('id, mac, device_key, modelo, status, trial_expira_em, expira_em, ativado_por, criado_em, atualizado_em')
+      const { data: disp0 } = await sb.from('dispositivos')
+        .select('id, mac, device_key, modelo, status, plano, trial_expira_em, expira_em, ativado_por, criado_em, atualizado_em')
         .eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
+      // deno-lint-ignore no-explicit-any
+      const dispositivos = (disp0 || []).map((d: any) => ({ ...d, status: statusEfetivo(d) }))
       const { data: playlists } = await sb.from('playlists')
         .select('id, nome, tipo, criado_em').eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
       // deno-lint-ignore no-explicit-any
@@ -762,6 +799,8 @@ Deno.serve(async (req: Request) => {
       const cliente_id = (body.cliente_id || '').trim()
       const key = (body.key || '').trim()
       const mac = (body.mac || '').trim()
+      const plano = planoValido(body.plano)
+      if (!plano) return erro('escolha o plano da ativação')
       if (!(await clienteDoRev(cliente_id))) return erro('cliente nao encontrado', 404)
       if (!mac || !key) return erro('mac e key obrigatorios')
       // MAC é único → casa pelo MAC e CONFIRMA a Key.
@@ -770,9 +809,10 @@ Deno.serve(async (req: Request) => {
 
       // Consumo de 1 crédito + ativação são ATÔMICOS (RPC). Antes eram 3 statements
       // separados: duas ativações simultâneas gastavam 1 crédito por 2 devices.
-      // Re-vincular um device já 'ativo' NÃO cobra de novo (a RPC decide isso).
+      // Re-vincular um device VIGENTE não cobra de novo (a RPC decide isso).
       const { data: res, error: eA } = await sb.rpc('rpc_ativar_dispositivo', {
         p_dispositivo_id: d.id, p_cliente_id: cliente_id, p_rev: rev.id, p_mac: mac,
+        p_plano: plano, p_meses: PLANOS[plano], p_renovar: false,
       })
       if (eA) {
         if ((eA.message || '').includes('SALDO_INSUFICIENTE')) {
@@ -780,7 +820,35 @@ Deno.serve(async (req: Request) => {
         }
         return erro('falha ao ativar o dispositivo')
       }
-      return json({ ok: true, dispositivo: { id: d.id, mac: d.mac }, saldo: res?.saldo, cobrado: !!res?.cobrado })
+      return json({
+        ok: true, dispositivo: { id: d.id, mac: d.mac },
+        saldo: res?.saldo, cobrado: !!res?.cobrado, expira_em: res?.expira_em ?? null, plano,
+      })
+    }
+
+    /**
+     * RENOVAR a assinatura de um device que já é do revendedor.
+     *
+     * Sempre cobra 1 crédito — é uma venda nova. Renovar ANTES de vencer soma ao
+     * que resta (o cliente não perde o que já pagou); vencido, conta de hoje.
+     */
+    if (acao === 'renovar_dispositivo') {
+      const dispositivo_id = (body.dispositivo_id || '').trim()
+      const plano = planoValido(body.plano)
+      if (!plano) return erro('escolha o plano da renovação')
+      const { data: d } = await sb.from('dispositivos').select('id, mac, cliente_id').eq('id', dispositivo_id).maybeSingle()
+      if (!d || !(await clienteDoRev(d.cliente_id))) return erro('dispositivo nao encontrado', 404)
+      const { data: res, error: eR } = await sb.rpc('rpc_ativar_dispositivo', {
+        p_dispositivo_id: d.id, p_cliente_id: null, p_rev: rev.id, p_mac: d.mac,
+        p_plano: plano, p_meses: PLANOS[plano], p_renovar: true,
+      })
+      if (eR) {
+        if ((eR.message || '').includes('SALDO_INSUFICIENTE')) {
+          return erro('Saldo insuficiente: renovar um dispositivo consome 1 crédito.')
+        }
+        return erro('falha ao renovar o dispositivo')
+      }
+      return json({ ok: true, saldo: res?.saldo, expira_em: res?.expira_em ?? null, plano })
     }
 
     // ── Playlists do cliente (cifra) + vínculo aos dispositivos ───────────────
@@ -874,12 +942,14 @@ Deno.serve(async (req: Request) => {
       const cids = (clis || []).map((c) => c.id)
       if (!cids.length) return json({ dispositivos: [] })
       const { data: disp } = await sb.from('dispositivos')
-        .select('id, mac, device_key, modelo, status, trial_expira_em, expira_em, cliente_id, criado_em, ativado_por, atualizado_em')
+        .select('id, mac, device_key, modelo, status, plano, trial_expira_em, expira_em, cliente_id, criado_em, ativado_por, atualizado_em')
         .in('cliente_id', cids).order('criado_em', { ascending: false })
       // deno-lint-ignore no-explicit-any
       const nomeCli = new Map((clis || []).map((c: any) => [c.id, c.nome]))
       // deno-lint-ignore no-explicit-any
-      const dispositivos = (disp || []).map((d: any) => ({ ...d, cliente: nomeCli.get(d.cliente_id) || '' }))
+      const dispositivos = (disp || []).map((d: any) => ({
+        ...d, cliente: nomeCli.get(d.cliente_id) || '', status: statusEfetivo(d),
+      }))
       return json({ dispositivos })
     }
 

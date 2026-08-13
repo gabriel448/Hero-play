@@ -327,6 +327,24 @@ function abrirModal({ titulo, campos, okLabel = 'Salvar', onOk, aviso }) {
   // cursor tem que cair direto na descrição.
   const primeiro = ov.querySelector('input, select, textarea'); if (primeiro) primeiro.focus()
 }
+/**
+ * PLANOS de ativação. `meses` só documenta aqui — quem calcula a data é o banco
+ * (a RPC soma o intervalo), então o painel nunca inventa validade.
+ *
+ * `semestre` fica de fora da lista oferecida por decisão do usuário: hoje só
+ * 1 ano e vitalícia. Está pronto no backend p/ quando for oferecido.
+ */
+const PLANOS = {
+  ano: { rot: '1 ano', desc: 'Expira em 12 meses — precisa renovar', ic: 'coins' },
+  vitalicia: { rot: 'Vitalícia', desc: 'Sem data de expiração', ic: 'shield' },
+}
+const planoRot = (p) => (PLANOS[p] || {}).rot || (p === 'semestre' ? '6 meses' : '—')
+// Campo de escolha do plano, igual nos dois modais (vincular e renovar).
+const campoPlano = () => ({
+  id: 'plano', label: 'Plano da ativação',
+  escolhas: Object.keys(PLANOS).map((k) => ({ v: k, t: PLANOS[k].rot, d: PLANOS[k].desc, ic: PLANOS[k].ic })),
+})
+
 function formatarMac(v) { const h = String(v).toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 12); return h.replace(/(.{2})(?=.)/g, '$1:') }
 
 // ── Modal do DISPOSITIVO (info + trocar playlist ativa + remover) ─────────────
@@ -349,7 +367,8 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
       <div><span>Adicionado</span><b>${fmtDataHora(d.criado_em)}</b></div>
       <div><span>Ativado por</span><b>${esc(ATIVADO_POR_PT[d.ativado_por] || d.ativado_por || '—')}</b></div>
       <div><span>Última atividade</span><b>${d.atualizado_em ? fmtDataHora(d.atualizado_em) : '—'}</b></div>
-      <div><span>Expira</span><b>${d.expira_em ? fmtData(d.expira_em) : '—'}</b></div>
+      <div><span>Plano</span><b>${esc(planoRot(d.plano))}</b></div>
+      <div><span>Expira</span><b>${d.expira_em ? fmtData(d.expira_em) : (d.plano === 'vitalicia' ? 'nunca' : '—')}</b></div>
       <div><span>Trial até</span><b>${d.trial_expira_em ? fmtData(d.trial_expira_em) : '—'}</b></div>
     </div>
     <div class="mdev-sec-t">Playlist ativa</div>
@@ -361,6 +380,7 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
     <div class="modal-erro" id="mdev-erro"></div>
     <div class="mdev-acoes">
       <button class="btn-danger" id="mdev-remover">Remover dispositivo</button>
+      <button class="btn-sec" id="mdev-renovar">Renovar assinatura</button>
       <button class="btn-sec" id="mdev-fechar">Fechar</button>
     </div>
   </div>`
@@ -375,6 +395,23 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
     try { await api('selecionar_playlist', { dispositivo_id: d.id, playlist_id: b.dataset.pl }); toast('Playlist ativada no dispositivo'); fechar(); recarregar() }
     catch (e) { err(e.message); ov.querySelectorAll('.mdev-pl').forEach((x) => { x.disabled = false }) }
   } })
+  // Renovar SEMPRE cobra 1 crédito — é uma venda nova. Renovar antes de vencer
+  // soma ao que resta (a conta é do banco), então ninguém perde dia pago.
+  ov.querySelector('#mdev-renovar').onclick = () => {
+    abrirModal({
+      titulo: 'Renovar assinatura', okLabel: 'Renovar (1 crédito)',
+      aviso: `Dispositivo <b>${esc(d.mac)}</b>. Renovar <b>consome 1 crédito</b>. Se ainda não venceu, o novo prazo é somado ao que resta.`,
+      campos: [campoPlano()],
+      onOk: async (v) => {
+        const r = await api('renovar_dispositivo', { dispositivo_id: d.id, plano: v.plano })
+        atualizarSaldo(r.saldo)
+        invalidar('dispositivos', 'cliente:' + cliente_id)
+        toast(r.expira_em ? `Renovado até ${fmtData(r.expira_em)}` : 'Agora é vitalícia')
+        fechar(); recarregar()
+        return null
+      },
+    })
+  }
   ov.querySelector('#mdev-remover').onclick = async () => {
     if (!confirm(`Remover o dispositivo ${d.mac}?\n\nEle sai deste cliente e volta a "sem lista". A ativação NÃO é reembolsada — re-ativar depois consome outro crédito.`)) return
     const rb = ov.querySelector('#mdev-remover'); rb.disabled = true; rb.textContent = 'Removendo…'; err('')
@@ -480,8 +517,20 @@ async function vCliente(cliente_id) {
   document.getElementById('vincular').onclick = () => abrirModal({
     titulo: 'Vincular dispositivo', okLabel: 'Ativar (1 crédito)',
     aviso: `⚠️ Ativar este dispositivo <b>consome 1 crédito</b> e é <b>irreversível</b>. Seu saldo: <b>${me.saldo_creditos ?? 0}</b> crédito(s).`,
-    campos: [{ id: 'mac', label: 'MAC', placeholder: 'AA:BB:CC:DD:EE:FF', format: 'mac' }, { id: 'key', label: 'Key', placeholder: '000000' }],
-    onOk: async (v) => { if (v.mac.length !== 17) return 'MAC incompleto'; if (!v.key) return 'Informe a Key'; const r = await api('vincular_dispositivo', { cliente_id, mac: v.mac, key: v.key }); atualizarSaldo(r.saldo); toast(r.cobrado ? 'Dispositivo ativado (−1 crédito)' : 'Dispositivo vinculado'); recarregar(); return null },
+    campos: [
+      { id: 'mac', label: 'MAC', placeholder: 'AA:BB:CC:DD:EE:FF', format: 'mac' },
+      { id: 'key', label: 'Key', placeholder: '000000' },
+      campoPlano(),
+    ],
+    onOk: async (v) => {
+      if (v.mac.length !== 17) return 'MAC incompleto'
+      if (!v.key) return 'Informe a Key'
+      const r = await api('vincular_dispositivo', { cliente_id, mac: v.mac, key: v.key, plano: v.plano })
+      atualizarSaldo(r.saldo)
+      toast(r.cobrado ? `Ativado (${planoRot(r.plano)}) — −1 crédito` : 'Dispositivo vinculado')
+      recarregar()
+      return null
+    },
   })
   document.getElementById('add-pl').onclick = () => abrirModal({
     titulo: 'Adicionar playlist', okLabel: 'Adicionar',
@@ -799,12 +848,13 @@ async function vDispositivos() {
     })
     const el = document.getElementById('dv-tbl')
     if (!f.length) { el.innerHTML = '<div class="vazio">Nenhum dispositivo.</div>'; return }
-    el.innerHTML = `<table><thead><tr><th>MAC</th><th>Key</th><th>Modelo</th><th>Cliente</th><th>Status</th><th>Expira</th><th>Trial</th><th>Criado</th></tr></thead><tbody>
+    el.innerHTML = `<table><thead><tr><th>MAC</th><th>Key</th><th>Modelo</th><th>Cliente</th><th>Plano</th><th>Status</th><th>Expira</th><th>Trial</th><th>Criado</th></tr></thead><tbody>
       ${f.map((d) => `<tr>
         <td class="mono">${esc(d.mac)}</td><td class="mono">${esc(d.device_key)}</td>
         <td><span class="mdl-ico">${modeloIcone(d.modelo)}</span> ${esc(modeloNome(d.modelo))}</td><td>${esc(d.cliente || '—')}</td>
+        <td>${esc(planoRot(d.plano))}</td>
         <td><span class="badge badge-${esc(d.status)}">${esc(d.status)}</span></td>
-        <td class="tnum">${d.expira_em ? fmtData(d.expira_em) : '—'}</td>
+        <td class="tnum">${d.expira_em ? fmtData(d.expira_em) : (d.plano === 'vitalicia' ? 'nunca' : '—')}</td>
         <td class="tnum">${d.trial_expira_em ? fmtData(d.trial_expira_em) : '—'}</td>
         <td class="tnum">${fmtData(d.criado_em)}</td>
       </tr>`).join('')}</tbody></table>`
@@ -838,8 +888,18 @@ async function modalVincularGlobal() {
       { id: 'cliente_id', label: 'Cliente', options: clientes.map((c) => ({ v: c.id, t: c.nome })) },
       { id: 'mac', label: 'MAC', placeholder: 'AA:BB:CC:DD:EE:FF', format: 'mac' },
       { id: 'key', label: 'Key', placeholder: '000000' },
+      campoPlano(),
     ],
-    onOk: async (v) => { if (v.mac.length !== 17) return 'MAC incompleto'; if (!v.key) return 'Informe a Key'; const r = await api('vincular_dispositivo', { cliente_id: v.cliente_id, mac: v.mac, key: v.key }); atualizarSaldo(r.saldo); invalidar('dispositivos', 'cliente:' + v.cliente_id); toast(r.cobrado ? 'Dispositivo ativado (−1 crédito)' : 'Dispositivo vinculado'); vDispositivos(); return null },
+    onOk: async (v) => {
+      if (v.mac.length !== 17) return 'MAC incompleto'
+      if (!v.key) return 'Informe a Key'
+      const r = await api('vincular_dispositivo', { cliente_id: v.cliente_id, mac: v.mac, key: v.key, plano: v.plano })
+      atualizarSaldo(r.saldo)
+      invalidar('dispositivos', 'cliente:' + v.cliente_id)
+      toast(r.cobrado ? `Ativado (${planoRot(r.plano)}) — −1 crédito` : 'Dispositivo vinculado')
+      vDispositivos()
+      return null
+    },
   })
 }
 

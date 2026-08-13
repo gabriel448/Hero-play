@@ -162,6 +162,25 @@ const Dispositivo = (() => {
   const temLista = () => { const r = registro(); return !!(r && r.lista_url); };
   const status = () => { const r = registro(); return (r && r.status) || 'sem_lista'; };
 
+  /**
+   * ASSINATURA VENCIDA? (ou aparelho banido)
+   *
+   * Vale o `status` que a nuvem devolveu E a DATA guardada no registro: o
+   * aparelho pode estar offline há semanas, e mesmo assim tem que saber que
+   * venceu — o `expira_em` fica no snapshot local justamente pra isso. Sem esta
+   * checagem local o cache do catálogo continuaria tocando para sempre, porque
+   * os links dos streams já estão baixados aqui dentro.
+   */
+  function expirado() {
+    const r = registro();
+    if (!r) return false;
+    if (r.status === 'banido' || r.status === 'expirado') return true;
+    const venceu = (iso) => !!iso && new Date(iso).getTime() < Date.now();
+    if (venceu(r.expira_em)) return true;                       // plano (1 ano)
+    if (r.status === 'trial' && venceu(r.trial_expira_em)) return true;
+    return false;
+  }
+
   function diasTeste() {
     const r = registro();
     if (!r || !r.trial_expira_em) return 7;
@@ -246,7 +265,7 @@ const Dispositivo = (() => {
     return !!(j && j.ok !== false);
   }
 
-  return { init, mac, key, plataforma, temLista, status, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, urlAtivacao };
+  return { init, mac, key, plataforma, temLista, status, expirado, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, urlAtivacao };
 })();
 
 // Utilitarios de lista: montar a URL a partir do Xtream e DERIVAR o EPG da M3U.
