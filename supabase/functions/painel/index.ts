@@ -293,7 +293,13 @@ Deno.serve(async (req: Request) => {
       // garante o código de indicação (gera na 1ª vez p/ contas antigas)
       let codigo = rev.codigo_indicacao
       if (!codigo) { codigo = await gerarCodigoUnico(); await sb.from('revendedores').update({ codigo_indicacao: codigo }).eq('id', rev.id) }
-      return json({ id: rev.id, nome: rev.nome, usuario: rev.usuario, papel: rev.papel, saldo_creditos: rev.saldo_creditos ?? 0, codigo_indicacao: codigo })
+      // ADMIN nao tem saldo: ele e a FONTE do credito, nao um estoque. Manda
+      // `null` p/ o painel nao exibir numero nenhum pra ele.
+      return json({
+        id: rev.id, nome: rev.nome, usuario: rev.usuario, papel: rev.papel,
+        saldo_creditos: ehAdmin ? null : (rev.saldo_creditos ?? 0),
+        codigo_indicacao: codigo,
+      })
     }
 
     // Qualquer operador cria um REVENDEDOR (papel 'reseller'), sem limite de
@@ -756,7 +762,7 @@ Deno.serve(async (req: Request) => {
       const { data } = await sb.from('creditos_transacoes')
         .select('id, tipo, quantidade, saldo_apos, nota, criado_em')
         .eq('revendedor_id', rev.id).order('criado_em', { ascending: false }).limit(200)
-      return json({ saldo: rev.saldo_creditos ?? 0, transacoes: data || [] })
+      return json({ saldo: ehAdmin ? null : (rev.saldo_creditos ?? 0), transacoes: data || [] })
     }
 
     // ── Clientes ──────────────────────────────────────────────────────────────

@@ -35,6 +35,9 @@ const ATIVADO_POR_PT = { reseller: 'Revendedor', qr: 'QR (auto)', codigo: 'Códi
 
 const app = document.getElementById('app')
 let me = null // { id, nome, usuario, papel, saldo_creditos }
+// ADMIN não tem saldo: ele é a FONTE do crédito, não um estoque. Toda a UI de
+// crédito some pra ele (backend também não debita — ver rpc_* no schema).
+const admInf = () => me && me.papel === 'admin'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const fmtData = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—'
@@ -174,7 +177,7 @@ function renderShell() {
     <header class="mtop">
       <button class="hamb" id="hamb" aria-label="Menu">${svg('menu')}</button>
       <img class="mtop-logo" src="heroplay-icon.svg" alt="Hero Play"><b class="mtop-nome">Hero Play</b>
-      <div class="mtop-cr"><b>${me.saldo_creditos ?? 0}</b><span>cr</span></div>
+      ${admInf() ? '' : `<div class="mtop-cr"><b>${me.saldo_creditos ?? 0}</b><span>cr</span></div>`}
     </header>
     <div class="side-bd" id="side-bd"></div>
     <aside class="side">
@@ -184,7 +187,7 @@ function renderShell() {
         <div class="user-card">
           <div class="user-av">${esc(inicial)}</div>
           <div class="user-meta"><div class="user-nome">${esc(me.nome || me.usuario)}</div><div class="user-papel">${esc(PAPEL_PT[me.papel] || me.papel)}</div></div>
-          <div class="user-cr"><b id="u-saldo">${me.saldo_creditos ?? 0}</b><span>cr</span></div>
+          ${admInf() ? '' : `<div class="user-cr"><b id="u-saldo">${me.saldo_creditos ?? 0}</b><span>cr</span></div>`}
         </div>
         <button class="side-sair" id="sair">${svg('logout')}<span>Sair</span></button>
       </div>
@@ -266,7 +269,9 @@ async function sair() { await sb.auth.signOut(); me = null; cache.clear(); viewL
 
 // ── Modal genérico ───────────────────────────────────────────────────────────
 // Atualiza o saldo em memória + em qualquer contador visível (topbar / créditos).
+// `saldo` null = admin (crédito infinito) → não há número a atualizar.
 function atualizarSaldo(saldo) {
+  if (saldo === null || saldo === undefined) return
   if (saldo == null) return
   me.saldo_creditos = saldo
   const u = document.getElementById('u-saldo'); if (u) u.textContent = saldo
@@ -347,6 +352,12 @@ const campoPlano = () => ({
 
 function formatarMac(v) { const h = String(v).toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 12); return h.replace(/(.{2})(?=.)/g, '$1:') }
 
+// Aviso do modal de ativação: o admin não gasta crédito, então pra ele o texto
+// vira só o alerta de que a ação vale (não há custo nem saldo a mostrar).
+const avisoAtivacao = () => admInf()
+  ? 'Escolha o plano: <b>1 ano</b> expira e precisa de renovação; <b>vitalícia</b> não expira.'
+  : `⚠️ Ativar este dispositivo <b>consome 1 crédito</b> e é <b>irreversível</b>. Seu saldo: <b>${me.saldo_creditos ?? 0}</b> crédito(s).`
+
 // ── Modal do DISPOSITIVO (info + trocar playlist ativa + remover) ─────────────
 function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
   if (!d) return
@@ -399,8 +410,8 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
   // soma ao que resta (a conta é do banco), então ninguém perde dia pago.
   ov.querySelector('#mdev-renovar').onclick = () => {
     abrirModal({
-      titulo: 'Renovar assinatura', okLabel: 'Renovar (1 crédito)',
-      aviso: `Dispositivo <b>${esc(d.mac)}</b>. Renovar <b>consome 1 crédito</b>. Se ainda não venceu, o novo prazo é somado ao que resta.`,
+      titulo: 'Renovar assinatura', okLabel: admInf() ? 'Renovar' : 'Renovar (1 crédito)',
+      aviso: `Dispositivo <b>${esc(d.mac)}</b>. ${admInf() ? '' : 'Renovar <b>consome 1 crédito</b>. '}Se ainda não venceu, o novo prazo é somado ao que resta.`,
       campos: [campoPlano()],
       onOk: async (v) => {
         const r = await api('renovar_dispositivo', { dispositivo_id: d.id, plano: v.plano })
@@ -442,7 +453,7 @@ async function vDashboard() {
   const meu = viewAtual()
   try {
     const card = (ic, cor, val, lbl) => `<div class="stat"><div class="stat-ic" style="background:${cor}1f;color:${cor}">${svg(ic)}</div><div><b>${val}</b><span>${lbl}</span></div></div>`
-    let html = card('coins', '#E53935', me.saldo_creditos ?? 0, 'Créditos')
+    let html = admInf() ? '' : card('coins', '#E53935', me.saldo_creditos ?? 0, 'Créditos')
     const { clientes } = await pega('clientes', () => api('listar_clientes'))
     html += card('users', '#4f8ef7', clientes.length, 'Clientes')
     const { revendedores } = await pega('downline', () => api('listar_revendedores'))
@@ -515,8 +526,8 @@ async function vCliente(cliente_id) {
     </div>`
   const recarregar = () => { invalidar(chaveCache); irPara('cliente', cliente_id) }
   document.getElementById('vincular').onclick = () => abrirModal({
-    titulo: 'Vincular dispositivo', okLabel: 'Ativar (1 crédito)',
-    aviso: `⚠️ Ativar este dispositivo <b>consome 1 crédito</b> e é <b>irreversível</b>. Seu saldo: <b>${me.saldo_creditos ?? 0}</b> crédito(s).`,
+    titulo: 'Vincular dispositivo', okLabel: admInf() ? 'Ativar' : 'Ativar (1 crédito)',
+    aviso: avisoAtivacao(),
     campos: [
       { id: 'mac', label: 'MAC', placeholder: 'AA:BB:CC:DD:EE:FF', format: 'mac' },
       { id: 'key', label: 'Key', placeholder: '000000' },
@@ -573,8 +584,19 @@ async function vRevendedores() {
       </tr>`).join('')}</tbody></table>`
     el.querySelectorAll('[data-acao="transferir"]').forEach((b) => { b.onclick = () => abrirModal({
       titulo: 'Transferir créditos', okLabel: 'Transferir',
-      campos: [{ id: 'qtd', label: `Quantidade (seu saldo: ${me.saldo_creditos ?? 0}) → ${b.dataset.nome}`, type: 'number', placeholder: '0' }],
-      onOk: async (v) => { const q = parseInt(v.qtd, 10); if (!q || q <= 0) return 'Quantidade inválida'; const r = await api('transferir_creditos', { revendedor_id: b.dataset.id, quantidade: q }); me.saldo_creditos = r.saldo; document.getElementById('u-saldo').textContent = r.saldo; invalidar('downline', 'creditos'); toast('Créditos transferidos'); vRevendedores(); return null },
+      campos: [{ id: 'qtd', label: admInf()
+        ? `Quantidade → ${b.dataset.nome}`
+        : `Quantidade (seu saldo: ${me.saldo_creditos ?? 0}) → ${b.dataset.nome}`, type: 'number', placeholder: '0' }],
+      onOk: async (v) => {
+        const q = parseInt(v.qtd, 10)
+        if (!q || q <= 0) return 'Quantidade inválida'
+        const r = await api('transferir_creditos', { revendedor_id: b.dataset.id, quantidade: q })
+        atualizarSaldo(r.saldo)          // null p/ admin → não mexe em nada
+        invalidar('downline', 'creditos')
+        toast('Créditos transferidos')
+        vRevendedores()
+        return null
+      },
     }) })
     el.querySelectorAll('[data-acao="tier"]').forEach((b) => { b.onclick = async () => { try { await api('promover', { revendedor_id: b.dataset.id, tier: b.dataset.tier }); invalidar('downline'); toast(b.dataset.tier === 'master' ? 'Promovido a Master' : 'Rebaixado a comum'); vRevendedores() } catch (e) { toast(e.message, true) } } })
   } catch (e) { toast(e.message, true) }
@@ -582,15 +604,18 @@ async function vRevendedores() {
 
 // ── Créditos (extrato) ───────────────────────────────────────────────────────
 async function vCreditos() {
-  view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Créditos</h1><p>Seu saldo e histórico de movimentos</p></div></div>
-    <div class="stats"><div class="stat"><div class="stat-ic" style="background:#E539351f;color:#E53935">${svg('coins')}</div><div><b id="cr-saldo">${me.saldo_creditos ?? 0}</b><span>Saldo atual</span></div></div></div>
+  view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Créditos</h1><p>${
+    admInf() ? 'Você distribui crédito para os revendedores — seu saldo é ilimitado' : 'Seu saldo e histórico de movimentos'}</p></div></div>
+    <div class="stats"><div class="stat"><div class="stat-ic" style="background:#E539351f;color:#E53935">${svg('coins')}</div><div>${
+    admInf() ? '<b class="cr-inf">∞</b><span>Crédito ilimitado</span>'
+      : `<b id="cr-saldo">${me.saldo_creditos ?? 0}</b><span>Saldo atual</span>`}</div></div></div>
     <div class="tbl-wrap" id="cr-tbl"><div class="vazio">Carregando…</div></div></div>`
   const meu = viewAtual()
   try {
     const { saldo, transacoes } = await pega('creditos', () => api('listar_creditos'))
     if (meu !== viewAtual()) return
-    me.saldo_creditos = saldo; document.getElementById('cr-saldo').textContent = saldo
-    const su = document.getElementById('u-saldo'); if (su) su.textContent = saldo
+    atualizarSaldo(saldo)   // admin: saldo vem null e nada é exibido
+    const cs = document.getElementById('cr-saldo'); if (cs && saldo !== null) cs.textContent = saldo
     const el = document.getElementById('cr-tbl')
     if (!transacoes.length) { el.innerHTML = '<div class="vazio">Nenhum movimento ainda.</div>'; return }
     const rotulo = { adicionado: 'Adicionado', consumido: 'Consumido', transferido_saida: 'Transferido', transferido_entrada: 'Recebido' }
@@ -882,8 +907,8 @@ async function modalVincularGlobal() {
   try { const r = await pega('clientes', () => api('listar_clientes')); clientes = r.clientes || [] } catch (_) {}
   if (!clientes.length) { toast('Crie um cliente primeiro', true); irPara('clientes'); return }
   abrirModal({
-    titulo: 'Vincular dispositivo', okLabel: 'Ativar (1 crédito)',
-    aviso: `⚠️ Ativar este dispositivo <b>consome 1 crédito</b> e é <b>irreversível</b>. Seu saldo: <b>${me.saldo_creditos ?? 0}</b> crédito(s).`,
+    titulo: 'Vincular dispositivo', okLabel: admInf() ? 'Ativar' : 'Ativar (1 crédito)',
+    aviso: avisoAtivacao(),
     campos: [
       { id: 'cliente_id', label: 'Cliente', options: clientes.map((c) => ({ v: c.id, t: c.nome })) },
       { id: 'mac', label: 'MAC', placeholder: 'AA:BB:CC:DD:EE:FF', format: 'mac' },

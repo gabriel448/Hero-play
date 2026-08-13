@@ -196,26 +196,38 @@ security definer
 set search_path = public
 as $$
 declare
+  v_admin      boolean;
   v_saldo_de   int;
   v_saldo_para int;
 begin
   if p_qtd is null or p_qtd <= 0 then raise exception 'QTD_INVALIDA'; end if;
 
-  update revendedores set saldo_creditos = saldo_creditos - p_qtd
-    where id = p_de and saldo_creditos >= p_qtd
-    returning saldo_creditos into v_saldo_de;
-  if not found then raise exception 'SALDO_INSUFICIENTE'; end if;
+  -- ADMIN tem credito INFINITO: ele e a fonte, nao um estoque. Nao debita nem
+  -- lanca saida no extrato dele — so credita quem recebe. O papel e lido AQUI
+  -- (e nao vem do cliente) pra ninguem se declarar admin pela requisicao.
+  select (papel = 'admin') into v_admin from revendedores where id = p_de;
+  if v_admin is null then raise exception 'ORIGEM_INVALIDA'; end if;
+
+  if not v_admin then
+    update revendedores set saldo_creditos = saldo_creditos - p_qtd
+      where id = p_de and saldo_creditos >= p_qtd
+      returning saldo_creditos into v_saldo_de;
+    if not found then raise exception 'SALDO_INSUFICIENTE'; end if;
+  end if;
 
   update revendedores set saldo_creditos = saldo_creditos + p_qtd
     where id = p_para
     returning saldo_creditos into v_saldo_para;
   if not found then raise exception 'DESTINO_INVALIDO'; end if;
 
-  insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota) values
-    (p_de,   'transferido_saida',   -p_qtd, v_saldo_de,   p_por, p_nota_saida),
-    (p_para, 'transferido_entrada',  p_qtd, v_saldo_para, p_por, p_nota_entrada);
+  if not v_admin then
+    insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
+      values (p_de, 'transferido_saida', -p_qtd, v_saldo_de, p_por, p_nota_saida);
+  end if;
+  insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
+    values (p_para, 'transferido_entrada', p_qtd, v_saldo_para, p_por, p_nota_entrada);
 
-  return v_saldo_de;
+  return v_saldo_de;   -- NULL p/ admin: o painel nao mostra saldo dele
 end $$;
 
 -- ── PLANO da ativacao (1 ano / vitalicia) ────────────────────────────────────
@@ -246,6 +258,7 @@ security definer
 set search_path = public
 as $$
 declare
+  v_admin    boolean;
   v_status   text;
   v_exp      timestamptz;
   v_vigente  boolean;      -- ativo E dentro da validade
@@ -258,12 +271,15 @@ begin
     from dispositivos where id = p_dispositivo_id for update;
   if not found then raise exception 'DEVICE_INEXISTENTE'; end if;
 
+  -- ADMIN ativa/renova de graca (credito infinito). Papel lido do banco.
+  select (papel = 'admin') into v_admin from revendedores where id = p_rev;
+
   -- "Ja ativo" tem que considerar a VALIDADE: um device com status 'ativo' e
   -- expira_em no passado esta expirado, e re-ativar tem que cobrar de novo.
   v_vigente := (v_status = 'ativo' and (v_exp is null or v_exp > now()));
   -- Renovacao sempre cobra (e o que o revendedor esta vendendo de novo).
   -- Vincular de novo um device VIGENTE nao cobra — protege o duplo-clique.
-  v_cobra := p_renovar or not v_vigente;
+  v_cobra := (p_renovar or not v_vigente) and not coalesce(v_admin, false);
 
   if v_cobra then
     update revendedores set saldo_creditos = saldo_creditos - 1
@@ -276,9 +292,9 @@ begin
               (case when p_renovar then 'Renovação' else 'Ativação' end)
               || ' do dispositivo ' || coalesce(p_mac, '')
               || ' (' || coalesce(p_plano, '?') || ')');
-  else
+  elsif not coalesce(v_admin, false) then
     select saldo_creditos into v_saldo from revendedores where id = p_rev;
-  end if;
+  end if;   -- admin: v_saldo fica NULL (o painel nao mostra saldo dele)
 
   if p_meses is null then
     v_nova := null;                                  -- vitalicia
