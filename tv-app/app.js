@@ -510,15 +510,20 @@ function focarPoster(el) {
     const r = el.getBoundingClientRect(), fr = fila.getBoundingClientRect();
     fila.scrollTo({ left: fila.scrollLeft + (r.left - fr.left) - fr.width / 2 + r.width / 2, behavior: _rolagem() });
   }
+  focarTrilho(el);
+}
+
+// Traz o trilho do elemento para logo ABAIXO do hero fixo. Vale para o pôster e
+// para o título do trilho (que também é focável — abre a categoria inteira).
+function focarTrilho(el) {
   const cont = document.getElementById('conteudo');
   const trilho = el.closest('.trilho');
   const hero = document.getElementById('hero2');
-  if (cont && trilho) {
-    const heroH = hero ? hero.offsetHeight : 0;
-    // +60: deixa o título ABAIXO do gradiente de transição (não escurecido).
-    const delta = trilho.getBoundingClientRect().top - cont.getBoundingClientRect().top - heroH - 60;
-    cont.scrollBy({ top: delta, behavior: _rolagem() });
-  }
+  if (!cont || !trilho) return;
+  const heroH = hero ? hero.offsetHeight : 0;
+  // +60: deixa o título ABAIXO do gradiente de transição (não escurecido).
+  const delta = trilho.getBoundingClientRect().top - cont.getBoundingClientRect().top - heroH - 60;
+  cont.scrollBy({ top: delta, behavior: _rolagem() });
 }
 
 // Foco num item do DETALHE (títulos semelhantes / elenco).
@@ -2767,21 +2772,95 @@ function _posterLembrado(fila) {
   if (!id) return null;
   return [...fila.querySelectorAll('.poster')].find((p) => p.dataset.id === id) || null;
 }
+/**
+ * LINHAS navegáveis da seção, em ordem de tela: título focável, fila, título…
+ *
+ * ⚠️ O título ENTRA na sequência. Antes esta função só olhava `.trilho-fila`, e
+ * o ↑/↓ pulava de fila em fila — o título do trilho ficava INALCANÇÁVEL, então
+ * o "Ver tudo" só funcionava no PRIMEIRO trilho (Lançamentos): ali o ↑ não tinha
+ * fila acima, o handler devolvia o evento pro engine e a geometria achava o
+ * título. Nos demais, o ↑ saltava direto pra fila de cima.
+ *
+ * "Continuar assistindo" tem título sem `.focusable` (não é categoria) → fica de
+ * fora da sequência, como deve.
+ */
+function _linhasDaSecao() {
+  const linhas = [];
+  document.querySelectorAll('#conteudo .trilho').forEach((s) => {
+    const tit = s.querySelector('.trilho-titulo.focusable');
+    if (tit) linhas.push(tit);
+    const fila = s.querySelector('.trilho-fila');
+    if (fila && fila.querySelector('.poster')) linhas.push(fila);
+  });
+  return linhas;
+}
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
   const at = SpatialNav.atual;
-  if (!at || !at.classList || !at.classList.contains('poster')) return;
-  const filaAtual = at.closest('.trilho-fila');
-  if (!filaAtual) return;
-  const filas = [...document.querySelectorAll('#conteudo .trilho-fila')];
-  const i = filas.indexOf(filaAtual);
-  const alvoFila = filas[e.key === 'ArrowDown' ? i + 1 : i - 1];
-  if (!alvoFila) return;                       // sem trilho na direção → foco fica
-  const alvo = _posterLembrado(alvoFila) || alvoFila.querySelector('.poster');
-  if (!alvo) return;                           // trilho-alvo vazio → deixa o engine
+  if (!at || !at.closest) return;
+  const linhaAtual = at.classList.contains('poster') ? at.closest('.trilho-fila')
+    : at.classList.contains('trilho-titulo') ? at
+    : null;
+  if (!linhaAtual || !linhaAtual.closest('#conteudo')) return;
+  const linhas = _linhasDaSecao();
+  const i = linhas.indexOf(linhaAtual);
+  if (i < 0) return;
+  const alvo = linhas[e.key === 'ArrowDown' ? i + 1 : i - 1];
+  if (!alvo) return;                           // ponta → deixa o engine (hero/nav)
+  // Fila → posição lembrada; título → ele mesmo.
+  const dest = alvo.classList.contains('trilho-fila')
+    ? (_posterLembrado(alvo) || alvo.querySelector('.poster'))
+    : alvo;
+  if (!dest) return;
   e.preventDefault(); e.stopPropagation();
-  SpatialNav.setFocus(alvo);
+  SpatialNav.setFocus(dest);
 }, true);
+
+/**
+ * TELA ACESA enquanto toca (Samsung/LG e navegador).
+ *
+ * Assistindo um filme ninguém toca no controle, então a TV conta aquilo como
+ * INATIVIDADE e apaga a tela no meio da sessão. No Android quem resolve é a
+ * casca (`keepScreenOn`, ver MainActivity.kt) — aqui cobrimos as plataformas
+ * onde o vídeo é o `<video>` da página.
+ *
+ * Tudo em try/catch e checado antes: cada plataforma tem uma API (ou nenhuma),
+ * e faltar uma delas não pode derrubar a reprodução.
+ */
+const TelaAcesa = (() => {
+  let ligada = false, lock = null;
+  const tizenAc = () => {
+    try { return (typeof webapis !== 'undefined' && webapis.appcommon) ? webapis.appcommon : null; }
+    catch (_) { return null; }
+  };
+  async function set(on) {
+    if (on === ligada) return;
+    ligada = on;
+    // Samsung: desliga o protetor de tela do sistema enquanto o vídeo roda.
+    try {
+      const ac = tizenAc();
+      if (ac && ac.setScreenSaver) {
+        ac.setScreenSaver(on ? ac.AppCommonScreenSaverState.SCREEN_SAVER_OFF
+          : ac.AppCommonScreenSaverState.SCREEN_SAVER_ON);
+      }
+    } catch (_) { /* sem o privilégio no config.xml, ignora */ }
+    // Padrão da web, onde existir (Chromium moderno / webOS novo).
+    try {
+      if (on) {
+        if (navigator.wakeLock && !lock) lock = await navigator.wakeLock.request('screen');
+      } else if (lock) { lock.release(); lock = null; }
+    } catch (_) { lock = null; }
+  }
+  // Voltar do background solta o wakeLock sozinho — repõe se ainda está tocando.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && ligada) { ligada = false; set(true); }
+  });
+  return { set };
+})();
+// `playing`/`pause`/`ended` não borbulham → captura no document.
+document.addEventListener('playing', () => TelaAcesa.set(true), true);
+document.addEventListener('pause', () => TelaAcesa.set(false), true);
+document.addEventListener('ended', () => TelaAcesa.set(false), true);
 
 function revelarControles() {
   const ov = document.querySelector('.player-modal');
@@ -3954,6 +4033,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         const it = LISTA.indice[el.dataset.id];
         if (it) atualizarHero(it);
       }
+    } else if (el.classList.contains('trilho-titulo')) {
+      // Mesmo scroll do pôster: o `scrollIntoView('nearest')` do SpatialNav
+      // encostaria o título no topo do #conteudo — ou seja, DEBAIXO do hero
+      // fixo. Aqui ele para logo abaixo dele.
+      requestAnimationFrame(() => focarTrilho(el));
     } else if (el.classList.contains('cr-item')) {
       mostrarCredito(el);                    // créditos: painel reage ao foco
     } else if (el.classList.contains('ep-temp-item')) {

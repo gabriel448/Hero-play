@@ -154,6 +154,23 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
     /** Chamado a cada evento relevante — a MainActivity repassa ao JS. */
     var aoEvento: ((String) -> Unit)? = null
 
+    /**
+     * `true` enquanto ha reproducao em andamento (tocando OU carregando).
+     *
+     * E o que segura a TELA ACESA: sem isto o Android TV conta o tempo sem
+     * toque no controle e DESLIGA a tela no meio do filme (confirmado baixando
+     * o tempo de inatividade pra 15 min — a TV apagou com o filme rodando).
+     * Pausado NAO conta: filme parado por horas nao deve impedir a TV de dormir.
+     */
+    var aoReproduzir: ((Boolean) -> Unit)? = null
+
+    private fun avisarReproducao() {
+        val p = player
+        val ativo = p != null && p.playWhenReady &&
+            p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
+        aoReproduzir?.invoke(ativo)
+    }
+
     private fun garantir(): ExoPlayer {
         player?.let { return it }
         // ⚠️ User-Agent: MUITO servidor de IPTV recusa cliente desconhecido, e o
@@ -195,9 +212,16 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
                     Player.STATE_READY -> aoEvento?.invoke("canplay")
                     Player.STATE_ENDED -> aoEvento?.invoke("ended")
                 }
+                avisarReproducao()
             }
             override fun onIsPlayingChanged(tocando: Boolean) {
                 aoEvento?.invoke(if (tocando) "playing" else "pause")
+                avisarReproducao()
+            }
+            // Pausar/retomar mexe no playWhenReady sem trocar o estado do
+            // player — sem este callback a tela ficaria acesa com o filme pausado.
+            override fun onPlayWhenReadyChanged(pwr: Boolean, motivo: Int) {
+                avisarReproducao()
             }
             // A lista de faixas so existe depois de o container ser lido, e muda
             // quando o usuario troca de faixa. Refeita AQUI porque este callback
@@ -254,6 +278,7 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         }
         player = null
         view?.player = null
+        aoReproduzir?.invoke(false)
     }
 
     fun soltar() {
@@ -262,6 +287,7 @@ class PlayerNativo(private val ctx: Context, private val raiz: FrameLayout) {
         player = null
         view?.let { it.player = null; raiz.removeView(it) }
         view = null
+        aoReproduzir?.invoke(false)
     }
 
     fun pausar() { player?.playWhenReady = false }

@@ -102,6 +102,20 @@ class MainActivity : AppCompatActivity() {
         web.setBackgroundColor(Color.TRANSPARENT)
         raiz.addView(web)
         nativo = PlayerNativo(this, raiz)
+        /**
+         * TELA ACESA enquanto toca.
+         *
+         * O Android TV conta o tempo SEM TOQUE no controle e desliga a tela pelo
+         * "tempo de inatividade" — assistindo um filme ninguem mexe no controle,
+         * entao a TV apagava no meio (confirmado com o limite em 15 min). O
+         * `keepScreenOn` no container e a forma padrao de dizer "estou exibindo
+         * algo": vale enquanto a View estiver na tela e sai sozinho ao fechar.
+         * Nao pedimos WAKE_LOCK — nao e permissao, e uma flag de janela.
+         *
+         * Fica no `raiz` (e nao no PlayerView) porque o PlayerView e recriado a
+         * cada `parar()`; o container vive o app inteiro.
+         */
+        nativo.aoReproduzir = { tocando -> runOnUiThread { raiz.keepScreenOn = tocando } }
         nativo.aoEvento = { evento ->
             runOnUiThread {
                 web.evaluateJavascript(

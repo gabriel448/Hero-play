@@ -8,5 +8,9 @@
   <feature name="http://tizen.org/feature/screen.size.all"/>
   <icon src="icon.png"/>
   <name>Hero Play</name>
+  <!-- appcommon: desligar o protetor de tela enquanto o vídeo roda (TelaAcesa
+       em app.js). Sem este privilégio a chamada lança, e o app cai no
+       try/catch — a TV volta a apagar no meio do filme. -->
+  <tizen:privilege name="http://developer.samsung.com/privilege/appcommon"/>
   <tizen:profile name="tv"/>
 </widget>

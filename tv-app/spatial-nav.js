@@ -94,11 +94,13 @@ const SpatialNav = (() => {
     } else if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
     }
-    // Pôster tem scroll próprio (focarPoster: fila + título sob o hero fixo).
+    // Pôster e TÍTULO de trilho têm scroll próprio (focarPoster/focarTrilho:
+    // fila + trilho sob o hero fixo) — o 'nearest' daqui encostaria o título no
+    // topo do #conteudo, ou seja, escondido DEBAIXO do hero.
     // 'nearest' (não 'center'): só rola se o item NÃO estiver visível, e o mínimo
     // — assim focar uma tecla já visível não "desce a tela"; só rola onde há
     // overflow real (ex.: menu de categorias).
-    if (!el.classList.contains('poster')) {
+    if (!el.classList.contains('poster') && !el.classList.contains('trilho-titulo')) {
       el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: rolagem() });
     }
   }
