@@ -167,6 +167,35 @@ const planoValido = (p: unknown): string | null => {
 }
 
 /**
+ * Traduz um erro de RPC em algo que se possa AGIR.
+ *
+ * ⚠️ Antes isto devolvia so "falha ao ativar o dispositivo" e jogava fora o
+ * `error.message` do Postgres — quando quebrou de verdade, nao havia log nenhum
+ * pra olhar, nem no painel nem aqui. Agora a causa vai junto.
+ *
+ * O caso mais comum e o par SCHEMA x FUNCAO fora de sincronia: a assinatura da
+ * `rpc_ativar_dispositivo` mudou (ganhou plano/meses/renovar) e a versao antiga
+ * foi derrubada pelo `drop function` do schema. Se um dos dois lados nao foi
+ * atualizado, o PostgREST responde PGRST202 ("could not find the function").
+ */
+// deno-lint-ignore no-explicit-any
+function erroRpc(e: any, oque: string) {
+  const msg = String(e?.message || '')
+  const cod = String(e?.code || '')
+  if (msg.includes('SALDO_INSUFICIENTE')) {
+    return erro(`Saldo insuficiente: ${oque} um dispositivo consome 1 crédito.`)
+  }
+  if (cod === 'PGRST202' || /could not find the function|does not exist/i.test(msg)) {
+    return erro(
+      'Backend desatualizado: a função rpc_ativar_dispositivo do banco não bate com esta versão. '
+      + 'Rode o supabase/schema-tv.sql e faça `supabase functions deploy painel`.', 500,
+    )
+  }
+  if (msg.includes('DEVICE_INEXISTENTE')) return erro('dispositivo nao encontrado', 404)
+  return erro(`falha ao ${oque} o dispositivo: ${msg || cod || 'erro desconhecido no banco'}`, 500)
+}
+
+/**
  * Status REAL do device: a coluna `status` continua 'ativo' depois do
  * vencimento (ninguem passa varrendo o banco), entao quem manda e a DATA.
  * Mesma regra da Edge Function `ativacao` — as duas TEM que concordar, senao o
@@ -810,8 +839,20 @@ Deno.serve(async (req: Request) => {
       if (!(await clienteDoRev(cliente_id))) return erro('cliente nao encontrado', 404)
       if (!mac || !key) return erro('mac e key obrigatorios')
       // MAC é único → casa pelo MAC e CONFIRMA a Key.
+      //
+      // As duas falhas davam a MESMA mensagem, e no suporte isso custava caro:
+      // "o MAC nem chegou no servidor" e "a Key está errada" pedem coisas
+      // diferentes do usuário. Distinguir revela a um revendedor logado que um
+      // MAC existe — é um painel de operador, não público, e o ganho no
+      // atendimento paga esse custo.
       const { data: d } = await sb.from('dispositivos').select('*').eq('mac', mac).maybeSingle()
-      if (!d || d.device_key !== key) return erro('dispositivo nao encontrado (confira MAC e Key)', 404)
+      if (!d) {
+        return erro(
+          `Nenhum aparelho com o MAC ${mac}. Abra o app no aparelho e deixe a tela de ativação `
+          + 'aberta um instante — é o primeiro contato dele que o cadastra aqui.', 404,
+        )
+      }
+      if (d.device_key !== key) return erro('A Key não confere com esse MAC. Confira o número na tela do aparelho.', 404)
 
       // Consumo de 1 crédito + ativação são ATÔMICOS (RPC). Antes eram 3 statements
       // separados: duas ativações simultâneas gastavam 1 crédito por 2 devices.
@@ -820,12 +861,7 @@ Deno.serve(async (req: Request) => {
         p_dispositivo_id: d.id, p_cliente_id: cliente_id, p_rev: rev.id, p_mac: mac,
         p_plano: plano, p_meses: PLANOS[plano], p_renovar: false,
       })
-      if (eA) {
-        if ((eA.message || '').includes('SALDO_INSUFICIENTE')) {
-          return erro('Saldo insuficiente: a ativação de um dispositivo consome 1 crédito.')
-        }
-        return erro('falha ao ativar o dispositivo')
-      }
+      if (eA) { console.error('rpc_ativar_dispositivo (ativar):', eA); return erroRpc(eA, 'ativar') }
       return json({
         ok: true, dispositivo: { id: d.id, mac: d.mac },
         saldo: res?.saldo, cobrado: !!res?.cobrado, expira_em: res?.expira_em ?? null, plano,
@@ -848,12 +884,7 @@ Deno.serve(async (req: Request) => {
         p_dispositivo_id: d.id, p_cliente_id: null, p_rev: rev.id, p_mac: d.mac,
         p_plano: plano, p_meses: PLANOS[plano], p_renovar: true,
       })
-      if (eR) {
-        if ((eR.message || '').includes('SALDO_INSUFICIENTE')) {
-          return erro('Saldo insuficiente: renovar um dispositivo consome 1 crédito.')
-        }
-        return erro('falha ao renovar o dispositivo')
-      }
+      if (eR) { console.error('rpc_ativar_dispositivo (renovar):', eR); return erroRpc(eR, 'renovar') }
       return json({ ok: true, saldo: res?.saldo, expira_em: res?.expira_em ?? null, plano })
     }
 
