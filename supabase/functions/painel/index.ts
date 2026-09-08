@@ -1149,7 +1149,18 @@ Deno.serve(async (req: Request) => {
           if (p.epg_cifrada) {
             try { const e = await decifrar(p.epg_cifrada); if (e.startsWith(origem)) epg_cifrada = await cifrar(destino + e.slice(origem.length)) } catch { /* ignore */ }
           }
-          await sb.from('playlists').update({ url_cifrada, epg_cifrada, atualizado_em: new Date().toISOString() }).eq('id', p.id)
+          // ⚠️ O `host` em texto claro TEM que acompanhar a URL. Ele nao e
+          // decorativo: e por ele que se casa a playlist com um parceiro
+          // (Free DNS), que se conta device por dominio e que se fecha a
+          // fatura. Antes a migracao mexia so na URL cifrada, entao a playlist
+          // continuava contando para o dominio ANTIGO — e uma troca de DNS
+          // para um dominio parceiro nunca passava a valer.
+          const novoHost = hostDe(nova)
+          const novoParceiro = await parceiroDoHost(novoHost)
+          await sb.from('playlists').update({
+            url_cifrada, epg_cifrada, host: novoHost, free_dns: !!novoParceiro,
+            atualizado_em: new Date().toISOString(),
+          }).eq('id', p.id)
         }
       }
       return json({ ok: true, afetadas, aplicado: !preview })
