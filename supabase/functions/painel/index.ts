@@ -85,6 +85,62 @@ function urlValida(url: string): boolean {
 function hostDe(url: string): string | null {
   try { return new URL(url).host.toLowerCase().replace(/^www\./, '') || null } catch { return null }
 }
+/** "servidor.com:8080" -> "servidor.com". */
+const semPorta = (h: string) => h.replace(/:\d+$/, '')
+
+/**
+ * Um parceiro cadastrado SEM porta cobre o dominio em QUALQUER porta;
+ * cadastrado COM porta casa exato.
+ *
+ * ⚠️ Isto NAO e conveniencia, e requisito. A URL de playlist IPTV quase sempre
+ * traz porta (`http://servidor.com:8080/get.php?...`), entao `hostDe` devolve
+ * "servidor.com:8080". Exigir igualdade exata faria o acordo nunca valer para
+ * quem cadastrou so "servidor.com" — e e exatamente esse o formato que o Player
+ * Hub manda: a normalizacao dele REJEITA porta. Sem esta regra a integracao
+ * responderia "ok" e nao ativaria device nenhum.
+ */
+const filtroPlaylistsDeParceiros = (dominios: string[]) => dominios.flatMap((d) => (
+  /:\d+$/.test(d) ? [`host.eq.${d}`] : [`host.eq.${d}`, `host.like.${d}:*`]
+)).join(',')
+
+/** Dominio parceiro (da lista) que cobre este host de playlist, ou null. */
+function parceiroQueCobre(dominios: Set<string>, host: string): string | null {
+  if (dominios.has(host)) return host
+  const nu = semPorta(host)
+  return dominios.has(nu) ? nu : null
+}
+
+/**
+ * Conta DEVICES por dominio parceiro — o vinculo SELECIONADO (a lista que o
+ * aparelho usa de fato), cada device uma vez so. Usada pela aba Parceiros e
+ * pela cobranca, para as duas nunca divergirem.
+ */
+async function devicesPorParceiro(dominios: string[]): Promise<Record<string, number>> {
+  const contagem: Record<string, number> = {}
+  if (!dominios.length) return contagem
+  const { data: pls } = await sb.from('playlists').select('id, host')
+    .or(filtroPlaylistsDeParceiros(dominios))
+  const set = new Set(dominios)
+  const porId = new Map<string, string>()
+  // deno-lint-ignore no-explicit-any
+  for (const pl of ((pls || []) as any[])) {
+    const dom = pl.host ? parceiroQueCobre(set, pl.host) : null
+    if (dom) porId.set(pl.id, dom)
+  }
+  if (!porId.size) return contagem
+  const { data: vins } = await sb.from('dispositivo_playlists')
+    .select('playlist_id, dispositivo_id').eq('selecionada', true).in('playlist_id', [...porId.keys()])
+  const vistos = new Set<string>()
+  // deno-lint-ignore no-explicit-any
+  for (const v of ((vins || []) as any[])) {
+    if (vistos.has(v.dispositivo_id)) continue
+    vistos.add(v.dispositivo_id)
+    const d = porId.get(v.playlist_id)
+    if (d) contagem[d] = (contagem[d] || 0) + 1
+  }
+  return contagem
+}
+
 /**
  * Normaliza o que o admin digitar no cadastro de parceiro: aceita URL inteira,
  * "http://host:porta/get.php?...", "www.host" ou so o host. Sai host[:porta].
@@ -117,15 +173,66 @@ async function lerConfigParceiros() {
   } catch { return padrao }
 }
 
-/** Parceiro ATIVO deste host (ou null). Ver tabela `parceiros` no schema. */
+/**
+ * Parceiro ATIVO que cobre este host de playlist (ou null).
+ *
+ * Tenta o host inteiro ("servidor.com:8080") e o dominio nu ("servidor.com") —
+ * ver [filtroPlaylistsDeParceiros] para o porque. O exato ganha do nu quando os
+ * dois existirem. `ativo = false` nao casa: suspender corta ativacao NOVA.
+ */
 async function parceiroDoHost(host: string | null) {
   if (!host) return null
   try {
+    const chaves = [...new Set([host, semPorta(host)])]
     const { data } = await sb.from('parceiros')
-      .select('id, dominio').eq('dominio', host).eq('ativo', true).maybeSingle()
-    return data || null
+      .select('id, dominio').in('dominio', chaves).eq('ativo', true)
+    const achados = data || []
+    // deno-lint-ignore no-explicit-any
+    return achados.find((p: any) => p.dominio === host) || achados[0] || null
   } catch { return null }
 }
+/**
+ * Forma publica de um parceiro. E o contrato que o Player Hub (painel
+ * centralizado do chefe) consome — mudar campo aqui quebra o outro lado.
+ */
+// deno-lint-ignore no-explicit-any
+const parceiroPublico = (p: any) => ({
+  id: p.id,
+  dominio: p.dominio,
+  nome: p.nome ?? null,
+  ativo: !!p.ativo,
+  cobranca: p.cobranca,
+  valor: p.valor,
+})
+
+/**
+ * Le o parceiro do banco DE NOVO, depois de escrever.
+ *
+ * O Player Hub exige que toda operacao seja confirmada por consulta e proibe
+ * "simular sucesso": sem esta releitura um insert/update/delete que nao pegou
+ * (RLS, trigger, corrida entre dois operadores) voltaria como `ok: true`.
+ */
+async function lerParceiro(id: string) {
+  const { data } = await sb.from('parceiros')
+    .select('id, dominio, nome, ativo, cobranca, valor, criado_em')
+    .eq('id', id).maybeSingle()
+  return data || null
+}
+
+/**
+ * Confere que o `dominio` enviado bate com o do registro, quando enviado.
+ *
+ * O Player Hub guarda o id do parceiro do Hero como TEXTO e manda o dominio
+ * junto em suspender/excluir. Se o id estiver velho (parceiro apagado e outro
+ * criado no lugar), agir por id sozinho mexeria no registro errado — barato
+ * demais para nao conferir.
+ */
+// deno-lint-ignore no-explicit-any
+function dominioConfere(p: any, enviado: unknown): boolean {
+  const d = normalizarDominio(String(enviado || ''))
+  return !d || d === p.dominio
+}
+
 // Código de indicação: 8 chars sem caracteres ambíguos (0/O/1/I).
 function gerarCodigo(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -395,32 +502,21 @@ Deno.serve(async (req: Request) => {
       if (!ehAdmin) return erro('apenas admin', 403)
       const { data: lista } = await sb.from('parceiros').select('*').order('criado_em', { ascending: false })
       const parceiros = lista || []
-      // Devices por domínio: playlists guardam o `host` em texto claro, então dá
-      // pra contar sem decifrar nada. Conta o vínculo SELECIONADO — é a lista
-      // que o aparelho está usando de fato.
-      const contagem: Record<string, number> = {}
-      if (parceiros.length) {
-        // deno-lint-ignore no-explicit-any
-        const hosts = parceiros.map((p: any) => p.dominio)
-        const { data: pls } = await sb.from('playlists').select('id, host').in('host', hosts)
-        // deno-lint-ignore no-explicit-any
-        const porId = new Map((pls || []).map((p: any) => [p.id, p.host]))
-        if (porId.size) {
-          const { data: vins } = await sb.from('dispositivo_playlists')
-            .select('playlist_id, dispositivo_id').eq('selecionada', true).in('playlist_id', [...porId.keys()])
-          const vistos = new Set<string>()
-          for (const v of (vins || [])) {
-            // deno-lint-ignore no-explicit-any
-            const vv = v as any
-            if (vistos.has(vv.dispositivo_id)) continue      // 1 device conta 1x
-            vistos.add(vv.dispositivo_id)
-            const h = porId.get(vv.playlist_id)
-            if (h) contagem[h] = (contagem[h] || 0) + 1
-          }
-        }
-      }
+      // Devices por domínio: as playlists guardam o `host` em texto claro, então
+      // dá pra contar sem decifrar nada.
       // deno-lint-ignore no-explicit-any
-      return json({ parceiros: parceiros.map((p: any) => ({ ...p, devices: contagem[p.dominio] || 0 })) })
+      const contagem = await devicesPorParceiro(parceiros.map((p: any) => p.dominio))
+      // `ok: true` explicito: o Player Hub trata a ausencia dele como falha.
+      return json({
+        ok: true,
+        // deno-lint-ignore no-explicit-any
+        parceiros: parceiros.map((p: any) => ({
+          ...parceiroPublico(p),
+          criado_em: p.criado_em,
+          nota: p.nota ?? null,
+          devices: contagem[p.dominio] || 0,
+        })),
+      })
     }
 
     if (acao === 'criar_parceiro') {
@@ -438,7 +534,8 @@ Deno.serve(async (req: Request) => {
       // Playlists que JÁ apontam pra esse domínio passam a valer como parceiras,
       // e os aparelhos delas são ativados — senão o acordo só valeria daqui pra
       // frente e o admin teria que mexer device a device.
-      const { data: pls } = await sb.from('playlists').select('id').eq('host', dominio)
+      const { data: pls } = await sb.from('playlists').select('id')
+        .or(filtroPlaylistsDeParceiros([dominio]))
       // deno-lint-ignore no-explicit-any
       const ids = (pls || []).map((p: any) => p.id)
       let ativados = 0
@@ -455,19 +552,36 @@ Deno.serve(async (req: Request) => {
           ativados = devs.length
         }
       }
-      return json({ ok: true, id: data.id, dominio, ativados })
+      // Releitura obrigatoria: e o que o Player Hub usa para dar a operacao
+      // por concluida (ele nao aceita sucesso sem confirmacao).
+      const criado = await lerParceiro(data.id)
+      if (!criado) return erro('o parceiro foi gravado mas o banco não confirmou o registro', 500)
+      // `id`/`dominio`/`ativados` no topo: o painel do Hero ja os consome.
+      return json({ ok: true, id: criado.id, dominio: criado.dominio, ativados, parceiro: parceiroPublico(criado) })
     }
 
     if (acao === 'parceiro_ativo') {
       if (!ehAdmin) return erro('apenas admin', 403)
-      const id = (body.id || '').trim()
+      const id = String(body.id || '').trim()
       const ativo = !!body.ativo
       if (!id) return erro('id obrigatorio')
-      // Suspender NÃO desativa quem já está ativo: só para de valer p/ listas
-      // novas. Tirar o acesso de quem já usa é outra decisão, e manual.
+      const antes = await lerParceiro(id)
+      if (!antes) return erro('parceiro não encontrado', 404)
+      if (!dominioConfere(antes, body.dominio)) {
+        return erro(`o id informado é do domínio ${antes.dominio}, não de ${normalizarDominio(String(body.dominio))}`, 409)
+      }
+      // ⚠️ Suspender NÃO desativa quem já está ativo: só para de valer para
+      // listas NOVAS (`parceiroDoHost` filtra `ativo = true`). Os aparelhos já
+      // liberados continuam `status='ativo'` e com `expira_em` NULO — ou seja,
+      // sem vencimento. Quem consumir esta ação (inclusive o Player Hub) NÃO
+      // pode anunciar que eles venceram ou foram restaurados: não venceram.
       const { error } = await sb.from('parceiros').update({ ativo }).eq('id', id)
       if (error) return erro(error.message)
-      return json({ ok: true })
+      const depois = await lerParceiro(id)
+      if (!depois || depois.ativo !== ativo) {
+        return erro('o banco não confirmou a mudança de status do parceiro', 500)
+      }
+      return json({ ok: true, parceiro: parceiroPublico(depois) })
     }
 
     // ── FATURAS dos parceiros ────────────────────────────────────────────────
@@ -512,26 +626,10 @@ Deno.serve(async (req: Request) => {
       const venc = new Date(fim)
       const iso = (d: Date) => d.toISOString().slice(0, 10)
 
-      // Devices por domínio (mesma contagem da aba Parceiros).
+      // Devices por domínio — MESMA função da aba Parceiros, de propósito: a
+      // tela e a fatura não podem divergir na contagem.
       // deno-lint-ignore no-explicit-any
-      const hosts = parceiros.map((p: any) => p.dominio)
-      const contagem: Record<string, number> = {}
-      const { data: pls } = await sb.from('playlists').select('id, host').in('host', hosts)
-      // deno-lint-ignore no-explicit-any
-      const porId = new Map((pls || []).map((p: any) => [p.id, p.host]))
-      if (porId.size) {
-        const { data: vins } = await sb.from('dispositivo_playlists')
-          .select('playlist_id, dispositivo_id').eq('selecionada', true).in('playlist_id', [...porId.keys()])
-        const vistos = new Set<string>()
-        for (const v of (vins || [])) {
-          // deno-lint-ignore no-explicit-any
-          const vv = v as any
-          if (vistos.has(vv.dispositivo_id)) continue
-          vistos.add(vv.dispositivo_id)
-          const h = porId.get(vv.playlist_id)
-          if (h) contagem[h] = (contagem[h] || 0) + 1
-        }
-      }
+      const contagem = await devicesPorParceiro(parceiros.map((p: any) => p.dominio))
 
       let criadas = 0
       for (const p of parceiros) {
@@ -615,11 +713,21 @@ Deno.serve(async (req: Request) => {
 
     if (acao === 'excluir_parceiro') {
       if (!ehAdmin) return erro('apenas admin', 403)
-      const id = (body.id || '').trim()
+      const id = String(body.id || '').trim()
       if (!id) return erro('id obrigatorio')
+      const antes = await lerParceiro(id)
+      // Já não existe: idempotente de propósito — o Player Hub pode repetir a
+      // exclusão depois de um timeout sem receber um erro enganoso.
+      if (!antes) return json({ ok: true, ja_excluido: true })
+      if (!dominioConfere(antes, body.dominio)) {
+        return erro(`o id informado é do domínio ${antes.dominio}, não de ${normalizarDominio(String(body.dominio))}`, 409)
+      }
+      // ⚠️ Mesma regra da suspensão: excluir o acordo só corta ativações NOVAS.
+      // Os aparelhos já liberados seguem ativos e sem vencimento.
       const { error } = await sb.from('parceiros').delete().eq('id', id)
       if (error) return erro(error.message)
-      return json({ ok: true })
+      if (await lerParceiro(id)) return erro('o banco não confirmou a exclusão do parceiro', 500)
+      return json({ ok: true, dominio: antes.dominio })
     }
 
     // ── SERVIDORES (só admin) — atalho de login Xtream por código ────────────

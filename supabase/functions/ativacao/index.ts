@@ -82,9 +82,17 @@ function hostDe(url: string): string | null {
 async function parceiroDoHost(host: string | null) {
   if (!host) return null
   try {
+    // Casa o host inteiro ("servidor.com:8080") E o dominio nu
+    // ("servidor.com"): a URL de playlist quase sempre traz porta, entao exigir
+    // igualdade exata faria o acordo nunca valer para o parceiro cadastrado so
+    // com o dominio. MESMA regra da funcao `painel` — as duas precisam decidir
+    // igual, senao o mesmo dominio ativaria pelo painel e nao pelo self-serve.
+    const chaves = [...new Set([host, host.replace(/:\d+$/, '')])]
     const { data } = await sb.from('parceiros')
-      .select('id, dominio, ativo').eq('dominio', host).eq('ativo', true).maybeSingle()
-    return data || null
+      .select('id, dominio, ativo').in('dominio', chaves).eq('ativo', true)
+    const achados = data || []
+    // deno-lint-ignore no-explicit-any
+    return achados.find((p: any) => p.dominio === host) || achados[0] || null
   } catch { return null }
 }
 
