@@ -741,6 +741,8 @@ class _Retomada {
 
 /// Calcula em que episodio a serie deve abrir:
 ///  1. Ha episodio com progresso salvo -> retoma o de progresso mais recente.
+///     Se esse episodio ja foi CONCLUIDO (assistido ate o fim), avanca para o
+///     seguinte, do comeco.
 ///  2. Sem progresso, mas ha episodios no historico -> avanca para o
 ///     episodio seguinte ao mais avancado ja assistido.
 ///  3. Nada visto -> primeiro episodio ("Assistir").
@@ -748,6 +750,7 @@ _Retomada _calcularRetomada(Serie serie, IptvProvider provider) {
   // 1. Episodio com progresso mais recente.
   Canal? epProgresso;
   int posSeg = 0;
+  bool concluido = false;
   DateTime? maisRecente;
   for (final ep in serie.episodios) {
     final p = provider.obterProgresso(ep);
@@ -756,12 +759,31 @@ _Retomada _calcularRetomada(Serie serie, IptvProvider provider) {
       maisRecente = p.atualizadoEm;
       epProgresso = ep;
       posSeg = p.posicaoSeg;
+      concluido = p.concluido;
     }
   }
   if (epProgresso != null) {
+    if (!concluido) {
+      return _Retomada(
+        episodio: epProgresso,
+        posicao: Duration(seconds: posSeg),
+        continuar: true,
+      );
+    }
+    // Terminou este episodio: proximo, do zero. Se era o ultimo da serie,
+    // fica nele mesmo (a serie continua na fila, mas nao ha para onde ir).
+    final idx = serie.episodios.indexOf(epProgresso);
+    final prox = (idx >= 0 && idx + 1 < serie.episodios.length)
+        ? serie.episodios[idx + 1]
+        : epProgresso;
+    // O proximo pode ja ter sido comecado antes (rever um episodio antigo nao
+    // deve jogar fora onde o usuario parou no seguinte).
+    final pProx = provider.obterProgresso(prox);
     return _Retomada(
-      episodio: epProgresso,
-      posicao: Duration(seconds: posSeg),
+      episodio: prox,
+      posicao: (pProx != null && !pProx.concluido)
+          ? Duration(seconds: pProx.posicaoSeg)
+          : Duration.zero,
       continuar: true,
     );
   }
@@ -1673,6 +1695,11 @@ class _ItemEpisodio extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
     final progresso = provider.obterProgresso(episodio);
+    // Tocar num episodio ja CONCLUIDO reabre do inicio — retomar nos ultimos
+    // segundos nao serve para nada.
+    final retomar = (progresso != null && !progresso.concluido)
+        ? Duration(seconds: progresso.posicaoSeg)
+        : null;
     return InkWell(
       onTap: () {
         provider.registrarVisualizacao(episodio);
@@ -1681,9 +1708,7 @@ class _ItemEpisodio extends StatelessWidget {
             builder: (_) => TelaPlayer(
               canal: episodio,
               episodiosSerie: episodiosSerie,
-              posicaoInicial: progresso != null
-                  ? Duration(seconds: progresso.posicaoSeg)
-                  : null,
+              posicaoInicial: retomar,
             ),
           ),
         );

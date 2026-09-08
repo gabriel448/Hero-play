@@ -670,12 +670,13 @@ class IptvProvider extends ChangeNotifier {
   /// nao se reconstroi a arvore no meio da reproducao (a tela que precisa do
   /// valor novo — detalhes, "continuar assistindo" — so e montada depois).
   Future<void> salvarProgresso(Canal canal, int posicaoSeg, int? duracaoSeg,
-      {bool notificar = true}) async {
+      {bool notificar = true, bool concluido = false}) async {
     final p = ProgressoCanal(
       url: canal.url,
       posicaoSeg: posicaoSeg,
       duracaoSeg: duracaoSeg,
       atualizadoEm: DateTime.now(),
+      concluido: concluido,
     );
     await _armazenamento.salvarProgresso(p);
     _progressos = _armazenamento.carregarProgressos();

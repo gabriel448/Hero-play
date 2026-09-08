@@ -4,11 +4,18 @@ class ProgressoCanal {
   final int? duracaoSeg;
   final DateTime atualizadoEm;
 
+  /// `true` quando o episodio foi assistido ate o fim (>=90%). Serve para a
+  /// serie CONTINUAR aparecendo em "Continuar assistindo" apontando para o
+  /// proximo episodio — antes o progresso era simplesmente apagado e a serie
+  /// sumia da fila. Filme concluido continua sendo apagado (nao ha "proximo").
+  final bool concluido;
+
   const ProgressoCanal({
     required this.url,
     required this.posicaoSeg,
     this.duracaoSeg,
     required this.atualizadoEm,
+    this.concluido = false,
   });
 
   /// Fração assistida (0.0–1.0). Zero quando duração desconhecida.
@@ -21,6 +28,7 @@ class ProgressoCanal {
         'posicaoSeg': posicaoSeg,
         if (duracaoSeg != null) 'duracaoSeg': duracaoSeg,
         'atualizadoEm': atualizadoEm.toIso8601String(),
+        if (concluido) 'concluido': true,
       };
 
   factory ProgressoCanal.fromMap(Map map) => ProgressoCanal(
@@ -30,5 +38,6 @@ class ProgressoCanal {
             ? (map['duracaoSeg'] as num).toInt()
             : null,
         atualizadoEm: DateTime.parse(map['atualizadoEm'] as String),
+        concluido: (map['concluido'] as bool?) ?? false,
       );
 }

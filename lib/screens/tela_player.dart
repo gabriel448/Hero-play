@@ -150,7 +150,13 @@ class _TelaPlayerState extends State<TelaPlayer>
   final ValueNotifier<bool> _mostrarProximoEp = ValueNotifier(false);
   // Espelho da visibilidade dos controles do media_kit (para o botao subir/
   // descer junto com a barra). Observado via Listener nao-consumidor.
-  final ValueNotifier<bool> _barraVodVisivel = ValueNotifier(true);
+  final ValueNotifier<bool> _barraVodVisivel = ValueNotifier(false);
+  // Visibilidade REAL dos controles do media_kit, reportada pela sentinela que
+  // vive dentro deles (o estado do pacote e privado — ver _SentinelaControles).
+  bool _mkVisivel = false;
+  // Segura as barras enquanto o dedo esta ARRASTANDO volume/brilho, mesmo que
+  // os controles do media_kit ja tenham sumido nesse meio tempo.
+  bool _arrastandoBarras = false;
   Timer? _timerBarraVod;
   StreamSubscription? _subPosition;
   // Tela cheia do VOD numa rota SO (sem o segundo Video do media_kit): imersivo
@@ -585,27 +591,37 @@ class _TelaPlayerState extends State<TelaPlayer>
     }
   }
 
-  /// Espelha a visibilidade da barra de controles do media_kit a cada toque no
-  /// video (Listener nao-consumidor), para o botao "proximo episodio" subir
-  /// quando a barra aparece e descer quando some. O `controlsHoverDuration` do
-  /// media_kit foi alinhado a este timer (~3.5s) para ficarem em sincronia.
-  void _aoTocarVodControles() {
-    _timerBarraVod?.cancel();
-    _barraVodVisivel.value = !_barraVodVisivel.value;
-    if (_barraVodVisivel.value) {
-      _timerBarraVod = Timer(const Duration(milliseconds: 3500), () {
-        _barraVodVisivel.value = false;
-      });
-    }
+  /// As barras laterais (volume/brilho) e o botao "proximo episodio" seguem os
+  /// controles do media_kit.
+  ///
+  /// ANTES isto era um toggle cego: cada toque na tela invertia um booleano
+  /// nosso, torcendo para bater com o estado interno do media_kit. Bastava um
+  /// evento que mexesse so num dos lados — arrastar a barra de progresso
+  /// (reinicia o timer DELE), arrastar o volume (reiniciava o NOSSO), ou o
+  /// simples fato de comecarmos visiveis enquanto ele comeca escondido — para
+  /// os dois ficarem em contrafase: um toque escondia a barra e mostrava os
+  /// controles laterais, o toque seguinte fazia o contrario.
+  void _sincronizarBarras() {
+    final alvo = _mkVisivel || _arrastandoBarras;
+    if (_barraVodVisivel.value != alvo) _barraVodVisivel.value = alvo;
   }
 
-  /// Mantem as barras (volume/brilho) visiveis enquanto o usuario interage com
-  /// elas — reinicia o timer de auto-hide a cada ajuste.
+  /// Chamado pela sentinela quando os controles do media_kit entram/saem.
+  void _mkVisibilidade(bool visivel) {
+    if (!mounted) return;
+    _mkVisivel = visivel;
+    _sincronizarBarras();
+  }
+
+  /// Mantem as barras visiveis enquanto o usuario ARRASTA volume/brilho — sem
+  /// isso o auto-hide do media_kit sumiria com elas no meio do gesto.
   void _manterBarraVod() {
     _timerBarraVod?.cancel();
-    _barraVodVisivel.value = true;
+    _arrastandoBarras = true;
+    _sincronizarBarras();
     _timerBarraVod = Timer(const Duration(milliseconds: 3500), () {
-      _barraVodVisivel.value = false;
+      _arrastandoBarras = false;
+      _sincronizarBarras();
     });
   }
 
@@ -694,7 +710,15 @@ class _TelaPlayerState extends State<TelaPlayer>
           .salvarProgresso(ep, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null,
               notificar: notificar)
           .ignore();
+    } else if (widget.episodiosSerie != null) {
+      // EPISODIO no fim: marca como concluido em vez de apagar. A serie segue
+      // em "Continuar assistindo" e a retomada pula para o proximo episodio.
+      _provider
+          .salvarProgresso(ep, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null,
+              notificar: notificar, concluido: true)
+          .ignore();
     } else {
+      // FILME no fim: nao ha proximo — sai da fila.
       _provider.removerProgresso(ep, notificar: notificar).ignore();
     }
   }
@@ -708,13 +732,15 @@ class _TelaPlayerState extends State<TelaPlayer>
     _salvarProgressoEp(_episodio); // progresso do episodio que esta saindo
     _provider.registrarVisualizacao(prox);
     final prog = _provider.obterProgresso(prox);
+    // Episodio ja concluido volta do inicio, nao do fim.
+    final progUtil = (prog != null && !prog.concluido) ? prog : null;
     _mostrarProximoEp.value = false;
     setState(() {
       _episodio = prox;
       _fonteAtual = prox.temFontes ? prox.fontes.first : prox;
       _varianteAtual = prox.agrupado ? prox.variantes.first : prox;
       _posicaoInicial =
-          prog != null ? Duration(seconds: prog.posicaoSeg) : null;
+          progUtil != null ? Duration(seconds: progUtil.posicaoSeg) : null;
       _recalcularProximoEp();
     });
     _abrirStream();
@@ -957,6 +983,10 @@ class _TelaPlayerState extends State<TelaPlayer>
 
   Widget _buildControls(VideoState state) {
     List<Widget> topBar() => [
+      // Sentinela invisivel: vive DENTRO da arvore que o media_kit monta e
+      // desmonta junto com os controles. E o unico jeito de saber quando eles
+      // aparecem/somem — ver _sincronizarBarras.
+      _SentinelaControles(aoMudar: _mkVisibilidade),
       // Voltar — só no player maximizado (que força paisagem). No modo janela
       // /retrato a AppBar já tem a seta, então não duplicamos.
       if (_telaCheia)
@@ -1019,36 +1049,46 @@ class _TelaPlayerState extends State<TelaPlayer>
         onPressed: _alternarTelaCheia,
       ),
     ];
+    // Respiro lateral da barra de progresso. Com os 12px do padrao o "thumb"
+    // no inicio/fim ficava a ~19px da borda: dificil de pegar com o polegar e
+    // em conflito com o gesto de voltar do Android. Em tela cheia (paisagem)
+    // ainda soma o recorte/notch, que no landscape cai nas laterais.
+    final recorte = MediaQuery.paddingOf(context);
+    final margemH = _telaCheia
+        ? 32.0 + (recorte.left > recorte.right ? recorte.left : recorte.right)
+        : 20.0;
+
     return MaterialVideoControlsTheme(
       normal: MaterialVideoControlsThemeData(
         topButtonBar: topBar(),
         bottomButtonBar: bottomBar(),
         controlsHoverDuration: const Duration(milliseconds: 3500),
+        controlsTransitionDuration: _kFadeControles,
         seekBarHeight: 4.5,
         seekBarThumbSize: 14.0,
         seekBarContainerHeight: 52.0,
-        seekBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 12),
-        bottomButtonBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 8),
+        seekBarMargin: EdgeInsets.only(bottom: 16, left: margemH, right: margemH),
+        bottomButtonBarMargin:
+            EdgeInsets.only(bottom: 16, left: margemH, right: margemH - 4),
       ),
       fullscreen: MaterialVideoControlsThemeData(
         topButtonBar: topBar(),
         bottomButtonBar: bottomBar(),
         controlsHoverDuration: const Duration(milliseconds: 3500),
+        controlsTransitionDuration: _kFadeControles,
         seekBarHeight: 4.5,
         seekBarThumbSize: 14.0,
         seekBarContainerHeight: 52.0,
-        seekBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 12),
-        bottomButtonBarMargin: const EdgeInsets.only(bottom: 16, left: 12, right: 8),
+        seekBarMargin: EdgeInsets.only(bottom: 16, left: margemH, right: margemH),
+        bottomButtonBarMargin:
+            EdgeInsets.only(bottom: 16, left: margemH, right: margemH - 4),
       ),
       child: MaterialDesktopVideoControlsTheme(
         normal: MaterialDesktopVideoControlsThemeData(topButtonBar: topBar()),
         fullscreen: MaterialDesktopVideoControlsThemeData(topButtonBar: topBar()),
         // O botao "proximo episodio" fica DENTRO dos controles para aparecer
         // tambem no fullscreen nativo do media_kit (que reusa este builder).
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (_) => _aoTocarVodControles(),
-          child: Stack(
+        child: Stack(
             children: [
               AdaptiveVideoControls(state),
               _DoubleTapSeek(player: _player),
@@ -1089,7 +1129,6 @@ class _TelaPlayerState extends State<TelaPlayer>
                   ),
                 ),
             ],
-          ),
         ),
       ),
     );
@@ -2403,4 +2442,44 @@ class _BannerAutoQualidade extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Duracao do fade dos controles do media_kit. Curta de proposito: a sentinela
+/// so avisa que os controles sumiram quando a animacao TERMINA (e o momento em
+/// que o media_kit desmonta a arvore), entao um fade longo faria as barras
+/// laterais saírem visivelmente atrasadas.
+const Duration _kFadeControles = Duration(milliseconds: 180);
+
+/// Widget de tamanho zero cujo unico trabalho e avisar quando os controles do
+/// media_kit sao montados e desmontados. O estado de visibilidade deles e
+/// privado do pacote (`_MaterialVideoControlsState.visible`), mas a arvore
+/// inteira sai do ar quando eles somem — entao montar/desmontar E a
+/// visibilidade.
+class _SentinelaControles extends StatefulWidget {
+  final ValueChanged<bool> aoMudar;
+  const _SentinelaControles({required this.aoMudar});
+
+  @override
+  State<_SentinelaControles> createState() => _SentinelaControlesState();
+}
+
+class _SentinelaControlesState extends State<_SentinelaControles> {
+  @override
+  void initState() {
+    super.initState();
+    // Fora do frame: mexer num ValueNotifier durante o build da arvore que o
+    // escuta dispara "setState during build".
+    final aoMudar = widget.aoMudar;
+    WidgetsBinding.instance.addPostFrameCallback((_) => aoMudar(true));
+  }
+
+  @override
+  void dispose() {
+    final aoMudar = widget.aoMudar;
+    WidgetsBinding.instance.addPostFrameCallback((_) => aoMudar(false));
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
