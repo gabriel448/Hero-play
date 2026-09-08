@@ -122,7 +122,6 @@ class _TelaPlayerState extends State<TelaPlayer>
   StreamSubscription? _subLog;
   StreamSubscription? _subTracks;
   StreamSubscription? _subTrack;
-  StreamSubscription? _subDuration;
 
   Tracks _tracks = Tracks(video: [], audio: [], subtitle: []);
   Track _track = const Track();
@@ -194,6 +193,13 @@ class _TelaPlayerState extends State<TelaPlayer>
   // serie reabria do comeco.
   Timer? _timerProgresso;
   static const _intervaloSalvarProgresso = Duration(seconds: 15);
+  // Restauracao da posicao de retomada — ver _iniciarBombaDeRetomada.
+  Timer? _timerBombaSeek;
+  int _tentativasSeek = 0;
+  static const _kMaxTentativasSeek = 12;
+  static const _kJanelaRetomada = Duration(seconds: 40);
+  static const _kEstabilidadeSeek = Duration(seconds: 6);
+  static const _kRespiroEntreSeeks = Duration(milliseconds: 1200);
 
   @override
   void initState() {
@@ -515,7 +521,6 @@ class _TelaPlayerState extends State<TelaPlayer>
         _fontesFalhas.clear();
         _registrarLog('playing=true');
         setState(() => _status = 'Tocando');
-        _tentarSeekInicial();
       } else if (!tocando && _iniciado) {
         setState(() => _status = 'Pausado');
       }
@@ -570,13 +575,10 @@ class _TelaPlayerState extends State<TelaPlayer>
       setState(() => _track = t);
     });
 
-    // A retomada (posicaoInicial) só é confiável depois que a duração é
-    // conhecida — aí a mídia está carregada e aceita seek. Seekar cedo
-    // demais (ex.: no playing=true) faz o libmpv ignorar e tocar do início.
-    _subDuration = _player.stream.duration.listen((_) {
-      if (!mounted) return;
-      _tentarSeekInicial();
-    });
+    // NAO ha listener de `duration` aqui: a retomada deixou de ser disparada
+    // por evento. Quem cuida dela e _iniciarBombaDeRetomada, que roda enquanto
+    // o stream abre — o evento de duracao chega antes de a superficie de video
+    // existir, e o reinicio que vem junto com a superficie apagava o seek.
 
     // Botao "proximo episodio": aparece a partir de ~90% do episodio. Roda
     // enquanto houver contexto de serie (a troca in-place pode mudar _proximoEp).
@@ -779,20 +781,84 @@ class _TelaPlayerState extends State<TelaPlayer>
     }
   }
 
-  /// Executa o seek de retomada uma única vez, quando a mídia já está
-  /// pronta (duração conhecida). Chamado tanto pelo evento de duração
-  /// quanto pelo de playing.
-  void _tentarSeekInicial() {
-    if (_seekFeito) return;
+  /// Restaura a posicao de "continuar assistindo" e SEGURA ate ela grudar.
+  ///
+  /// Nao basta seekar uma vez. No Android a superficie de video nasce alguns
+  /// segundos DEPOIS do `open()` e, quando nasce, o mpv reinicia a midia do
+  /// zero — jogando fora um seek que ja tinha pegado. Era isso que fazia o
+  /// episodio abrir do inicio, e so as vezes: no primeiro video depois de
+  /// abrir o app a superficie ainda nao existe; no segundo ela ja esta pronta
+  /// e o seek sobrevive. Log do caso real:
+  ///
+  ///     seek de retomada para 123s
+  ///     retomada confirmada em 123s
+  ///     VideoOutput.Resize {1280x720}   <- superficie nasce aqui
+  ///     mpv h264_mediacodec: surface NULL
+  ///     ...posicao volta a 0 e sobe 9s, 24s, 39s...
+  ///
+  /// Entao: a cada 300ms, se a posicao estiver longe do alvo, seeka de novo
+  /// (com um respiro entre tentativas); se estiver no alvo, so da por
+  /// resolvido depois de ela SE MANTER por [_kEstabilidadeSeek]. Um reinicio
+  /// no meio do caminho e visto como "voltou pro inicio" e refaz o seek.
+  void _iniciarBombaDeRetomada() {
+    _timerBombaSeek?.cancel();
     final alvo = _posicaoInicial;
     if (alvo == null || alvo <= Duration.zero) return;
-    final duracao = _player.state.duration;
-    if (duracao <= Duration.zero) return; // duração ainda desconhecida
-    _seekFeito = true;
-    if (alvo >= duracao) return; // alvo inválido — toca do início
-    _player.seek(alvo);
-    _registrarLog('seek de retomada para ${alvo.inSeconds}s '
-        '(duração ${duracao.inSeconds}s)');
+    final inicio = DateTime.now();
+    DateTime? chegouEm;
+    DateTime? ultimoSeek;
+
+    _timerBombaSeek = Timer.periodic(const Duration(milliseconds: 300), (t) {
+      if (!mounted || _seekFeito) {
+        t.cancel();
+        return;
+      }
+      final agora = DateTime.now();
+      // Teto: midia que nunca carrega nao fica sendo cutucada pra sempre.
+      if (agora.difference(inicio) > _kJanelaRetomada) {
+        t.cancel();
+        _seekFeito = true;
+        _registrarLog('retomada: desistiu (posicao '
+            '${_player.state.position.inSeconds}s, alvo ${alvo.inSeconds}s)');
+        return;
+      }
+      final duracao = _player.state.duration;
+      if (duracao <= Duration.zero) return; // midia ainda carregando
+      if (alvo >= duracao) {
+        t.cancel();
+        _seekFeito = true; // alvo invalido — toca do inicio
+        return;
+      }
+
+      final pos = _player.state.position;
+      if (pos + const Duration(seconds: 5) >= alvo) {
+        chegouEm ??= agora;
+        if (agora.difference(chegouEm!) >= _kEstabilidadeSeek) {
+          t.cancel();
+          _seekFeito = true;
+          _registrarLog('retomada firme em ${pos.inSeconds}s');
+        }
+        return;
+      }
+
+      // Longe do alvo: ou ainda nao seekamos, ou a midia reiniciou.
+      chegouEm = null;
+      if (ultimoSeek != null &&
+          agora.difference(ultimoSeek!) < _kRespiroEntreSeeks) {
+        return; // da tempo do seek anterior surtir efeito
+      }
+      if (_tentativasSeek >= _kMaxTentativasSeek) {
+        t.cancel();
+        _seekFeito = true;
+        _registrarLog('retomada: desistiu apos $_tentativasSeek tentativas');
+        return;
+      }
+      _tentativasSeek++;
+      ultimoSeek = agora;
+      _player.seek(alvo);
+      _registrarLog('seek de retomada para ${alvo.inSeconds}s '
+          '(tentativa $_tentativasSeek, posicao ${pos.inSeconds}s)');
+    });
   }
 
   // Codifica @ em segmentos de caminho para evitar que parsers de URL
@@ -819,6 +885,8 @@ class _TelaPlayerState extends State<TelaPlayer>
     _iniciado = false;
     _temFaixas.value = false;
     _seekFeito = false;
+    _timerBombaSeek?.cancel();
+    _tentativasSeek = 0;
     _retryPendente = false;
     _streamAberto = false;
     _audioAuto = false; // novo stream: refaz a auto-selecao de audio
@@ -873,6 +941,7 @@ class _TelaPlayerState extends State<TelaPlayer>
         if (!mounted) return;
       }
       _streamAberto = true;
+      _iniciarBombaDeRetomada();
 
       await _player.open(
         Media(url, httpHeaders: headers.isEmpty ? null : headers),
@@ -1138,6 +1207,7 @@ class _TelaPlayerState extends State<TelaPlayer>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timerProgresso?.cancel();
+    _timerBombaSeek?.cancel();
     _salvarProgressoEp(_episodio);
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();
@@ -1149,7 +1219,6 @@ class _TelaPlayerState extends State<TelaPlayer>
     _subLog?.cancel();
     _subTracks?.cancel();
     _subTrack?.cancel();
-    _subDuration?.cancel();
     _subPosition?.cancel();
     _timerBarraVod?.cancel();
     _mostrarProximoEp.dispose();
