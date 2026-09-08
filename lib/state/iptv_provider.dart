@@ -665,8 +665,12 @@ class IptvProvider extends ChangeNotifier {
   ProgressoCanal? obterProgresso(Canal canal) =>
       _armazenamento.obterProgresso(canal.url);
 
-  Future<void> salvarProgresso(
-      Canal canal, int posicaoSeg, int? duracaoSeg) async {
+  /// Grava o ponto em que o video parou. [notificar] `false` para as gravacoes
+  /// periodicas do player: o disco e a lista em memoria ficam atualizados, mas
+  /// nao se reconstroi a arvore no meio da reproducao (a tela que precisa do
+  /// valor novo — detalhes, "continuar assistindo" — so e montada depois).
+  Future<void> salvarProgresso(Canal canal, int posicaoSeg, int? duracaoSeg,
+      {bool notificar = true}) async {
     final p = ProgressoCanal(
       url: canal.url,
       posicaoSeg: posicaoSeg,
@@ -675,13 +679,13 @@ class IptvProvider extends ChangeNotifier {
     );
     await _armazenamento.salvarProgresso(p);
     _progressos = _armazenamento.carregarProgressos();
-    notifyListeners();
+    if (notificar) notifyListeners();
   }
 
-  Future<void> removerProgresso(Canal canal) async {
+  Future<void> removerProgresso(Canal canal, {bool notificar = true}) async {
     await _armazenamento.removerProgresso(canal.url);
     _progressos = _armazenamento.carregarProgressos();
-    notifyListeners();
+    if (notificar) notifyListeners();
   }
 
   // ===== MINHA LISTA =====

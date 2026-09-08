@@ -85,7 +85,8 @@ extension on _Estrategia {
   }
 }
 
-class _TelaPlayerState extends State<TelaPlayer> {
+class _TelaPlayerState extends State<TelaPlayer>
+    with WidgetsBindingObserver {
   late Player _player;
   late VideoController _controller;
 
@@ -181,10 +182,17 @@ class _TelaPlayerState extends State<TelaPlayer> {
   // Garante que o seek de retomada aconteça uma única vez.
   bool _streamAberto = false;
   bool _seekFeito = false;
+  // Grava o progresso de tempos em tempos. Sem isto, o unico ponto de gravacao
+  // era o dispose() — e quem fecha o app pelo gesto de "recentes" (ou tem o app
+  // morto pelo sistema) NUNCA passa por ele: a sessao inteira era perdida e a
+  // serie reabria do comeco.
+  Timer? _timerProgresso;
+  static const _intervaloSalvarProgresso = Duration(seconds: 15);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _episodio = widget.canal;
     _posicaoInicial = widget.posicaoInicial;
     _fonteAtual = widget.canal.temFontes ? widget.canal.fontes.first : widget.canal;
@@ -255,6 +263,7 @@ class _TelaPlayerState extends State<TelaPlayer> {
       _boostarVolume();
       _abrirStream();
     }
+    _iniciarTimerProgresso();
     _registrarStreams();
     _atualizarTemFaixas();
   }
@@ -646,8 +655,35 @@ class _TelaPlayerState extends State<TelaPlayer> {
     }
   }
 
+  /// Liga a gravacao periodica do progresso do VOD. Nao vale para ao vivo
+  /// (nao ha onde retomar).
+  void _iniciarTimerProgresso() {
+    if (widget.canal.tipo != TipoCanal.filme) return;
+    _timerProgresso?.cancel();
+    _timerProgresso = Timer.periodic(_intervaloSalvarProgresso, (_) {
+      if (!mounted || !_player.state.playing) return;
+      _salvarProgressoEp(_episodio, notificar: false);
+    });
+  }
+
+  /// App foi para segundo plano: grava AGORA. Depois de `paused` o sistema pode
+  /// matar o processo sem avisar — e o dispose() nunca roda.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _salvarProgressoEp(_episodio, notificar: false);
+    }
+  }
+
   /// Salva (ou limpa) o progresso de [ep] com base na posicao atual do player.
-  void _salvarProgressoEp(Canal ep) {
+  ///
+  /// [notificar] `false` nas gravacoes periodicas: escreve no Hive sem
+  /// reconstruir quem escuta o provider — a cada 15s isso custaria rebuild da
+  /// arvore inteira durante a reproducao.
+  void _salvarProgressoEp(Canal ep, {bool notificar = true}) {
     if (!_iniciado || ep.tipo != TipoCanal.filme) return;
     final posicaoSeg = _player.state.position.inSeconds;
     if (posicaoSeg <= 120) return;
@@ -655,10 +691,11 @@ class _TelaPlayerState extends State<TelaPlayer> {
     final fracao = duracaoSeg > 0 ? posicaoSeg / duracaoSeg : 0.0;
     if (fracao < 0.9) {
       _provider
-          .salvarProgresso(ep, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null)
+          .salvarProgresso(ep, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null,
+              notificar: notificar)
           .ignore();
     } else {
-      _provider.removerProgresso(ep).ignore();
+      _provider.removerProgresso(ep, notificar: notificar).ignore();
     }
   }
 
@@ -1060,6 +1097,8 @@ class _TelaPlayerState extends State<TelaPlayer> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timerProgresso?.cancel();
     _salvarProgressoEp(_episodio);
     _timeoutTimer?.cancel();
     _atualizadorStatus?.cancel();

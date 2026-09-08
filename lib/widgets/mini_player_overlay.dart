@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
+import '../models/canal.dart';
 import '../screens/tela_player.dart';
+import '../state/iptv_provider.dart';
 import '../state/mini_player_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/layout.dart';
@@ -34,8 +37,48 @@ class MiniPlayerOverlay extends StatelessWidget {
   }
 }
 
-class _MiniFloat extends StatelessWidget {
+class _MiniFloat extends StatefulWidget {
   const _MiniFloat();
+
+  @override
+  State<_MiniFloat> createState() => _MiniFloatState();
+}
+
+class _MiniFloatState extends State<_MiniFloat> with WidgetsBindingObserver {
+  // Um filme que segue tocando no mini player tambem precisa gravar onde parou
+  // — senao o progresso congela no instante em que a TelaPlayer foi minimizada.
+  Timer? _timerProgresso;
+  static const _intervalo = Duration(seconds: 15);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _timerProgresso = Timer.periodic(_intervalo, (_) => _salvarProgresso());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _salvarProgresso();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timerProgresso?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _salvarProgresso() {
+    if (!mounted) return;
+    final mini = context.read<MiniPlayerProvider>();
+    salvarProgressoMini(context, mini);
+  }
 
   static bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -126,7 +169,12 @@ class _BarraMobile extends StatelessWidget {
           _BotaoMobile(
             icon: Icons.close,
             color: Colors.redAccent,
-            onTap: mini.fechar,
+            onTap: () {
+              // Grava antes de matar o player: depois do fechar() nao ha mais
+              // posicao para ler.
+              salvarProgressoMini(context, mini);
+              mini.fechar();
+            },
           ),
           _BotaoMobile(
             icon: mini.mutado
@@ -221,5 +269,29 @@ class _LiveBadge extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+
+/// Grava o progresso do VOD que esta tocando no mini player. Nao faz nada para
+/// canal ao vivo (nao ha onde retomar) nem antes de 2 min de reproducao — o
+/// mesmo criterio da TelaPlayer.
+void salvarProgressoMini(BuildContext context, MiniPlayerProvider mini) {
+  final canal = mini.canal;
+  final player = mini.player;
+  if (canal == null || player == null) return;
+  if (canal.tipo != TipoCanal.filme) return;
+  final posicaoSeg = player.state.position.inSeconds;
+  if (posicaoSeg <= 120) return;
+  final duracaoSeg = player.state.duration.inSeconds;
+  final fracao = duracaoSeg > 0 ? posicaoSeg / duracaoSeg : 0.0;
+  final provider = context.read<IptvProvider>();
+  if (fracao < 0.9) {
+    provider
+        .salvarProgresso(canal, posicaoSeg, duracaoSeg > 0 ? duracaoSeg : null,
+            notificar: false)
+        .ignore();
+  } else {
+    provider.removerProgresso(canal, notificar: false).ignore();
   }
 }

@@ -119,6 +119,7 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
   void _carregarMetadados() {
     _bloqueadoPorPin = false;
     final tmdb = context.read<TmdbService>();
+    final provider = context.read<IptvProvider>();
     final idioma = context.read<PreferenciasProvider>().idiomaEfetivo.codigo;
 
     _infoFuture = tmdb.info(
@@ -133,12 +134,17 @@ class _TelaDetalhesState extends State<TelaDetalhes> {
       _posterSerieFuture =
           tmdb.poster(widget.serie!.nome, categoria: widget.serie!.grupo);
       _agrup = _agruparEpisodios(widget.serie!);
-      _temporadaSelecionada =
-          _agrup!.temporadas.isNotEmpty ? _agrup!.temporadas.first : null;
+      // Abre na temporada em que o usuario parou — NAO na primeira. Sem isto,
+      // quem parou em T3:E5 reabria a serie olhando a lista da T1 (o botao
+      // dizia "Continuar T3:E5", mas a lista embaixo contradizia ele).
+      final tRetomada =
+          Serie.seasonOf(_calcularRetomada(widget.serie!, provider).episodio);
+      _temporadaSelecionada = _agrup!.temporadas.contains(tRetomada)
+          ? tRetomada
+          : (_agrup!.temporadas.isNotEmpty ? _agrup!.temporadas.first : null);
     } else {
       // Captura o catálogo agora (sync) e seleciona depois, fora do 1º frame.
-      final canais =
-          context.read<IptvProvider>().listaAtiva?.canais ?? const <Canal>[];
+      final canais = provider.listaAtiva?.canais ?? const <Canal>[];
       final filme = widget.filme!;
       _relacionadosFuture = Future(() => _selecionarRelacionados(canais, filme));
     }
