@@ -96,12 +96,36 @@ test('semPorta', () => {
 // então não dá para executar. O que importa é que as travas não sumam.
 const migrar = src.slice(src.indexOf("if (acao === 'migrar_url')"), src.indexOf("// ── SUPORTE"))
 
-test('escopo global existe, é opt-in e só admin', () => {
+test('NAO existe escopo global — escopo se prova por ID', () => {
   assert.ok(migrar.length > 0, 'não achei a ação migrar_url')
-  assert.match(migrar, /const todos = body\.escopo === 'todos'/)
-  assert.match(migrar, /if \(todos && !ehAdmin\) return erro\('apenas admin/)
-  // O padrão NÃO pode virar global: sem opt-in continua "meus clientes".
-  assert.match(migrar, /if \(!todos\) \{[\s\S]*?eq\('revendedor_id', rev\.id\)/)
+  // Um escopo "todos" deixaria a troca de DNS do Player Hub — que um
+  // REVENDEDOR pode disparar pelo portal dele — reescrever playlist de cliente
+  // dos outros, e até de quem nunca usou o painel central.
+  assert.doesNotMatch(migrar, /escopo === 'todos'/)
+  assert.match(migrar, /const porDispositivos = body\.escopo === 'dispositivos'/)
+  assert.match(migrar, /if \(porDispositivos && !ehAdmin\) return erro\('apenas admin/)
+})
+
+test('escopo por dispositivos valida os IDs no banco antes de agir', () => {
+  // Não confia no que foi pedido: resolve por id E por MAC e segue só com o
+  // que existe de fato.
+  assert.match(migrar, /from\('dispositivos'\)\.select\('id'\)\.in\('id', ids\)/)
+  assert.match(migrar, /from\('dispositivos'\)\.select\('id'\)\.in\('mac', macs\)/)
+  assert.match(migrar, /encontrados_dispositivos = achados\.size/)
+  // Só as playlists VINCULADAS a esses aparelhos entram na consulta.
+  assert.match(migrar, /from\('dispositivo_playlists'\)/)
+  assert.match(migrar, /q = q\.in\('id', plIds\)/)
+  assert.match(migrar, /MAX_DISPOSITIVOS_MIGRACAO/)
+})
+
+test('devolve quantos casaram e quantos foram alterados', () => {
+  assert.match(migrar, /encontrados: afetadas\.length, alterados/)
+  assert.match(migrar, /if \(!error\) alterados\+\+/)
+})
+
+test('o padrão continua sendo só os clientes do próprio operador', () => {
+  assert.match(migrar, /eq\('revendedor_id', rev\.id\)/)
+  assert.match(migrar, /escopo: porDispositivos \? 'dispositivos' : 'meus'/)
 })
 
 test('pré-filtra por host, o que também mata o falso positivo do prefixo', () => {

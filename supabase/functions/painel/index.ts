@@ -93,6 +93,9 @@ function hostDe(url: string): string | null {
  */
 const MAX_MIGRACAO = 500
 
+/** Teto de dispositivos por chamada no escopo `dispositivos`. */
+const MAX_DISPOSITIVOS_MIGRACAO = 200
+
 /** "servidor.com:8080" -> "servidor.com". */
 const semPorta = (h: string) => h.replace(/:\d+$/, '')
 
@@ -1139,60 +1142,110 @@ Deno.serve(async (req: Request) => {
       const origem = (body.origem || '').trim().replace(/\/+$/, '')
       const destino = (body.destino || '').trim().replace(/\/+$/, '')
       const preview = !!body.preview
-      /**
-       * ESCOPO. O padrao continua sendo "meus clientes" — mudar isso calado
-       * transformaria uma migracao de rotina numa reescrita das listas do
-       * sistema inteiro. `escopo: 'todos'` e opt-in e so admin: e o que o
-       * painel central (Player Hub) usa para trocar o DNS de TODOS os
-       * aparelhos, inclusive os dos revendedores.
-       */
-      const todos = body.escopo === 'todos'
-      if (todos && !ehAdmin) return erro('apenas admin pode migrar no escopo global', 403)
       if (!origem || !destino) return erro('informe origem e destino')
-      // Cursor da paginacao: ultimo id ja VISTO (nao necessariamente migrado).
-      const apos = String(body.apos || '').trim()
+
+      /**
+       * ESCOPO — quais playlists esta migracao pode tocar.
+       *
+       * `meus` (padrao): as playlists dos clientes do proprio operador. E o que
+       * o botao "Migrar URL" do painel usa.
+       *
+       * `dispositivos`: SOMENTE as playlists dos aparelhos listados em
+       * `body.dispositivos` (id do dispositivo ou MAC). E o que o painel
+       * central (Player Hub) usa para trocar o DNS dos aparelhos que ELE
+       * rastreia — que podem ser de revendedores diferentes.
+       *
+       * ⚠️ NAO existe escopo "todos". Existiu por uma versao e era um buraco:
+       * a troca de DNS do Player Hub pode ser disparada por um REVENDEDOR (a
+       * rota do portal dele), e um escopo global deixaria esse revendedor
+       * reescrever playlist de cliente dos outros — e ate de quem nunca usou o
+       * painel central. Escopo se prova por ID, nunca so pelo dominio.
+       */
+      const porDispositivos = body.escopo === 'dispositivos'
+      if (porDispositivos && !ehAdmin) return erro('apenas admin pode migrar por lista de dispositivos', 403)
 
       let q = sb.from('playlists').select('id, nome, url_cifrada, epg_cifrada')
-      if (!todos) {
+      let encontrados_dispositivos = 0
+
+      if (porDispositivos) {
+        const pedidos = (Array.isArray(body.dispositivos) ? body.dispositivos : [])
+          .map((x: unknown) => String(x || '').trim()).filter(Boolean)
+        if (!pedidos.length) return erro('informe os dispositivos da migração')
+        if (pedidos.length > MAX_DISPOSITIVOS_MIGRACAO) {
+          return erro(`no máximo ${MAX_DISPOSITIVOS_MIGRACAO} dispositivos por chamada`)
+        }
+        // Resolve por ID **e** por MAC, e so segue com o que EXISTE de fato —
+        // o pedido nao e tratado como verdade.
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        const ids = pedidos.filter((x: string) => uuid.test(x))
+        const macs = pedidos.filter((x: string) => !uuid.test(x))
+        const achados = new Set<string>()
+        if (ids.length) {
+          const { data } = await sb.from('dispositivos').select('id').in('id', ids)
+          // deno-lint-ignore no-explicit-any
+          for (const d of ((data || []) as any[])) achados.add(d.id)
+        }
+        if (macs.length) {
+          const { data } = await sb.from('dispositivos').select('id').in('mac', macs)
+          // deno-lint-ignore no-explicit-any
+          for (const d of ((data || []) as any[])) achados.add(d.id)
+        }
+        encontrados_dispositivos = achados.size
+        if (!achados.size) {
+          return json({
+            ok: true, afetadas: [], aplicado: false, escopo: 'dispositivos',
+            encontrados_dispositivos: 0, encontrados: 0, alterados: 0,
+          })
+        }
+        const { data: vin } = await sb.from('dispositivo_playlists')
+          .select('playlist_id').in('dispositivo_id', [...achados])
+        // deno-lint-ignore no-explicit-any
+        const plIds = [...new Set(((vin || []) as any[]).map((v: any) => v.playlist_id))]
+        if (!plIds.length) {
+          return json({
+            ok: true, afetadas: [], aplicado: false, escopo: 'dispositivos',
+            encontrados_dispositivos, encontrados: 0, alterados: 0,
+          })
+        }
+        q = q.in('id', plIds)
+      } else {
         const { data: clis } = await sb.from('clientes').select('id').eq('revendedor_id', rev.id)
         const cids = (clis || []).map((c) => c.id)
-        if (!cids.length) return json({ ok: true, afetadas: [], aplicado: false, escopo: 'meus', restam_mais: false, proximo: null })
+        if (!cids.length) {
+          return json({ ok: true, afetadas: [], aplicado: false, escopo: 'meus', restam_mais: false, proximo: null })
+        }
         q = q.in('cliente_id', cids)
       }
+
       /**
-       * Pre-filtro pelo HOST em texto claro. Duas razoes:
-       *
-       * 1. Sem ele daria para decifrar o catalogo inteiro so para descobrir
-       *    quem casa — inviavel no escopo global.
-       * 2. Mata o falso positivo do prefixo: `http://old.com` casava tambem
-       *    `http://old.company.com` (porque "company" comeca com "com"), e a
-       *    migracao reescrevia a playlist de um dominio VIZINHO. Com o filtro
-       *    por host isso deixa de ser possivel.
-       *
-       * Cadastro sem porta cobre qualquer porta (mesma regra dos parceiros).
+       * Pre-filtro pelo HOST em texto claro. Evita decifrar o catalogo inteiro
+       * so para descobrir quem casa, e mata o falso positivo do prefixo:
+       * `http://old.com` casava tambem `http://old.company.com` (porque
+       * "company" comeca com "com"), e a migracao reescrevia a playlist de um
+       * dominio VIZINHO. Cadastro sem porta cobre qualquer porta.
        */
       const hostOrigem = hostDe(origem)
       if (hostOrigem) q = q.or(filtroPlaylistsDeParceiros([hostOrigem]))
 
       /**
-       * Paginacao por CURSOR (`apos` = ultimo id visto), nao por "consulta de
-       * novo e torce para o conjunto encolher".
+       * Paginacao por CURSOR (`apos` = ultimo id visto), so no escopo `meus` —
+       * o escopo por dispositivos ja e limitado pela lista enviada.
        *
-       * ⚠️ A versao ingenua nao terminava. Uma linha que casa o HOST mas nao
-       * casa o PREFIXO — tipico quando a playlist e `https://old.com` e esta
-       * passada migra `http://` — e pulada e NUNCA sai do filtro. Com mais de
-       * MAX_MIGRACAO listas no dominio, `restam_mais` ficaria true para sempre
-       * e quem chama repetiria sem progredir. Com cursor, cada volta anda.
+       * ⚠️ Reconsultar o mesmo filtro nao terminava: uma linha que casa o HOST
+       * mas nao casa o PREFIXO (playlist `https://old.com` numa passada que
+       * migra `http://`) e pulada e NUNCA sai do filtro.
        */
+      const apos = String(body.apos || '').trim()
       q = q.order('id', { ascending: true })
       if (apos) q = q.gt('id', apos)
       const { data: pls } = await q.limit(MAX_MIGRACAO + 1)
       const linhas = pls || []
-      const restam_mais = linhas.length > MAX_MIGRACAO
-      const lote = linhas.slice(0, MAX_MIGRACAO)
+      const restam_mais = !porDispositivos && linhas.length > MAX_MIGRACAO
+      const lote = porDispositivos ? linhas : linhas.slice(0, MAX_MIGRACAO)
       const proximo = lote.length ? lote[lote.length - 1].id : null
 
       const afetadas = []
+      let alterados = 0
       for (const p of lote) {
         let url = ''
         try { url = await decifrar(p.url_cifrada) } catch { continue }
@@ -1205,25 +1258,25 @@ Deno.serve(async (req: Request) => {
           if (p.epg_cifrada) {
             try { const e = await decifrar(p.epg_cifrada); if (e.startsWith(origem)) epg_cifrada = await cifrar(destino + e.slice(origem.length)) } catch { /* ignore */ }
           }
-          // ⚠️ O `host` em texto claro TEM que acompanhar a URL. Ele nao e
-          // decorativo: e por ele que se casa a playlist com um parceiro
-          // (Free DNS), que se conta device por dominio e que se fecha a
-          // fatura. Antes a migracao mexia so na URL cifrada, entao a playlist
-          // continuava contando para o dominio ANTIGO — e uma troca de DNS
-          // para um dominio parceiro nunca passava a valer.
+          // ⚠️ O `host` em texto claro TEM que acompanhar a URL: e por ele que
+          // se casa a playlist com um parceiro (Free DNS), que se conta device
+          // por dominio e que se fecha a fatura.
           const novoHost = hostDe(nova)
           const novoParceiro = await parceiroDoHost(novoHost)
-          await sb.from('playlists').update({
+          const { error } = await sb.from('playlists').update({
             url_cifrada, epg_cifrada, host: novoHost, free_dns: !!novoParceiro,
             atualizado_em: new Date().toISOString(),
           }).eq('id', p.id)
+          if (!error) alterados++
         }
       }
       return json({
         ok: true, afetadas, aplicado: !preview,
-        escopo: todos ? 'todos' : 'meus', restam_mais,
-        // Devolve para a proxima chamada: `apos: proximo`.
-        proximo: restam_mais ? proximo : null,
+        escopo: porDispositivos ? 'dispositivos' : 'meus',
+        // Quantos casaram e quantos foram de fato alterados — o painel central
+        // exige poder conferir os dois numeros.
+        encontrados: afetadas.length, alterados,
+        ...(porDispositivos ? { encontrados_dispositivos } : { restam_mais, proximo: restam_mais ? proximo : null }),
       })
     }
 
