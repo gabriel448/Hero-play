@@ -998,14 +998,32 @@ function modalMigrarUrl() {
     ],
     onOk: async (v) => {
       if (!v.origem || !v.destino) return 'Informe origem e destino'
-      const r = await api('migrar_url', { origem: v.origem, destino: v.destino, preview: true })
-      if (!r.afetadas.length) return 'Nenhuma playlist casa com essa URL de origem'
-      const amostra = r.afetadas.slice(0, 8).map((a) => `• ${a.nome}\n   ${a.de}\n → ${a.para}`).join('\n\n')
-      const extra = r.afetadas.length > 8 ? `\n\n… e mais ${r.afetadas.length - 8}` : ''
-      if (!confirm(`${r.afetadas.length} playlist(s) serão migradas:\n\n${amostra}${extra}\n\nAplicar?`)) return null
-      await api('migrar_url', { origem: v.origem, destino: v.destino })
+      // A pré-visualização vem em LOTES: varre tudo antes de mostrar o total,
+      // senão o admin confirmaria "500 playlists" achando que era o fim.
+      const afetadas = []
+      let apos = null
+      for (let volta = 0; volta < 200; volta++) {
+        const r = await api('migrar_url', { origem: v.origem, destino: v.destino, preview: true, ...(apos ? { apos } : {}) })
+        afetadas.push(...r.afetadas)
+        if (!r.restam_mais || !r.proximo || r.proximo === apos) break
+        apos = r.proximo
+      }
+      if (!afetadas.length) return 'Nenhuma playlist casa com essa URL de origem'
+      const amostra = afetadas.slice(0, 8).map((a) => `• ${a.nome}\n   ${a.de}\n → ${a.para}`).join('\n\n')
+      const extra = afetadas.length > 8 ? `\n\n… e mais ${afetadas.length - 8}` : ''
+      if (!confirm(`${afetadas.length} playlist(s) serão migradas:\n\n${amostra}${extra}\n\nAplicar?`)) return null
+      // Aplicar também pagina: sem isto só as primeiras seriam migradas e a
+      // tela ainda diria que migrou todas.
+      let migradas = 0
+      apos = null
+      for (let volta = 0; volta < 200; volta++) {
+        const r = await api('migrar_url', { origem: v.origem, destino: v.destino, ...(apos ? { apos } : {}) })
+        migradas += r.afetadas.length
+        if (!r.restam_mais || !r.proximo || r.proximo === apos) break
+        apos = r.proximo
+      }
       invalidar('playlists')
-      toast(`${r.afetadas.length} playlist(s) migradas`)
+      toast(`${migradas} playlist(s) migradas`)
       vPlaylists()
       return null
     },
