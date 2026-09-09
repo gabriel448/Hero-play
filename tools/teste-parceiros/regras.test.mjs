@@ -90,3 +90,31 @@ test('semPorta', () => {
   assert.equal(semPorta('a.com'), 'a.com')
   assert.equal(semPorta('1.2.3.4:25461'), '1.2.3.4')
 })
+
+// ─── Garantias do `migrar_url` (troca de DNS em massa) ───────────────────────
+// Aqui a checagem é sobre o FONTE: o corpo da ação depende de banco e sessão,
+// então não dá para executar. O que importa é que as travas não sumam.
+const migrar = src.slice(src.indexOf("if (acao === 'migrar_url')"), src.indexOf("// ── SUPORTE"))
+
+test('escopo global existe, é opt-in e só admin', () => {
+  assert.ok(migrar.length > 0, 'não achei a ação migrar_url')
+  assert.match(migrar, /const todos = body\.escopo === 'todos'/)
+  assert.match(migrar, /if \(todos && !ehAdmin\) return erro\('apenas admin/)
+  // O padrão NÃO pode virar global: sem opt-in continua "meus clientes".
+  assert.match(migrar, /if \(!todos\) \{[\s\S]*?eq\('revendedor_id', rev\.id\)/)
+})
+
+test('pré-filtra por host, o que também mata o falso positivo do prefixo', () => {
+  assert.match(migrar, /const hostOrigem = hostDe\(origem\)/)
+  assert.match(migrar, /q\.or\(filtroPlaylistsDeParceiros\(\[hostOrigem\]\)\)/)
+})
+
+test('tem teto por chamada e avisa quando sobra', () => {
+  assert.match(migrar, /MAX_MIGRACAO/)
+  assert.match(migrar, /restam_mais/)
+})
+
+test('a migração mantém host e free_dns em dia', () => {
+  assert.match(migrar, /const novoHost = hostDe\(nova\)/)
+  assert.match(migrar, /host: novoHost, free_dns: !!novoParceiro/)
+})

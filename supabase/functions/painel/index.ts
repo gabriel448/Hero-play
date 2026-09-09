@@ -85,6 +85,14 @@ function urlValida(url: string): boolean {
 function hostDe(url: string): string | null {
   try { return new URL(url).host.toLowerCase().replace(/^www\./, '') || null } catch { return null }
 }
+/**
+ * Teto de playlists por chamada de `migrar_url`. Edge Function tem limite de
+ * tempo e cada linha custa um decifra + um cifra; no escopo global (todos os
+ * revendedores) isso pode pegar muita coisa. Quem chama repete enquanto vier
+ * `restam_mais: true`.
+ */
+const MAX_MIGRACAO = 500
+
 /** "servidor.com:8080" -> "servidor.com". */
 const semPorta = (h: string) => h.replace(/:\d+$/, '')
 
@@ -1131,13 +1139,47 @@ Deno.serve(async (req: Request) => {
       const origem = (body.origem || '').trim().replace(/\/+$/, '')
       const destino = (body.destino || '').trim().replace(/\/+$/, '')
       const preview = !!body.preview
+      /**
+       * ESCOPO. O padrao continua sendo "meus clientes" — mudar isso calado
+       * transformaria uma migracao de rotina numa reescrita das listas do
+       * sistema inteiro. `escopo: 'todos'` e opt-in e so admin: e o que o
+       * painel central (Player Hub) usa para trocar o DNS de TODOS os
+       * aparelhos, inclusive os dos revendedores.
+       */
+      const todos = body.escopo === 'todos'
+      if (todos && !ehAdmin) return erro('apenas admin pode migrar no escopo global', 403)
       if (!origem || !destino) return erro('informe origem e destino')
-      const { data: clis } = await sb.from('clientes').select('id').eq('revendedor_id', rev.id)
-      const cids = (clis || []).map((c) => c.id)
-      if (!cids.length) return json({ ok: true, afetadas: [], aplicado: false })
-      const { data: pls } = await sb.from('playlists').select('id, nome, url_cifrada, epg_cifrada').in('cliente_id', cids)
+
+      let q = sb.from('playlists').select('id, nome, url_cifrada, epg_cifrada')
+      if (!todos) {
+        const { data: clis } = await sb.from('clientes').select('id').eq('revendedor_id', rev.id)
+        const cids = (clis || []).map((c) => c.id)
+        if (!cids.length) return json({ ok: true, afetadas: [], aplicado: false, escopo: 'meus', restam_mais: false })
+        q = q.in('cliente_id', cids)
+      }
+      /**
+       * Pre-filtro pelo HOST em texto claro. Duas razoes:
+       *
+       * 1. Sem ele daria para decifrar o catalogo inteiro so para descobrir
+       *    quem casa — inviavel no escopo global.
+       * 2. Mata o falso positivo do prefixo: `http://old.com` casava tambem
+       *    `http://old.company.com` (porque "company" comeca com "com"), e a
+       *    migracao reescrevia a playlist de um dominio VIZINHO. Com o filtro
+       *    por host isso deixa de ser possivel.
+       *
+       * Cadastro sem porta cobre qualquer porta (mesma regra dos parceiros).
+       */
+      const hostOrigem = hostDe(origem)
+      if (hostOrigem) q = q.or(filtroPlaylistsDeParceiros([hostOrigem]))
+
+      // Teto por chamada: Edge Function tem limite de tempo, e o escopo global
+      // pode pegar muita coisa. `restam_mais` avisa que e para repetir.
+      const { data: pls } = await q.limit(MAX_MIGRACAO + 1)
+      const restam_mais = (pls || []).length > MAX_MIGRACAO
+      const lote = (pls || []).slice(0, MAX_MIGRACAO)
+
       const afetadas = []
-      for (const p of (pls || [])) {
+      for (const p of lote) {
         let url = ''
         try { url = await decifrar(p.url_cifrada) } catch { continue }
         if (!url.startsWith(origem)) continue
@@ -1163,7 +1205,10 @@ Deno.serve(async (req: Request) => {
           }).eq('id', p.id)
         }
       }
-      return json({ ok: true, afetadas, aplicado: !preview })
+      return json({
+        ok: true, afetadas, aplicado: !preview,
+        escopo: todos ? 'todos' : 'meus', restam_mais,
+      })
     }
 
     // ── SUPORTE (tickets) ──────────────────────────────────────────────────────
