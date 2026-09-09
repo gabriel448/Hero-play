@@ -1149,12 +1149,14 @@ Deno.serve(async (req: Request) => {
       const todos = body.escopo === 'todos'
       if (todos && !ehAdmin) return erro('apenas admin pode migrar no escopo global', 403)
       if (!origem || !destino) return erro('informe origem e destino')
+      // Cursor da paginacao: ultimo id ja VISTO (nao necessariamente migrado).
+      const apos = String(body.apos || '').trim()
 
       let q = sb.from('playlists').select('id, nome, url_cifrada, epg_cifrada')
       if (!todos) {
         const { data: clis } = await sb.from('clientes').select('id').eq('revendedor_id', rev.id)
         const cids = (clis || []).map((c) => c.id)
-        if (!cids.length) return json({ ok: true, afetadas: [], aplicado: false, escopo: 'meus', restam_mais: false })
+        if (!cids.length) return json({ ok: true, afetadas: [], aplicado: false, escopo: 'meus', restam_mais: false, proximo: null })
         q = q.in('cliente_id', cids)
       }
       /**
@@ -1172,11 +1174,23 @@ Deno.serve(async (req: Request) => {
       const hostOrigem = hostDe(origem)
       if (hostOrigem) q = q.or(filtroPlaylistsDeParceiros([hostOrigem]))
 
-      // Teto por chamada: Edge Function tem limite de tempo, e o escopo global
-      // pode pegar muita coisa. `restam_mais` avisa que e para repetir.
+      /**
+       * Paginacao por CURSOR (`apos` = ultimo id visto), nao por "consulta de
+       * novo e torce para o conjunto encolher".
+       *
+       * ⚠️ A versao ingenua nao terminava. Uma linha que casa o HOST mas nao
+       * casa o PREFIXO — tipico quando a playlist e `https://old.com` e esta
+       * passada migra `http://` — e pulada e NUNCA sai do filtro. Com mais de
+       * MAX_MIGRACAO listas no dominio, `restam_mais` ficaria true para sempre
+       * e quem chama repetiria sem progredir. Com cursor, cada volta anda.
+       */
+      q = q.order('id', { ascending: true })
+      if (apos) q = q.gt('id', apos)
       const { data: pls } = await q.limit(MAX_MIGRACAO + 1)
-      const restam_mais = (pls || []).length > MAX_MIGRACAO
-      const lote = (pls || []).slice(0, MAX_MIGRACAO)
+      const linhas = pls || []
+      const restam_mais = linhas.length > MAX_MIGRACAO
+      const lote = linhas.slice(0, MAX_MIGRACAO)
+      const proximo = lote.length ? lote[lote.length - 1].id : null
 
       const afetadas = []
       for (const p of lote) {
@@ -1208,6 +1222,8 @@ Deno.serve(async (req: Request) => {
       return json({
         ok: true, afetadas, aplicado: !preview,
         escopo: todos ? 'todos' : 'meus', restam_mais,
+        // Devolve para a proxima chamada: `apos: proximo`.
+        proximo: restam_mais ? proximo : null,
       })
     }
 

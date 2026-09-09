@@ -109,9 +109,15 @@ test('pré-filtra por host, o que também mata o falso positivo do prefixo', () 
   assert.match(migrar, /q\.or\(filtroPlaylistsDeParceiros\(\[hostOrigem\]\)\)/)
 })
 
-test('tem teto por chamada e avisa quando sobra', () => {
+test('pagina por cursor — cada volta anda, nao repete o mesmo lote', () => {
   assert.match(migrar, /MAX_MIGRACAO/)
-  assert.match(migrar, /restam_mais/)
+  assert.match(migrar, /const apos = String\(body\.apos \|\| ''\)\.trim\(\)/)
+  assert.match(migrar, /q\.order\('id', \{ ascending: true \}\)/)
+  assert.match(migrar, /if \(apos\) q = q\.gt\('id', apos\)/)
+  // O cursor e o que garante terminacao: linha que casa o HOST mas nao casa o
+  // PREFIXO (ex.: https quando a passada e http) nunca sai do filtro, entao
+  // "consultar de novo" ficaria preso nela para sempre.
+  assert.match(migrar, /proximo: restam_mais \? proximo : null/)
 })
 
 test('a migração mantém host e free_dns em dia', () => {
