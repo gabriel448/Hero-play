@@ -88,3 +88,44 @@ test('o título da aba acompanha o menu', () => {
   // que está vendo a plataforma quando não está.
   assert.match(ui, /const titulo = me\.papel === 'admin' \? 'Meus clientes' : 'Clientes'/)
 })
+
+test('cliente sem revenda vem como null, nao como traco', () => {
+  // O backend mandava '—'. Com isso a tela nao tinha como distinguir
+  // "self-serve" de "revendedor com nome vazio", e aparecia um traco solto
+  // onde deveria estar o dono — que foi exatamente o que o admin estranhou.
+  const todos = acao('listar_clientes_todos', 'admin_cliente_detalhe')
+  assert.match(todos, /revendedor: donos\.get\(c\.revendedor_id\) \|\| null/)
+  const det = acao('admin_cliente_detalhe', 'cliente_detalhe')
+  assert.match(det, /revendedor: dono \? \(dono\.nome \|\| dono\.usuario\) : null/)
+})
+
+test('a tela chama self-serve pelo nome, em vez de mostrar um traco', () => {
+  const tela = ui.slice(ui.indexOf('async function vTodosClientes'), ui.indexOf('async function vCliente('))
+  assert.match(tela, /Self-serve/)
+  // Ramo explicito: null cai no rotulo, nao num fallback generico.
+  assert.match(tela, /c\.revendedor$\s*\?/m)
+  assert.match(tela, /d\.cliente\.revendedor$\s*\?/m)
+  // E da pra filtrar por eles na busca.
+  assert.match(tela, /c\.revendedor \|\| 'self-serve'/)
+})
+
+test('o detalhe e conteudo, nao nota de rodape', () => {
+  // `.sv-ajuda` e 11px, o estilo de texto auxiliar. A gaveta inteira estava
+  // nele — dai a queixa de letra pequena. Conteudo tem classe propria.
+  const tela = ui.slice(ui.indexOf('async function vTodosClientes'), ui.indexOf('async function vCliente('))
+  assert.ok(!tela.includes('sv-ajuda'), 'a gaveta voltou para o estilo de texto auxiliar')
+  for (const c of ['tc-det', 'tc-sec', 'tc-linha', 'tc-rot', 'tc-val']) {
+    assert.ok(tela.includes(c), `faltou .${c}`)
+  }
+})
+
+test('toda classe tc-* usada na tela existe no CSS', () => {
+  // Ja inventei classe que nao existia nesta mesma tela uma vez; o sintoma e
+  // silencioso (renderiza sem estilo nenhum).
+  const css = ler('../../painel/painel.css')
+  const usadas = new Set((ui.match(/tc-[a-z-]+/g) || []).filter((c) => !c.startsWith('tc-busca') && c !== 'tc-sub' && c !== 'tc-cont' && c !== 'tc-lista'))
+  for (const c of usadas) {
+    const achou = [' ', ',', ':', '{'].some((fim) => css.includes('.' + c + fim))
+    assert.ok(achou, `.${c} nao existe em painel.css`)
+  }
+})

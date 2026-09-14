@@ -195,3 +195,14 @@ test('a URL da playlist entra CIFRADA, como no painel', () => {
   // conta device por domínio.
   assert.match(post, /host, free_dns: !!parceiro/)
 })
+
+test('a plataforma nao pode exigir JWT na funcao da API', () => {
+  // A API autentica por CHAVE. Com verify_jwt ligado, o gateway do Supabase
+  // derruba a requisicao antes da funcao rodar e responde "Invalid JWT" —
+  // a API inteira fica inalcancavel e NENHUM teste de codigo percebe, porque
+  // o codigo esta certo. Ja aconteceu: a funcao subiu sem esta entrada.
+  const cfg = readFileSync(new URL('../../supabase/config.toml', import.meta.url), 'utf8')
+  const bloco = cfg.slice(cfg.indexOf('[functions.api]'))
+  assert.ok(bloco.startsWith('[functions.api]'), 'faltou [functions.api] no config.toml')
+  assert.match(bloco.split('[').slice(0, 2).join('['), /verify_jwt\s*=\s*false/)
+})

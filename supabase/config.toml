@@ -381,6 +381,13 @@ verify_jwt = false
 [functions.painel]
 verify_jwt = false
 
+# API pública: autentica por CHAVE (hp_…), não por JWT. Com o verify_jwt da
+# plataforma ligado, o gateway derruba a requisição ANTES da função rodar — a
+# chave nem chega a ser lida, e o erro que sai é "Invalid JWT", que não diz
+# nada a quem está integrando. Quem confere a chave é o nosso código.
+[functions.api]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

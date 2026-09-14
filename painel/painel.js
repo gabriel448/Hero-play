@@ -528,7 +528,8 @@ async function vTodosClientes() {
   const filtrar = () => {
     const q = (document.getElementById('tc-busca').value || '').trim().toLowerCase()
     const lista = !q ? todos : todos.filter((c) =>
-      [c.nome, c.revendedor].some((x) => String(x || '').toLowerCase().includes(q)))
+      // "self" acha os sem revenda — senao nao havia como filtra-los.
+      [c.nome, c.revendedor || 'self-serve'].some((x) => String(x || '').toLowerCase().includes(q)))
     document.getElementById('tc-cont').textContent = `${lista.length}/${todos.length}`
     pintar(lista)
   }
@@ -547,9 +548,11 @@ async function vTodosClientes() {
             ${c.meu ? '<span class="badge badge-ok">Meu</span>' : ''}
           </div>
           <div class="pc-sub">
-            <span>${svg('userplus')} ${esc(c.revendedor)}</span>
-            <span>${svg('monitor')} ${c.devices} device(s)</span>
-            <span>${svg('listv')} ${c.playlists} playlist(s)</span>
+            ${c.revendedor
+              ? `<span>${svg('userplus')} ${esc(c.revendedor)}</span>`
+              : `<span class="tc-self">${svg('shield')} Self-serve</span>`}
+            <span>${svg('monitor')} ${c.devices} aparelho${c.devices !== 1 ? 's' : ''}</span>
+            <span>${svg('listv')} ${c.playlists} lista${c.playlists !== 1 ? 's' : ''}</span>
             <span>Criado ${fmtData(c.criado_em)}</span>
           </div>
         </div>
@@ -570,22 +573,60 @@ async function vTodosClientes() {
         btn.textContent = 'Ocultar'
         try {
           const d = await api('admin_cliente_detalhe', { cliente_id: id })
-          caixa.innerHTML = `
-            <div class="sv-ajuda" style="margin-top:10px">
-              <b>Dispositivos</b><br>
-              ${d.dispositivos.length
-                ? d.dispositivos.map((x) => `<span class="mono">${esc(x.mac)}</span>
-                    · Key <span class="mono">${esc(x.device_key || '—')}</span>
-                    · <span class="badge badge-${x.status === 'ativo' ? 'ok' : (x.status === 'trial' ? 'info' : 'warn')}">${esc(x.status)}</span>
-                    ${x.expira_em ? ' · expira ' + fmtData(x.expira_em) : ''}`).join('<br>')
-                : '<i>nenhum</i>'}
-              <br><br>
-              <b>Playlists</b><br>
-              ${d.playlists.length
-                ? d.playlists.map((x) => `${esc(x.nome)} · <span class="mono">${esc(x.host || '—')}</span>
-                    ${x.free_dns ? ' · <span class="badge badge-ok">Free DNS</span>' : ''}`).join('<br>')
-                : '<i>nenhuma</i>'}
-            </div>`
+          // `revendedor` nulo nao e falta de dado: e cliente que se ativou
+          // sozinho pelo app, sem revenda. Um traco fazia parecer erro.
+          const dono = d.cliente.revendedor
+            ? `<span class="tc-val">${esc(d.cliente.revendedor)}</span>`
+            : `<span class="tc-val tc-self">${svg('shield')} Self-serve — ativou sozinho pelo app</span>`
+          const campo = (rot, val) => `<span class="tc-campo"><span class="tc-rot">${rot}</span>${val}</span>`
+
+          caixa.innerHTML = `<div class="tc-det">
+            <div class="tc-fatos">
+              ${campo('Revendedor', dono)}
+              ${campo('Cadastrado', `<span class="tc-val">${fmtData(d.cliente.criado_em)}</span>`)}
+              ${campo('ID', `<span class="tc-val mono tc-id">${esc(d.cliente.id)}</span>`)}
+            </div>
+
+            <div class="tc-sec">
+              <div class="tc-sec-h">${svg('monitor')} Dispositivos <span class="tc-n">${d.dispositivos.length}</span></div>
+              ${d.dispositivos.length ? d.dispositivos.map((x) => `<div class="tc-linha">
+                <div class="tc-linha-top">
+                  <span class="tc-chave mono">${esc(x.mac)}</span>
+                  <button class="tc-copy" data-copiar="${esc(x.mac)}" data-oque="MAC" title="Copiar MAC">${svg('copy')}</button>
+                  <span class="badge badge-${esc(x.status)}">${esc(x.status)}</span>
+                </div>
+                <div class="tc-campos">
+                  ${campo('Key', `<span class="tc-val mono">${esc(x.device_key || '—')}</span>`)}
+                  ${x.modelo ? campo('Modelo', `<span class="tc-val">${esc(x.modelo)}</span>`) : ''}
+                  ${x.plano ? campo('Plano', `<span class="tc-val">${esc(x.plano)}</span>`) : ''}
+                  ${x.expira_em ? campo('Expira', `<span class="tc-val">${fmtData(x.expira_em)}</span>`) : ''}
+                  ${x.ativado_por ? campo('Ativado por', `<span class="tc-val">${esc(x.ativado_por)}</span>`) : ''}
+                </div>
+              </div>`).join('') : '<div class="tc-nada">Nenhum aparelho vinculado.</div>'}
+            </div>
+
+            <div class="tc-sec">
+              <div class="tc-sec-h">${svg('listv')} Listas <span class="tc-n">${d.playlists.length}</span></div>
+              ${d.playlists.length ? d.playlists.map((x) => `<div class="tc-linha">
+                <div class="tc-linha-top">
+                  <span class="tc-chave">${esc(x.nome || 'Playlist')}</span>
+                  ${x.free_dns ? '<span class="badge badge-ok">Free DNS</span>' : ''}
+                  ${x.tipo ? `<span class="badge badge-cinza">${esc(x.tipo)}</span>` : ''}
+                </div>
+                <div class="tc-campos">
+                  ${campo('Servidor', `<span class="tc-val mono">${esc(x.host || '—')}</span>`)}
+                  ${campo('Criada', `<span class="tc-val">${fmtData(x.criado_em)}</span>`)}
+                </div>
+              </div>`).join('') : '<div class="tc-nada">Nenhuma lista cadastrada.</div>'}
+            </div>
+          </div>`
+
+          caixa.querySelectorAll('[data-copiar]').forEach((bt) => {
+            bt.onclick = async () => {
+              try { await navigator.clipboard.writeText(bt.dataset.copiar) } catch (_) { /* sem permissão */ }
+              toast(bt.dataset.oque + ' copiado')
+            }
+          })
         } catch (e) {
           caixa.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
         }

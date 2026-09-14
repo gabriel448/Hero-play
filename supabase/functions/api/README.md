@@ -301,8 +301,24 @@ O papel `admin` é conferido **a cada requisição**, não só ao criar a chave:
 conta for rebaixada depois, a chave para de valer na hora, sem ninguém precisar
 lembrar de revogar.
 
+A função **não pode** subir com o `verify_jwt` da plataforma ligado. Ela
+autentica por chave, não por JWT — com o verify_jwt ligado o gateway do
+Supabase derruba a requisição antes do nosso código rodar, e a resposta é
+`{"code":"UNAUTHORIZED_INVALID_JWT_FORMAT"}` para uma chave perfeitamente
+válida. Quem garante isso é o `[functions.api]` no `supabase/config.toml`
+(com teste em `tools/teste-parceiros/api.test.mjs`).
+
 Para publicar:
 
 ```bash
 supabase functions deploy api
+```
+
+Depois de publicar, confira que o gateway saiu da frente — o erro tem que ser
+**nosso**, e não do Supabase:
+
+```bash
+curl -s "$BASE/clientes" -H "Authorization: Bearer hp_chave_falsa"
+# esperado: {"ok":false,"erro":"chave inválida"}
+# se vier {"code":"UNAUTHORIZED_INVALID_JWT_FORMAT"}, o verify_jwt ficou ligado
 ```

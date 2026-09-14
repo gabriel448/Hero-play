@@ -1044,7 +1044,9 @@ Deno.serve(async (req: Request) => {
         clientes: (lote as any[]).map((c) => ({
           id: c.id, nome: c.nome, criado_em: c.criado_em,
           revendedor_id: c.revendedor_id,
-          revendedor: donos.get(c.revendedor_id) || '—',
+          // null = self-serve: cliente que se cadastrou sozinho pelo app e
+          // nao tem revenda (o schema permite revendedor_id NULL de proposito).
+          revendedor: donos.get(c.revendedor_id) || null,
           meu: c.revendedor_id === rev.id,
           devices: nDisp.get(c.id) || 0,
           playlists: nPls.get(c.id) || 0,
@@ -1078,7 +1080,7 @@ Deno.serve(async (req: Request) => {
         .eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
       return json({
         ok: true,
-        cliente: { ...cliente, revendedor: dono ? (dono.nome || dono.usuario) : '—' },
+        cliente: { ...cliente, revendedor: dono ? (dono.nome || dono.usuario) : null },
         // deno-lint-ignore no-explicit-any
         dispositivos: (disp || []).map((d: any) => ({ ...d, status: statusEfetivo(d) })),
         playlists: pls || [],
