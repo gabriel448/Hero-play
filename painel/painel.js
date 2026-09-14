@@ -142,7 +142,13 @@ const NAV = [
   ] },
   { grupo: 'Conteúdo', itens: [
     // Clientes é NOSSO (o painel é client-centric; o de referência é device-centric).
-    { id: 'clientes', rotulo: 'Clientes', ic: 'users' },
+    //
+    // Só no ADMIN a aba se divide em duas: "Clientes" é a plataforma inteira
+    // (com o revendedor dono de cada um) e "Meus clientes" são os que ele mesmo
+    // criou. Para revendedor não existe essa distinção — tudo que ele vê é dele.
+    { id: 'todosclientes', rotulo: 'Clientes', ic: 'users', papeis: ['admin'] },
+    { id: 'clientes', rotulo: 'Meus clientes', ic: 'users', papeis: ['admin'] },
+    { id: 'clientes', rotulo: 'Clientes', ic: 'users', papeis: ['master', 'reseller'] },
     { id: 'dispositivos', rotulo: 'Dispositivos', ic: 'monitor' },
     { id: 'playlists', rotulo: 'Playlists', ic: 'listv' },
   ] },
@@ -219,7 +225,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves }[v]
   if (fn) fn(param)
 }
 
@@ -416,7 +422,7 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
       onOk: async (v) => {
         const r = await api('renovar_dispositivo', { dispositivo_id: d.id, plano: v.plano })
         atualizarSaldo(r.saldo)
-        invalidar('dispositivos', 'cliente:' + cliente_id)
+        invalidar('dispositivos', 'todosclientes', 'cliente:' + cliente_id)
         toast(r.expira_em ? `Renovado até ${fmtData(r.expira_em)}` : 'Agora é vitalícia')
         fechar(); recarregar()
         return null
@@ -477,12 +483,15 @@ async function vDashboard() {
 
 // ── Clientes ─────────────────────────────────────────────────────────────────
 async function vClientes() {
-  view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Clientes</h1><p id="cli-sub">Carregando…</p></div>
+  // No admin esta aba é "Meus clientes": a visão da plataforma inteira fica em
+  // `vTodosClientes`. O título acompanha o menu, senão a tela contradiz a aba.
+  const titulo = me.papel === 'admin' ? 'Meus clientes' : 'Clientes'
+  view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>${titulo}</h1><p id="cli-sub">Carregando…</p></div>
     <button class="btn" id="novo-cli">${svg('plus')} Novo cliente</button></div>
     <div class="lista" id="cli-lista"><div class="vazio">Carregando…</div></div></div>`
   document.getElementById('novo-cli').onclick = () => abrirModal({
     titulo: 'Novo cliente', okLabel: 'Criar', campos: [{ id: 'nome', label: 'Nome do cliente', placeholder: 'Ex.: Gabriel' }],
-    onOk: async (v) => { if (!v.nome) return 'Informe o nome'; await api('criar_cliente', { nome: v.nome }); invalidar('clientes'); toast('Cliente criado'); vClientes(); return null },
+    onOk: async (v) => { if (!v.nome) return 'Informe o nome'; await api('criar_cliente', { nome: v.nome }); invalidar('clientes', 'todosclientes'); toast('Cliente criado'); vClientes(); return null },
   })
   const meu = viewAtual()
   try {
@@ -496,9 +505,113 @@ async function vClientes() {
   } catch (e) { toast(e.message, true) }
 }
 
+// ── Clientes da PLATAFORMA (só admin) ───────────────────────────────────────
+// Todos os clientes cadastrados, de todos os revendedores, com o dono de cada
+// um. É de CONSULTA: as ações de escrita continuam na aba "Meus clientes", que
+// é onde o admin mexe no que é dele.
+async function vTodosClientes() {
+  if (me.papel !== 'admin') { placeholder('Clientes', 'Área restrita ao administrador', 'users'); return }
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head">
+      <div><h1>Clientes</h1><p id="tc-sub">Carregando…</p></div>
+    </div>
+    <div class="busca-wrap">
+      ${svg('search')}
+      <input id="tc-busca" placeholder="Buscar por cliente ou revendedor…" autocomplete="off">
+      <span class="busca-cont" id="tc-cont"></span>
+    </div>
+    <div class="lista" id="tc-lista"><div class="vazio">Carregando…</div></div>
+  </div>`
+  const meu = viewAtual()
+  let todos = []
+
+  const filtrar = () => {
+    const q = (document.getElementById('tc-busca').value || '').trim().toLowerCase()
+    const lista = !q ? todos : todos.filter((c) =>
+      [c.nome, c.revendedor].some((x) => String(x || '').toLowerCase().includes(q)))
+    document.getElementById('tc-cont').textContent = `${lista.length}/${todos.length}`
+    pintar(lista)
+  }
+
+  function pintar(lista) {
+    const el = document.getElementById('tc-lista'); if (!el) return
+    if (!lista.length) { el.innerHTML = '<div class="vazio">Nenhum cliente encontrado.</div>'; return }
+    // Mesma estrutura do card de Parceiros (classes `pc-*`, que já existem no
+    // CSS), com uma gaveta embaixo para o detalhe.
+    el.innerHTML = lista.map((c) => `<div class="sv-card">
+      <div class="pc-row">
+        <div class="pc-ic ${c.meu ? 'on' : ''}">${svg('users')}</div>
+        <div class="pc-meta">
+          <div class="pc-top">
+            <span class="pc-dom">${esc(c.nome)}</span>
+            ${c.meu ? '<span class="badge badge-ok">Meu</span>' : ''}
+          </div>
+          <div class="pc-sub">
+            <span>${svg('userplus')} ${esc(c.revendedor)}</span>
+            <span>${svg('monitor')} ${c.devices} device(s)</span>
+            <span>${svg('listv')} ${c.playlists} playlist(s)</span>
+            <span>Criado ${fmtData(c.criado_em)}</span>
+          </div>
+        </div>
+        <div class="pc-acoes">
+          <button class="btn-sec" data-ver="${esc(c.id)}">Ver detalhes</button>
+        </div>
+      </div>
+      <div id="det-${esc(c.id)}" hidden></div>
+    </div>`).join('')
+
+    el.querySelectorAll('[data-ver]').forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.dataset.ver
+        const caixa = document.getElementById('det-' + id)
+        if (!caixa.hidden) { caixa.hidden = true; btn.textContent = 'Ver detalhes'; return }
+        caixa.hidden = false
+        caixa.innerHTML = '<div class="vazio">Carregando…</div>'
+        btn.textContent = 'Ocultar'
+        try {
+          const d = await api('admin_cliente_detalhe', { cliente_id: id })
+          caixa.innerHTML = `
+            <div class="sv-ajuda" style="margin-top:10px">
+              <b>Dispositivos</b><br>
+              ${d.dispositivos.length
+                ? d.dispositivos.map((x) => `<span class="mono">${esc(x.mac)}</span>
+                    · Key <span class="mono">${esc(x.device_key || '—')}</span>
+                    · <span class="badge badge-${x.status === 'ativo' ? 'ok' : (x.status === 'trial' ? 'info' : 'warn')}">${esc(x.status)}</span>
+                    ${x.expira_em ? ' · expira ' + fmtData(x.expira_em) : ''}`).join('<br>')
+                : '<i>nenhum</i>'}
+              <br><br>
+              <b>Playlists</b><br>
+              ${d.playlists.length
+                ? d.playlists.map((x) => `${esc(x.nome)} · <span class="mono">${esc(x.host || '—')}</span>
+                    ${x.free_dns ? ' · <span class="badge badge-ok">Free DNS</span>' : ''}`).join('<br>')
+                : '<i>nenhuma</i>'}
+            </div>`
+        } catch (e) {
+          caixa.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+        }
+      }
+    })
+  }
+
+  try {
+    const r = await pega('todosclientes', () => api('listar_clientes_todos'))
+    if (meu !== viewAtual()) return
+    todos = r.clientes
+    const donos = new Set(todos.map((c) => c.revendedor_id)).size
+    document.getElementById('tc-sub').textContent =
+      `${todos.length} cliente${todos.length !== 1 ? 's' : ''} de ${donos} revendedor(es)`
+      + (r.truncado ? ' — mostrando os mais recentes' : '')
+    filtrar()
+  } catch (e) {
+    if (meu !== viewAtual()) return
+    const el = document.getElementById('tc-lista'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
+  document.getElementById('tc-busca').oninput = () => { if (todos.length) filtrar() }
+}
+
 async function vCliente(cliente_id) {
   const chaveCache = 'cliente:' + cliente_id
-  view().innerHTML = `<div class="pg"><button class="btn-sec pg-back" id="voltar">← Clientes</button><div id="cli-det"><div class="vazio">Carregando…</div></div></div>`
+  view().innerHTML = `<div class="pg"><button class="btn-sec pg-back" id="voltar">← ${me.papel === 'admin' ? 'Meus clientes' : 'Clientes'}</button><div id="cli-det"><div class="vazio">Carregando…</div></div></div>`
   document.getElementById('voltar').onclick = () => irPara('clientes')
   const meu = viewAtual()
   let det
@@ -920,7 +1033,7 @@ async function modalVincularGlobal() {
       if (!v.key) return 'Informe a Key'
       const r = await api('vincular_dispositivo', { cliente_id: v.cliente_id, mac: v.mac, key: v.key, plano: v.plano })
       atualizarSaldo(r.saldo)
-      invalidar('dispositivos', 'cliente:' + v.cliente_id)
+      invalidar('dispositivos', 'todosclientes', 'cliente:' + v.cliente_id)
       toast(r.cobrado ? `Ativado (${planoRot(r.plano)}) — −1 crédito` : 'Dispositivo vinculado')
       vDispositivos()
       return null
@@ -968,7 +1081,7 @@ async function vPlaylists() {
         <td class="tnum">${fmtData(p.criado_em)}</td>
         <td><button class="btn-del" data-id="${esc(p.id)}" data-cli="${esc(p.cliente_id)}">excluir</button></td>
       </tr>`).join('')}</tbody></table>`
-    el.querySelectorAll('.btn-del').forEach((b) => { b.onclick = async () => { if (!confirm('Excluir esta playlist?')) return; try { await api('excluir_playlist', { cliente_id: b.dataset.cli, playlist_id: b.dataset.id }); invalidar('playlists'); toast('Excluída'); vPlaylists() } catch (e) { toast(e.message, true) } } })
+    el.querySelectorAll('.btn-del').forEach((b) => { b.onclick = async () => { if (!confirm('Excluir esta playlist?')) return; try { await api('excluir_playlist', { cliente_id: b.dataset.cli, playlist_id: b.dataset.id }); invalidar('playlists', 'todosclientes'); toast('Excluída'); vPlaylists() } catch (e) { toast(e.message, true) } } })
   }
   document.getElementById('pl-q').oninput = (e) => { st.q = e.target.value; render() }
   wirePills(document.getElementById('pl-fsel'), (v) => { st.sel = v; render() })
@@ -1023,7 +1136,7 @@ function modalMigrarUrl() {
         if (!r.restam_mais || !r.proximo || r.proximo === apos) break
         apos = r.proximo
       }
-      invalidar('playlists')
+      invalidar('playlists', 'todosclientes')
       toast(`${migradas} playlist(s) migradas`)
       vPlaylists()
       return null

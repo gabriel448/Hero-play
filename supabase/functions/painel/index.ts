@@ -96,6 +96,9 @@ const MAX_MIGRACAO = 500
 /** Teto de dispositivos por chamada no escopo `dispositivos`. */
 const MAX_DISPOSITIVOS_MIGRACAO = 200
 
+/** Teto da visao de plataforma. Acima disso a tela avisa que truncou. */
+const MAX_CLIENTES_PLATAFORMA = 2000
+
 /** "servidor.com:8080" -> "servidor.com". */
 const semPorta = (h: string) => h.replace(/:\d+$/, '')
 
@@ -989,6 +992,97 @@ Deno.serve(async (req: Request) => {
       const { data } = await sb.from('clientes').select('id, nome, criado_em')
         .eq('revendedor_id', rev.id).order('criado_em', { ascending: false })
       return json({ clientes: data || [] })
+    }
+
+    /**
+     * VISAO DE PLATAFORMA (so admin): TODOS os clientes, de todos os
+     * revendedores, com o dono de cada um.
+     *
+     * Existe separada de `listar_clientes` de proposito. Aquela continua
+     * respondendo "os meus" — inclusive para o admin —, e e o que a aba
+     * "Meus clientes" usa. Fundir as duas mudaria em silencio o que o admin ve
+     * na tela que ele ja usa todo dia.
+     */
+    if (acao === 'listar_clientes_todos') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data: cls } = await sb.from('clientes')
+        .select('id, nome, revendedor_id, criado_em')
+        .order('criado_em', { ascending: false }).limit(MAX_CLIENTES_PLATAFORMA + 1)
+      const linhas = cls || []
+      const truncado = linhas.length > MAX_CLIENTES_PLATAFORMA
+      const lote = linhas.slice(0, MAX_CLIENTES_PLATAFORMA)
+      // deno-lint-ignore no-explicit-any
+      const ids = (lote as any[]).map((c) => c.id)
+
+      // Nome do revendedor dono — sem isso a lista da plataforma inteira nao
+      // diz nada: sao centenas de nomes sem contexto.
+      // deno-lint-ignore no-explicit-any
+      const revIds = [...new Set((lote as any[]).map((c) => c.revendedor_id).filter(Boolean))]
+      const donos = new Map<string, string>()
+      if (revIds.length) {
+        const { data: revs } = await sb.from('revendedores').select('id, nome, usuario').in('id', revIds)
+        // deno-lint-ignore no-explicit-any
+        for (const r of ((revs || []) as any[])) donos.set(r.id, r.nome || r.usuario || '—')
+      }
+
+      // Contagens numa consulta cada, somadas aqui: uma por cliente seriam
+      // centenas de idas ao banco para abrir uma tela.
+      const nDisp = new Map<string, number>()
+      const nPls = new Map<string, number>()
+      if (ids.length) {
+        const { data: ds } = await sb.from('dispositivos').select('cliente_id').in('cliente_id', ids)
+        // deno-lint-ignore no-explicit-any
+        for (const d of ((ds || []) as any[])) nDisp.set(d.cliente_id, (nDisp.get(d.cliente_id) || 0) + 1)
+        const { data: ps } = await sb.from('playlists').select('cliente_id').in('cliente_id', ids)
+        // deno-lint-ignore no-explicit-any
+        for (const pl of ((ps || []) as any[])) nPls.set(pl.cliente_id, (nPls.get(pl.cliente_id) || 0) + 1)
+      }
+
+      return json({
+        ok: true,
+        // deno-lint-ignore no-explicit-any
+        clientes: (lote as any[]).map((c) => ({
+          id: c.id, nome: c.nome, criado_em: c.criado_em,
+          revendedor_id: c.revendedor_id,
+          revendedor: donos.get(c.revendedor_id) || '—',
+          meu: c.revendedor_id === rev.id,
+          devices: nDisp.get(c.id) || 0,
+          playlists: nPls.get(c.id) || 0,
+        })),
+        truncado,
+      })
+    }
+
+    /**
+     * Detalhe de QUALQUER cliente (so admin), somente LEITURA.
+     *
+     * Separada da `cliente_detalhe`, que exige o cliente ser do operador e e a
+     * porta das acoes de escrita. Aqui nao vai URL de playlist: a tela e de
+     * consulta, e credencial de servidor de outro revendedor nao precisa
+     * aparecer para ninguem ler de passagem.
+     */
+    if (acao === 'admin_cliente_detalhe') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const cliente_id = String(body.cliente_id || '').trim()
+      if (!cliente_id) return erro('cliente_id obrigatorio')
+      const { data: cliente } = await sb.from('clientes')
+        .select('id, nome, revendedor_id, criado_em').eq('id', cliente_id).maybeSingle()
+      if (!cliente) return erro('cliente nao encontrado', 404)
+      const { data: dono } = await sb.from('revendedores')
+        .select('nome, usuario').eq('id', cliente.revendedor_id).maybeSingle()
+      const { data: disp } = await sb.from('dispositivos')
+        .select('id, mac, device_key, modelo, status, plano, trial_expira_em, expira_em, ativado_por, criado_em')
+        .eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
+      const { data: pls } = await sb.from('playlists')
+        .select('id, nome, tipo, host, free_dns, criado_em')
+        .eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
+      return json({
+        ok: true,
+        cliente: { ...cliente, revendedor: dono ? (dono.nome || dono.usuario) : '—' },
+        // deno-lint-ignore no-explicit-any
+        dispositivos: (disp || []).map((d: any) => ({ ...d, status: statusEfetivo(d) })),
+        playlists: pls || [],
+      })
     }
 
     if (acao === 'cliente_detalhe') {
