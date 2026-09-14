@@ -1481,7 +1481,9 @@ async function vApiChaves() {
       <b>Endereço da API:</b> <span class="mono">${esc(base)}</span><br>
       <b>Autenticação:</b> mande a chave no cabeçalho
       <span class="mono">Authorization: Bearer hp_…</span><br>
-      <b>O que a chave faz:</b> lê clientes e playlists, e cria playlist.
+      <b>O que a chave faz:</b> lê os clientes, aparelhos (com MAC) e listas de
+      <b>todos os revendedores</b>; cria lista, troca a lista de um cliente e
+      troca o domínio em massa.<br>
       <b>Não</b> ativa nem renova dispositivo (isso consome crédito), não mexe
       em revendedor, crédito, parceiro nem servidor, e não apaga nada.
     </div>

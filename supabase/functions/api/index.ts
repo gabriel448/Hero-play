@@ -12,32 +12,44 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 //     Authorization: Bearer hp_xxxxxxxx...      (ou)  X-API-Key: hp_xxxx...
 // A chave e de um ADMIN. Nao existe login de usuario/senha aqui.
 //
-// ESCOPO desta versao: LEITURA + UPLOAD DE LISTA. So isso.
-//   GET  /clientes                  -> { ok, clientes: [...] }
-//   GET  /clientes/:id              -> { ok, cliente, dispositivos, playlists }
-//   GET  /playlists                 -> { ok, playlists: [...] }
-//   POST /playlists                 -> cria playlist e vincula a dispositivos
+// ESCOPO: a chave de admin enxerga a PLATAFORMA INTEIRA — clientes,
+// dispositivos e playlists de TODOS os revendedores. Diferente das acoes da
+// `painel`, que mostram so o que e do proprio operador. E proposital: esta API
+// existe para o admin administrar tudo de fora.
+//
+//   GET   /clientes                 -> todos os clientes, com o revendedor dono
+//   GET   /clientes/:id             -> cliente + aparelhos + listas
+//   GET   /dispositivos             -> todos os aparelhos, com MAC e Key
+//   GET   /playlists                -> todas as listas, com a URL decifrada
+//   POST  /playlists                -> cria lista e vincula aos aparelhos
+//   PATCH /playlists/:id            -> troca a URL/nome/EPG de UMA lista
+//   POST  /playlists/migrar         -> troca de dominio em MASSA (previa + aplicar)
 //
 // ⚠️ O QUE ESTA API NAO FAZ, DE PROPOSITO:
 //   - nao ativa nem renova dispositivo (isso CONSOME CREDITO: chave vazada
 //     viraria prejuizo direto);
 //   - nao cria/remove revendedor, nao transfere credito, nao mexe em parceiro
 //     nem em servidor;
-//   - nao exclui nada.
-// Nada disso e por esquecimento: a superficie e uma lista fechada, escrita a
-// mao. Acao que nao esta aqui nao e alcancavel por chave de API, mesmo que
-// exista na `painel`.
+//   - nao apaga nada.
+// Nao e esquecimento: a superficie e uma lista fechada, escrita a mao. Acao que
+// nao esta aqui nao e alcancavel por chave de API, mesmo existindo na `painel`.
 // ============================================================================
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-api-key, apikey, content-type',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
 }
 
 const SB_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const sb = createClient(SB_URL, SERVICE)
+
+/** Teto por chamada na troca em massa: Edge Function tem limite de tempo e
+ *  cada linha custa um decifra + um cifra. Quem chama repete com `apos`. */
+const MAX_MIGRACAO = 300
+/** Teto das listagens. Acima disso, pagina com `apos`. */
+const MAX_LISTA = 1000
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -98,6 +110,32 @@ function urlValida(url: string): boolean {
 function hostDe(url: string): string | null {
   try { return new URL(url).host.toLowerCase().replace(/^www\./, '') || null } catch { return null }
 }
+/** "servidor.com:8080" -> "servidor.com". */
+const semPorta = (h: string) => h.replace(/:\d+$/, '')
+
+/**
+ * Normaliza o que vier como dominio: aceita URL inteira, "www.host" ou so o
+ * host. Sai host[:porta] — a mesma chave que a coluna `host` guarda.
+ */
+function normalizarDominio(entrada: unknown): string {
+  let s = String(entrada || '').trim().toLowerCase()
+  if (!s) return ''
+  if (!/^[a-z][a-z0-9+.-]*:\/\//.test(s)) s = 'http://' + s
+  try { return new URL(s).host.replace(/^www\./, '') } catch { return '' }
+}
+
+/**
+ * Filtro PostgREST das playlists de um dominio.
+ *
+ * Dominio SEM porta cobre qualquer porta ("servidor.com" cobre
+ * "servidor.com:8080"); COM porta casa exato. A URL de playlist IPTV quase
+ * sempre traz porta, entao exigir igualdade exata faria a busca nunca achar
+ * nada para quem digitou so o dominio.
+ */
+const filtroDoHost = (d: string) => (
+  /:\d+$/.test(d) ? `host.eq.${d}` : `host.eq.${d},host.like.${d}:*`
+)
+
 /**
  * Parceiro ATIVO que cobre este host. Cadastro sem porta cobre qualquer porta.
  * MESMA regra da `painel` e da `ativacao` — as tres precisam decidir igual,
@@ -106,7 +144,7 @@ function hostDe(url: string): string | null {
 async function parceiroDoHost(host: string | null) {
   if (!host) return null
   try {
-    const chaves = [...new Set([host, host.replace(/:\d+$/, '')])]
+    const chaves = [...new Set([host, semPorta(host)])]
     const { data } = await sb.from('parceiros')
       .select('id, dominio').in('dominio', chaves).eq('ativo', true)
     const achados = data || []
@@ -134,9 +172,9 @@ async function autenticar(req: Request) {
   const { data: rev } = await sb.from('revendedores')
     .select('id, nome, usuario, papel, ativo').eq('id', registro.revendedor_id).maybeSingle()
   if (!rev || !rev.ativo) return { erro: erro('a conta dona desta chave esta inativa', 403) }
-  // Nesta versao a API e so de admin. A checagem fica AQUI, e nao so na
-  // criacao da chave: se a conta for rebaixada depois, a chave para de valer
-  // na hora, sem ninguem precisar lembrar de revogar.
+  // O papel e conferido A CADA requisicao, e nao so na criacao da chave: se a
+  // conta for rebaixada depois, a chave para de valer na hora, sem ninguem
+  // precisar lembrar de revogar. E e o que sustenta o escopo "ve tudo".
   if (rev.papel !== 'admin') return { erro: erro('esta chave nao pertence a uma conta admin', 403) }
 
   // Best-effort: registrar uso nao pode derrubar a requisicao.
@@ -146,10 +184,24 @@ async function autenticar(req: Request) {
   return { rev }
 }
 
-/** Ids dos clientes deste operador (mesmo escopo que ele ve no painel). */
-async function clientesDoOperador(revId: string): Promise<string[]> {
-  const { data } = await sb.from('clientes').select('id').eq('revendedor_id', revId)
-  return (data || []).map((c) => c.id)
+/** Mapa cliente_id -> { nome, revendedor }, para as listagens nao virem cegas. */
+async function mapaDeClientes(ids: string[]) {
+  const mapa = new Map<string, { nome: string; revendedor: string | null }>()
+  if (!ids.length) return mapa
+  const { data: cls } = await sb.from('clientes').select('id, nome, revendedor_id').in('id', ids)
+  // deno-lint-ignore no-explicit-any
+  const revIds = [...new Set(((cls || []) as any[]).map((c) => c.revendedor_id).filter(Boolean))]
+  const nomeRev = new Map<string, string>()
+  if (revIds.length) {
+    const { data: revs } = await sb.from('revendedores').select('id, nome, usuario').in('id', revIds)
+    // deno-lint-ignore no-explicit-any
+    for (const r of ((revs || []) as any[])) nomeRev.set(r.id, r.nome || r.usuario || '')
+  }
+  // deno-lint-ignore no-explicit-any
+  for (const c of ((cls || []) as any[])) {
+    mapa.set(c.id, { nome: c.nome, revendedor: nomeRev.get(c.revendedor_id) ?? null })
+  }
+  return mapa
 }
 
 // deno-lint-ignore no-explicit-any
@@ -161,33 +213,93 @@ function statusEfetivo(d: any): string {
   return d.status || 'sem_lista'
 }
 
+/** Troca o HOST de uma URL preservando esquema, caminho e query. */
+function trocarHost(url: string, novoHost: string): string | null {
+  try { const u = new URL(url); u.host = novoHost; return u.toString() } catch { return null }
+}
+
+/** Reavalia `host`/`free_dns` e ativa os aparelhos se o destino for parceiro. */
+async function aplicarHostNaPlaylist(playlistId: string, novaUrl: string, epgCifrada: string | null, epgNova: string | null) {
+  const novoHost = hostDe(novaUrl)
+  const parceiro = await parceiroDoHost(novoHost)
+  // ⚠️ O `host` em texto claro TEM que acompanhar a URL: e por ele que se casa
+  // a playlist com um parceiro, se conta device por dominio e se fecha fatura.
+  const { error } = await sb.from('playlists').update({
+    url_cifrada: await cifrar(novaUrl),
+    epg_cifrada: epgNova !== null ? epgNova : epgCifrada,
+    host: novoHost,
+    free_dns: !!parceiro,
+    atualizado_em: new Date().toISOString(),
+  }).eq('id', playlistId)
+  if (error) return { erro: error.message, ativados: 0, parceiro: !!parceiro }
+
+  let ativados = 0
+  if (parceiro) {
+    const { data: vins } = await sb.from('dispositivo_playlists')
+      .select('dispositivo_id').eq('playlist_id', playlistId)
+    // deno-lint-ignore no-explicit-any
+    const devs = [...new Set(((vins || []) as any[]).map((v) => v.dispositivo_id))]
+    if (devs.length) {
+      await sb.from('dispositivos')
+        .update({ status: 'ativo', ativado_por: 'parceiro', atualizado_em: new Date().toISOString() })
+        .in('id', devs).neq('status', 'banido')
+      ativados = devs.length
+    }
+  }
+  return { erro: null, ativados, parceiro: !!parceiro }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
 
   try {
     const auth = await autenticar(req)
     if (auth.erro) return auth.erro
-    const rev = auth.rev!
 
-    // O caminho vem depois do nome da funcao: /api/clientes -> ["clientes"]
-    const partes = new URL(req.url).pathname.split('/').filter(Boolean)
+    const url = new URL(req.url)
+    const partes = url.pathname.split('/').filter(Boolean)
     const i = partes.indexOf('api')
     const rota = (i >= 0 ? partes.slice(i + 1) : partes)
+    const apos = (url.searchParams.get('apos') || '').trim()
 
     // ── GET /clientes ────────────────────────────────────────────────────────
+    // TODOS os clientes da plataforma, com o revendedor dono de cada um.
     if (req.method === 'GET' && rota[0] === 'clientes' && !rota[1]) {
-      const { data } = await sb.from('clientes')
-        .select('id, nome, criado_em').eq('revendedor_id', rev.id)
-        .order('criado_em', { ascending: false })
-      return json({ ok: true, clientes: data || [] })
+      let q = sb.from('clientes').select('id, nome, revendedor_id, criado_em')
+        .order('id', { ascending: true }).limit(MAX_LISTA + 1)
+      if (apos) q = q.gt('id', apos)
+      const { data } = await q
+      const linhas = data || []
+      const restam_mais = linhas.length > MAX_LISTA
+      const lote = linhas.slice(0, MAX_LISTA)
+      // deno-lint-ignore no-explicit-any
+      const revIds = [...new Set((lote as any[]).map((c) => c.revendedor_id).filter(Boolean))]
+      const nomeRev = new Map<string, string>()
+      if (revIds.length) {
+        const { data: revs } = await sb.from('revendedores').select('id, nome, usuario').in('id', revIds)
+        // deno-lint-ignore no-explicit-any
+        for (const r of ((revs || []) as any[])) nomeRev.set(r.id, r.nome || r.usuario || '')
+      }
+      return json({
+        ok: true,
+        // deno-lint-ignore no-explicit-any
+        clientes: (lote as any[]).map((c) => ({
+          id: c.id, nome: c.nome, criado_em: c.criado_em,
+          revendedor_id: c.revendedor_id, revendedor: nomeRev.get(c.revendedor_id) ?? null,
+        })),
+        restam_mais,
+        proximo: restam_mais && lote.length ? lote[lote.length - 1].id : null,
+      })
     }
 
     // ── GET /clientes/:id ────────────────────────────────────────────────────
     if (req.method === 'GET' && rota[0] === 'clientes' && rota[1]) {
       const cliente_id = rota[1]
       const { data: cliente } = await sb.from('clientes')
-        .select('id, nome, criado_em').eq('id', cliente_id).eq('revendedor_id', rev.id).maybeSingle()
+        .select('id, nome, revendedor_id, criado_em').eq('id', cliente_id).maybeSingle()
       if (!cliente) return erro('cliente nao encontrado', 404)
+      const { data: rev } = await sb.from('revendedores')
+        .select('id, nome, usuario').eq('id', cliente.revendedor_id).maybeSingle()
 
       const { data: disp } = await sb.from('dispositivos')
         .select('id, mac, device_key, modelo, status, plano, trial_expira_em, expira_em, ativado_por, criado_em')
@@ -197,36 +309,140 @@ Deno.serve(async (req: Request) => {
         .eq('cliente_id', cliente_id).order('criado_em', { ascending: true })
       return json({
         ok: true,
-        cliente,
+        cliente: {
+          ...cliente,
+          revendedor: rev ? (rev.nome || rev.usuario || null) : null,
+        },
         // deno-lint-ignore no-explicit-any
         dispositivos: (disp || []).map((d: any) => ({ ...d, status: statusEfetivo(d) })),
         playlists: pls || [],
       })
     }
 
+    // ── GET /dispositivos ────────────────────────────────────────────────────
+    // TODOS os aparelhos, com MAC e Key, e de quem e cada um.
+    if (req.method === 'GET' && rota[0] === 'dispositivos' && !rota[1]) {
+      let q = sb.from('dispositivos')
+        .select('id, mac, device_key, modelo, status, plano, trial_expira_em, expira_em, cliente_id, ativado_por, criado_em, atualizado_em')
+        .order('id', { ascending: true }).limit(MAX_LISTA + 1)
+      if (apos) q = q.gt('id', apos)
+      const { data } = await q
+      const linhas = data || []
+      const restam_mais = linhas.length > MAX_LISTA
+      const lote = linhas.slice(0, MAX_LISTA)
+      // deno-lint-ignore no-explicit-any
+      const mapa = await mapaDeClientes([...new Set((lote as any[]).map((d) => d.cliente_id).filter(Boolean))])
+      return json({
+        ok: true,
+        // deno-lint-ignore no-explicit-any
+        dispositivos: (lote as any[]).map((d) => ({
+          ...d,
+          status: statusEfetivo(d),
+          cliente: mapa.get(d.cliente_id)?.nome ?? null,
+          revendedor: mapa.get(d.cliente_id)?.revendedor ?? null,
+        })),
+        restam_mais,
+        proximo: restam_mais && lote.length ? lote[lote.length - 1].id : null,
+      })
+    }
+
     // ── GET /playlists ───────────────────────────────────────────────────────
-    // A URL vai DECIFRADA: e a chave do admin, e sem a URL a integracao nao
-    // consegue conferir o que subiu.
+    // TODAS as listas, com a URL decifrada: e a chave do admin, e sem a URL a
+    // integracao nao consegue conferir o que subiu.
     if (req.method === 'GET' && rota[0] === 'playlists' && !rota[1]) {
-      const cids = await clientesDoOperador(rev.id)
-      if (!cids.length) return json({ ok: true, playlists: [] })
-      const { data: pls } = await sb.from('playlists')
+      let q = sb.from('playlists')
         .select('id, cliente_id, nome, tipo, url_cifrada, host, free_dns, criado_em, atualizado_em')
-        .in('cliente_id', cids).order('criado_em', { ascending: false }).limit(1000)
+        .order('id', { ascending: true }).limit(MAX_LISTA + 1)
+      if (apos) q = q.gt('id', apos)
+      const filtroHost = normalizarDominio(url.searchParams.get('host'))
+      if (filtroHost) q = q.or(filtroDoHost(filtroHost))
+      const { data } = await q
+      const linhas = data || []
+      const restam_mais = linhas.length > MAX_LISTA
+      const lote = linhas.slice(0, MAX_LISTA)
+      // deno-lint-ignore no-explicit-any
+      const mapa = await mapaDeClientes([...new Set((lote as any[]).map((p) => p.cliente_id).filter(Boolean))])
       const playlists = []
-      for (const p of (pls || [])) {
-        let url = ''
-        try { url = await decifrar(p.url_cifrada) } catch { /* nao derruba a lista inteira */ }
+      for (const p of lote) {
+        let lista_url = ''
+        try { lista_url = await decifrar(p.url_cifrada) } catch { /* nao derruba a lista inteira */ }
         playlists.push({
-          id: p.id, cliente_id: p.cliente_id, nome: p.nome, tipo: p.tipo, url,
+          id: p.id, cliente_id: p.cliente_id,
+          cliente: mapa.get(p.cliente_id)?.nome ?? null,
+          revendedor: mapa.get(p.cliente_id)?.revendedor ?? null,
+          nome: p.nome, tipo: p.tipo, url: lista_url,
           host: p.host, free_dns: !!p.free_dns,
           criado_em: p.criado_em, atualizado_em: p.atualizado_em,
         })
       }
-      return json({ ok: true, playlists })
+      return json({
+        ok: true, playlists, restam_mais,
+        proximo: restam_mais && lote.length ? lote[lote.length - 1].id : null,
+      })
     }
 
-    // ── POST /playlists ──────────────────────────────────────────────────────
+    // ── POST /playlists/migrar — troca de dominio em MASSA ───────────────────
+    // Corpo: { de, para, aplicar?, apos? }
+    // Sem `aplicar: true` e PREVIA: nada e alterado.
+    if (req.method === 'POST' && rota[0] === 'playlists' && rota[1] === 'migrar') {
+      const body = await req.json().catch(() => ({}))
+      const de = normalizarDominio(body.de)
+      const para = normalizarDominio(body.para)
+      const aplicar = body.aplicar === true
+      const cursor = String(body.apos || '').trim()
+      if (!de || !para) return erro('informe `de` e `para` (dominio ou URL do servidor)')
+      if (de === para) return erro('`de` e `para` sao o mesmo dominio')
+
+      // Casa por HOST, nao por prefixo de URL. Prefixo casaria vizinho:
+      // "old.com" pegaria "old.company.com" (porque "company" comeca com
+      // "com") e a troca reescreveria a playlist errada.
+      let q = sb.from('playlists')
+        .select('id, cliente_id, nome, url_cifrada, epg_cifrada, host')
+        .or(filtroDoHost(de)).order('id', { ascending: true }).limit(MAX_MIGRACAO + 1)
+      if (cursor) q = q.gt('id', cursor)
+      const { data } = await q
+      const linhas = data || []
+      const restam_mais = linhas.length > MAX_MIGRACAO
+      const lote = linhas.slice(0, MAX_MIGRACAO)
+
+      const afetadas = []
+      let alteradas = 0
+      for (const p of lote) {
+        let atual = ''
+        try { atual = await decifrar(p.url_cifrada) } catch { continue }
+        // O host do destino herda a porta do cadastro quando `para` nao traz
+        // uma: trocar "a.com:8080" por "b.com" mantém :8080.
+        const novoHost = /:\d+$/.test(para) ? para
+          : (/:\d+$/.test(p.host || '') ? `${para}:${(p.host || '').split(':').pop()}` : para)
+        const nova = trocarHost(atual, novoHost)
+        if (!nova) continue
+        afetadas.push({ id: p.id, nome: p.nome, cliente_id: p.cliente_id, de: atual, para: nova })
+        if (aplicar) {
+          let epgNova: string | null = null
+          if (p.epg_cifrada) {
+            try {
+              const e = await decifrar(p.epg_cifrada)
+              const trocada = hostDe(e) === p.host ? trocarHost(e, novoHost) : null
+              if (trocada) epgNova = await cifrar(trocada)
+            } catch { /* EPG ilegivel nao impede a troca da lista */ }
+          }
+          const r = await aplicarHostNaPlaylist(p.id, nova, p.epg_cifrada, epgNova)
+          if (!r.erro) alteradas++
+        }
+      }
+      return json({
+        ok: true,
+        aplicado: aplicar,
+        encontradas: afetadas.length,
+        alteradas,
+        // Na previa vai a lista inteira do lote, para conferir antes de aplicar.
+        amostra: aplicar ? afetadas.slice(0, 20) : afetadas,
+        restam_mais,
+        proximo: restam_mais && lote.length ? lote[lote.length - 1].id : null,
+      })
+    }
+
+    // ── POST /playlists — cria lista ─────────────────────────────────────────
     // Corpo: { cliente_id, nome?, lista_url, epg_url?, dispositivo_ids? }
     if (req.method === 'POST' && rota[0] === 'playlists' && !rota[1]) {
       const body = await req.json().catch(() => ({}))
@@ -240,9 +456,7 @@ Deno.serve(async (req: Request) => {
       if (!urlValida(lista_url)) return erro('lista_url invalida (use http ou https)')
       if (epg_url && !urlValida(epg_url)) return erro('epg_url invalida (use http ou https)')
 
-      // O cliente TEM que ser deste operador — nao basta o id existir.
-      const { data: cliente } = await sb.from('clientes')
-        .select('id').eq('id', cliente_id).eq('revendedor_id', rev.id).maybeSingle()
+      const { data: cliente } = await sb.from('clientes').select('id').eq('id', cliente_id).maybeSingle()
       if (!cliente) return erro('cliente nao encontrado', 404)
 
       const host = hostDe(lista_url)
@@ -256,7 +470,8 @@ Deno.serve(async (req: Request) => {
       }).select('id, nome, tipo, host, free_dns, criado_em').single()
       if (error) return erro(`falha ao gravar a playlist: ${error.message}`, 500)
 
-      // Alvos: os dispositivos informados (conferidos), ou TODOS do cliente.
+      // Alvos: os dispositivos informados (conferidos contra o cliente), ou
+      // TODOS do cliente.
       let alvos = dispositivo_ids
       if (alvos.length) {
         const { data: meus } = await sb.from('dispositivos')
@@ -292,7 +507,47 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, playlist: pl, vinculados: alvos.length, parceiro: !!parceiro, ativados }, 201)
     }
 
-    return erro('rota nao encontrada. Disponiveis: GET /clientes, GET /clientes/:id, GET /playlists, POST /playlists', 404)
+    // ── PATCH /playlists/:id — troca a lista de UM cliente ───────────────────
+    // Corpo: { lista_url?, nome?, epg_url? } — manda so o que muda.
+    if (req.method === 'PATCH' && rota[0] === 'playlists' && rota[1] && rota[1] !== 'migrar') {
+      const playlist_id = rota[1]
+      const body = await req.json().catch(() => ({}))
+      const lista_url = String(body.lista_url || '').trim()
+      const epg_url = String(body.epg_url || '').trim()
+      const nome = String(body.nome || '').trim()
+      if (!lista_url && !nome && !epg_url) return erro('nada para alterar: mande `lista_url`, `nome` ou `epg_url`')
+      if (lista_url && !urlValida(lista_url)) return erro('lista_url invalida (use http ou https)')
+      if (epg_url && !urlValida(epg_url)) return erro('epg_url invalida (use http ou https)')
+
+      const { data: pl } = await sb.from('playlists')
+        .select('id, cliente_id, nome, url_cifrada, epg_cifrada, host').eq('id', playlist_id).maybeSingle()
+      if (!pl) return erro('playlist nao encontrada', 404)
+
+      if (nome) await sb.from('playlists').update({ nome }).eq('id', playlist_id)
+
+      let ativados = 0, parceiro = false
+      if (lista_url) {
+        const epgNova = epg_url ? await cifrar(epg_url) : null
+        const r = await aplicarHostNaPlaylist(playlist_id, lista_url, pl.epg_cifrada, epgNova)
+        if (r.erro) return erro(`falha ao atualizar a playlist: ${r.erro}`, 500)
+        ativados = r.ativados; parceiro = r.parceiro
+      } else if (epg_url) {
+        await sb.from('playlists')
+          .update({ epg_cifrada: await cifrar(epg_url), atualizado_em: new Date().toISOString() })
+          .eq('id', playlist_id)
+      }
+
+      const { data: depois } = await sb.from('playlists')
+        .select('id, cliente_id, nome, tipo, host, free_dns, atualizado_em').eq('id', playlist_id).maybeSingle()
+      if (!depois) return erro('o banco nao confirmou a alteracao', 500)
+      return json({ ok: true, playlist: depois, parceiro, ativados })
+    }
+
+    return erro(
+      'rota nao encontrada. Disponiveis: GET /clientes, GET /clientes/:id, GET /dispositivos, '
+      + 'GET /playlists, POST /playlists, PATCH /playlists/:id, POST /playlists/migrar',
+      404,
+    )
   } catch (e) {
     return erro((e as Error).message || 'erro interno', 500)
   }

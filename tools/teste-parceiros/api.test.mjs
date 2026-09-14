@@ -19,10 +19,11 @@ function extrair(src, marcador, fim) {
   assert.ok(i >= 0, `não achei "${marcador}"`)
   const j = src.indexOf(fim, i)
   assert.ok(j > i, `não achei o fim de "${marcador}"`)
+  // A alternativa (`| null`) tem que sair JUNTO do `: string`, senão sobra um
+  // `| null` solto e o `new Function` não compila.
   return src.slice(i, j + fim.length)
     .replace(/export /g, '')
-    .replace(/:\s*Promise<string>/g, '')
-    .replace(/:\s*string/g, '')
+    .replace(/:\s*(?:Promise<string>|string\[\]|string)(?:\s*\|\s*null)?/g, '')
 }
 
 test('[executa] o hash da chave é IGUAL nos dois arquivos', async () => {
@@ -97,25 +98,93 @@ test('a superfície é FECHADA: nada que gaste crédito ou mexa em conta', () =>
   assert.doesNotMatch(api, /\.delete\(\)/)
 })
 
-test('as rotas são as quatro combinadas, e só elas', () => {
-  const rotas = [...api.matchAll(/req\.method === '(GET|POST)' && rota\[0\] === '([a-z]+)'/g)]
+test('as sete rotas combinadas, e só elas', () => {
+  const rotas = [...api.matchAll(/req\.method === '(GET|POST|PATCH)' && rota\[0\] === '([a-z]+)'/g)]
     .map((m) => `${m[1]} /${m[2]}`)
-  assert.deepEqual(rotas, ['GET /clientes', 'GET /clientes', 'GET /playlists', 'POST /playlists'])
+  assert.deepEqual(rotas, [
+    'GET /clientes',       // lista
+    'GET /clientes',       // detalhe (:id)
+    'GET /dispositivos',
+    'GET /playlists',
+    'POST /playlists',     // migrar
+    'POST /playlists',     // criar
+    'PATCH /playlists',
+  ])
 })
 
-test('escopo: só enxerga e escreve nos clientes do próprio operador', () => {
-  // Todo caminho passa por `revendedor_id = rev.id`. Sem isso a chave do admin
-  // veria cliente de revendedor que não é dele.
+test('escopo de admin: enxerga a plataforma inteira, de propósito', () => {
+  // Diferente da `painel`, que filtra tudo por `revendedor_id = rev.id`. Aqui a
+  // chave é de admin e a API existe para administrar tudo de fora — então as
+  // listagens NÃO podem estar presas ao dono da chave.
   const listar = api.slice(api.indexOf("rota[0] === 'clientes' && !rota[1]"), api.indexOf("rota[0] === 'clientes' && rota[1]"))
-  assert.match(listar, /eq\('revendedor_id', rev\.id\)/)
-  const detalhe = api.slice(api.indexOf("rota[0] === 'clientes' && rota[1]"), api.indexOf("rota[0] === 'playlists' && !rota[1]"))
-  assert.match(detalhe, /eq\('revendedor_id', rev\.id\)/)
-  assert.match(api, /async function clientesDoOperador/)
-  // No POST o cliente é conferido antes de gravar qualquer coisa.
-  const post = api.slice(api.indexOf("req.method === 'POST' && rota[0] === 'playlists'"))
-  assert.match(post, /eq\('id', cliente_id\)\.eq\('revendedor_id', rev\.id\)/)
-  // E os dispositivos informados também são conferidos contra o cliente.
+  assert.doesNotMatch(listar, /eq\('revendedor_id', rev\.id\)/)
+  // Mas a resposta diz de QUEM é cada cliente — listagem cega seria inútil.
+  assert.match(listar, /revendedor: nomeRev\.get/)
+  const disp = api.slice(api.indexOf("rota[0] === 'dispositivos'"), api.indexOf("rota[0] === 'playlists' && !rota[1]"))
+  assert.match(disp, /mac, device_key/)
+  assert.match(disp, /revendedor: mapa\.get/)
+  // O que sustenta esse escopo é o papel ser conferido a cada requisição.
+  assert.match(api, /rev\.papel !== 'admin'/)
+})
+
+test('criar lista não contamina outro cliente', () => {
+  const post = api.slice(api.indexOf("req.method === 'POST' && rota[0] === 'playlists' && !rota[1]"))
+  // O cliente tem que existir…
+  assert.match(post, /from\('clientes'\)\.select\('id'\)\.eq\('id', cliente_id\)/)
+  // …e os dispositivos informados têm que ser DELE. Sem isso, a lista de um
+  // cliente entraria no aparelho de outro.
   assert.match(post, /eq\('cliente_id', cliente_id\)\.in\('id', alvos\)/)
+  assert.match(post, /nenhum dos dispositivo_ids pertence a este cliente/)
+})
+
+test('[executa] troca em massa casa por HOST, nunca por prefixo de URL', () => {
+  // Prefixo pegaria vizinho: "old.com" casaria "old.company.com" (porque
+  // "company" começa com "com") e a troca reescreveria a playlist errada.
+  const filtro = new Function(`${extrair(api, 'const filtroDoHost =', "`\n)")}; return filtroDoHost`)()
+  assert.equal(filtro('a.com'), 'host.eq.a.com,host.like.a.com:*')
+  assert.equal(filtro('a.com:8080'), 'host.eq.a.com:8080')
+
+  const trocar = new Function(`${extrair(api, 'function trocarHost(', '\n}')}; return trocarHost`)()
+  // Preserva esquema, caminho e query — só o host muda.
+  assert.equal(
+    trocar('http://a.com:8080/get.php?username=u&password=p', 'b.com:9090'),
+    'http://b.com:9090/get.php?username=u&password=p',
+  )
+  assert.equal(trocar('https://a.com/lista.m3u', 'b.com'), 'https://b.com/lista.m3u')
+  assert.equal(trocar('não é url', 'b.com'), null)
+
+  const migrar = api.slice(api.indexOf("rota[1] === 'migrar'"), api.indexOf("req.method === 'POST' && rota[0] === 'playlists' && !rota[1]"))
+  assert.match(migrar, /or\(filtroDoHost\(de\)\)/)
+  assert.doesNotMatch(migrar, /startsWith\(/)
+})
+
+test('troca em massa é PRÉVIA por padrão', () => {
+  const migrar = api.slice(api.indexOf("rota[1] === 'migrar'"), api.indexOf("req.method === 'POST' && rota[0] === 'playlists' && !rota[1]"))
+  // Só altera com `aplicar: true` explícito. Um corpo esquecido não reescreve
+  // as listas da plataforma inteira.
+  assert.match(migrar, /const aplicar = body\.aplicar === true/)
+  assert.match(migrar, /if \(aplicar\) \{/)
+  assert.match(migrar, /de === para/)          // recusa origem igual ao destino
+  // Pagina por cursor: cada volta anda, sem repetir o mesmo lote.
+  assert.match(migrar, /q\.gt\('id', cursor\)/)
+  assert.match(migrar, /proximo: restam_mais/)
+  // E devolve os dois números, para dar pra conferir em vez de confiar.
+  assert.match(migrar, /encontradas: afetadas\.length/)
+  assert.match(migrar, /alteradas,/)
+})
+
+test('toda troca de URL mantém host e free_dns em dia', () => {
+  // O `host` em texto claro é o que casa parceiro, conta device por domínio e
+  // fecha fatura. Deixar ele para trás foi bug real no `migrar_url` do painel.
+  const aplicar = api.slice(api.indexOf('async function aplicarHostNaPlaylist'), api.indexOf('Deno.serve'))
+  assert.match(aplicar, /host: novoHost/)
+  assert.match(aplicar, /free_dns: !!parceiro/)
+  assert.match(aplicar, /url_cifrada: await cifrar\(novaUrl\)/)
+  // Um único ponto faz isso — PATCH e migração em massa passam os dois por aqui.
+  const patch = api.slice(api.indexOf("req.method === 'PATCH'"))
+  assert.match(patch, /aplicarHostNaPlaylist\(/)
+  const migrar = api.slice(api.indexOf("rota[1] === 'migrar'"), api.indexOf("req.method === 'POST' && rota[0] === 'playlists' && !rota[1]"))
+  assert.match(migrar, /aplicarHostNaPlaylist\(/)
 })
 
 test('a URL da playlist entra CIFRADA, como no painel', () => {
