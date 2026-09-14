@@ -446,6 +446,33 @@ alter table public.servidores enable row level security;
 revoke all on public.servidores from anon, authenticated;
 grant all on public.servidores to service_role;
 
+-- ════════════════════════════════════════════════════════════════════════════
+--  API PUBLICA (chaves) — integracao com paineis de terceiros.
+--
+--  A chave NUNCA e guardada em texto: so o SHA-256 dela. Quem cria ve o valor
+--  UMA vez, na resposta da criacao; depois nao ha como recuperar, so revogar e
+--  gerar outra. Se o banco vazar, as chaves nao vazam junto.
+--
+--  `prefixo` e o pedacinho visivel (ex.: "hp_a1b2c3d4") para o admin distinguir
+--  uma chave da outra na tela sem precisar do segredo.
+-- ════════════════════════════════════════════════════════════════════════════
+create table if not exists public.api_chaves (
+  id            uuid primary key default gen_random_uuid(),
+  nome          text not null,                  -- rotulo ("Painel do Danny", "Teste")
+  prefixo       text not null,                  -- inicio da chave, visivel
+  hash          text not null,                  -- SHA-256 hex da chave inteira
+  revendedor_id uuid not null references public.revendedores(id) on delete cascade,
+  ativo         boolean not null default true,
+  ultimo_uso_em timestamptz,
+  criado_em     timestamptz not null default now(),
+  revogada_em   timestamptz
+);
+create unique index if not exists idx_api_chaves_hash on public.api_chaves(hash);
+create index if not exists idx_api_chaves_rev on public.api_chaves(revendedor_id);
+alter table public.api_chaves enable row level security;
+revoke all on public.api_chaves from anon, authenticated;
+grant all on public.api_chaves to service_role;
+
 notify pgrst, 'reload schema';
 
 -- ════════════════════════════════════════════════════════════════════════════

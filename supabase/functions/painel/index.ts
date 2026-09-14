@@ -244,6 +244,23 @@ function dominioConfere(p: any, enviado: unknown): boolean {
   return !d || d === p.dominio
 }
 
+/**
+ * Chave de API: `hp_` + 40 hex. Do banco so vai o SHA-256 — o valor em texto
+ * aparece UMA vez, na resposta da criacao, e nunca mais. Se o banco vazar, as
+ * chaves nao vazam junto; para "recuperar" so revogando e gerando outra.
+ *
+ * O mesmo hash e recalculado pela Edge Function `api` a cada requisicao. As
+ * duas contas TEM que bater — mudar uma sem a outra derruba toda integracao.
+ */
+async function hashDaChave(chave: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(chave))
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+function gerarChaveApi(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(20))
+  return 'hp_' + [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 // Código de indicação: 8 chars sem caracteres ambíguos (0/O/1/I).
 function gerarCodigo(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -830,6 +847,53 @@ Deno.serve(async (req: Request) => {
       const { error } = await sb.from('servidores').delete().eq('id', id)
       if (error) return erro(error.message)
       return json({ ok: true })
+    }
+
+    // ── CHAVES DE API (só admin) ─────────────────────────────────────────────
+    // Usadas pela Edge Function `api`, que expõe LEITURA + UPLOAD DE LISTA para
+    // painéis de terceiros. A `api` NÃO alcança ativação, crédito, revendedor,
+    // parceiro nem servidor — a superfície de lá é uma lista fechada.
+    if (acao === 'listar_api_chaves') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data } = await sb.from('api_chaves')
+        .select('id, nome, prefixo, ativo, ultimo_uso_em, criado_em, revogada_em')
+        .eq('revendedor_id', rev.id).order('criado_em', { ascending: false })
+      // Sem `hash` na resposta, de propósito: ele não serve para nada na tela e
+      // é material para ataque de dicionário se a resposta vazar.
+      return json({ ok: true, chaves: data || [] })
+    }
+
+    if (acao === 'criar_api_chave') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const nome = (body.nome || '').trim()
+      if (!nome) return erro('dê um nome à chave (ex.: "Painel do Danny") para saber qual revogar depois')
+      const chave = gerarChaveApi()
+      const { data, error } = await sb.from('api_chaves').insert({
+        nome,
+        prefixo: chave.slice(0, 11),      // "hp_" + 8 hex: distingue na tela
+        hash: await hashDaChave(chave),
+        revendedor_id: rev.id,
+      }).select('id, nome, prefixo, ativo, criado_em').single()
+      if (error) return erro(error.message)
+      // `chave` só aqui. Quem não copiar agora, gera outra.
+      return json({ ok: true, chave, registro: data, aviso: 'Copie a chave agora: ela não será mostrada de novo.' })
+    }
+
+    if (acao === 'revogar_api_chave') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = String(body.id || '').trim()
+      if (!id) return erro('id obrigatorio')
+      const { data: antes } = await sb.from('api_chaves')
+        .select('id, nome').eq('id', id).eq('revendedor_id', rev.id).maybeSingle()
+      if (!antes) return erro('chave nao encontrada', 404)
+      const { error } = await sb.from('api_chaves')
+        .update({ ativo: false, revogada_em: new Date().toISOString() }).eq('id', id)
+      if (error) return erro(error.message)
+      // Confirma relendo: revogação que não pegou e responde "ok" é pior que
+      // erro — o admin acha que fechou a porta.
+      const { data: depois } = await sb.from('api_chaves').select('ativo').eq('id', id).maybeSingle()
+      if (!depois || depois.ativo) return erro('o banco não confirmou a revogação da chave', 500)
+      return json({ ok: true, nome: antes.nome })
     }
 
     // ── Caixa de entrada ──────────────────────────────────────────────────────

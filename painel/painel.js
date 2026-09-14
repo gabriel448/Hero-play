@@ -161,6 +161,7 @@ const NAV = [
     // Acordo comercial da plataforma — quem cadastra domínio parceiro é o admin.
     { id: 'parceiros', rotulo: 'Parceiros', ic: 'globe' },
     { id: 'servidores', rotulo: 'Servidores', ic: 'server' },
+    { id: 'apichaves', rotulo: 'API', ic: 'link' },
   ] },
 ]
 
@@ -218,7 +219,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves }[v]
   if (fn) fn(param)
 }
 
@@ -1458,6 +1459,108 @@ function modalServidor(s, recarregar) {
       if (!v.host) return 'Informe o host do servidor'
       const r = await api('salvar_servidor', { id: s ? s.id : '', ...v })
       toast(s ? 'Servidor atualizado' : 'Servidor criado — código ' + r.codigo)
+      recarregar()
+      return null
+    },
+  })
+}
+
+// ── Chaves de API (SÓ ADMIN) ────────────────────────────────────────────────
+// Abrem a Edge Function `api`, que expõe LEITURA + UPLOAD DE LISTA para painéis
+// de terceiros. A chave aparece UMA vez, na criação: do banco só sai o hash.
+async function vApiChaves() {
+  if (me.papel !== 'admin') { placeholder('API', 'Área restrita ao administrador', 'link') ; return }
+  // Deriva da mesma base da função `painel` — não repete a URL do projeto.
+  const base = FN.replace(/\/painel$/, '/api')
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head">
+      <div><h1>API</h1><p>Chaves para outros painéis lerem seus clientes e subirem listas.</p></div>
+      <button class="btn" id="ak-novo">${svg('plus')} Nova chave</button>
+    </div>
+    <div class="sv-ajuda" style="margin-bottom:14px">
+      <b>Endereço da API:</b> <span class="mono">${esc(base)}</span><br>
+      <b>Autenticação:</b> mande a chave no cabeçalho
+      <span class="mono">Authorization: Bearer hp_…</span><br>
+      <b>O que a chave faz:</b> lê clientes e playlists, e cria playlist.
+      <b>Não</b> ativa nem renova dispositivo (isso consome crédito), não mexe
+      em revendedor, crédito, parceiro nem servidor, e não apaga nada.
+    </div>
+    <div class="lista" id="ak-lista"><div class="vazio">Carregando…</div></div>
+  </div>`
+  document.getElementById('ak-novo').onclick = () => modalNovaChave(carregar)
+  const meu = viewAtual()
+
+  function pintar(chaves) {
+    const l = document.getElementById('ak-lista'); if (!l) return
+    if (!chaves.length) { l.innerHTML = '<div class="vazio">Nenhuma chave criada.</div>'; return }
+    l.innerHTML = chaves.map((c) => `<div class="sv-card">
+      <div class="sv-row">
+        <div class="sv-meta">
+          <div class="sv-top">
+            <span class="mono">${esc(c.prefixo)}…</span>
+            <span class="badge badge-${c.ativo ? 'ok' : 'warn'}">${c.ativo ? 'Ativa' : 'Revogada'}</span>
+          </div>
+          <div class="sv-sub">
+            <span>${esc(c.nome)}</span>
+            <span>${c.ultimo_uso_em ? 'Último uso: ' + new Date(c.ultimo_uso_em).toLocaleString('pt-BR') : 'Nunca usada'}</span>
+          </div>
+        </div>
+        <div class="sv-acoes">
+          ${c.ativo ? `<button class="sv-perigo" data-revogar="${esc(c.id)}" data-nome="${esc(c.nome)}">Revogar</button>` : ''}
+        </div>
+      </div>
+    </div>`).join('')
+
+    l.querySelectorAll('[data-revogar]').forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm(`Revogar a chave "${b.dataset.nome}"?\n\nQuem estiver usando ela para de funcionar na hora. Não dá para desfazer — só criar outra.`)) return
+        try { await api('revogar_api_chave', { id: b.dataset.revogar }); toast('Chave revogada'); carregar() }
+        catch (e) { toast(e.message, true) }
+      }
+    })
+  }
+
+  async function carregar() {
+    const l = document.getElementById('ak-lista'); if (l) l.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const { chaves } = await api('listar_api_chaves')
+      if (meu !== viewAtual()) return
+      pintar(chaves)
+    } catch (e) {
+      if (meu !== viewAtual()) return
+      const el = document.getElementById('ak-lista'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+  carregar()
+}
+
+function modalNovaChave(recarregar) {
+  abrirModal({
+    titulo: 'Nova chave de API',
+    okLabel: 'Criar chave',
+    aviso: 'A chave aparece <b>uma única vez</b>, agora. Ela não fica guardada em texto — se perder, é só revogar e criar outra.',
+    campos: [
+      { id: 'nome', label: 'Para que é esta chave?', placeholder: 'Ex.: Painel do Danny' },
+    ],
+    onOk: async (v) => {
+      if (!v.nome) return 'Dê um nome à chave, para saber qual revogar depois'
+      const r = await api('criar_api_chave', v)
+      // Mostra a chave numa caixa própria: some da tela e não volta.
+      setTimeout(() => {
+        abrirModal({
+          titulo: 'Copie a chave agora',
+          okLabel: 'Já copiei',
+          aviso: 'Esta é a <b>única</b> vez que ela aparece. Guarde num lugar seguro.',
+          campos: [
+            { id: 'chave', label: 'Chave de API', value: r.chave },
+          ],
+          onOk: async () => null,
+        })
+        navigator.clipboard?.writeText(r.chave).then(
+          () => toast('Chave copiada para a área de transferência'),
+          () => { /* sem permissão: ela está visível no campo */ },
+        )
+      }, 120)
       recarregar()
       return null
     },
