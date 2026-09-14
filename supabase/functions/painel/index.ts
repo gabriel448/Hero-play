@@ -337,13 +337,6 @@ function erroRpc(e: any, oque: string) {
 }
 
 /**
- * Status REAL do device: a coluna `status` continua 'ativo' depois do
- * vencimento (ninguem passa varrendo o banco), entao quem manda e a DATA.
- * Mesma regra da Edge Function `ativacao` — as duas TEM que concordar, senao o
- * painel diz "ativo" e a TV nao abre.
- */
-// deno-lint-ignore no-explicit-any
-/**
  * `.in(...)` com muitos IDs estoura a URL. PostgREST poe a lista inteira na
  * query string: 2000 UUIDs passam de 70 KB e o pedido morre bem antes disso.
  * As visoes de plataforma buscam por milhares de IDs de uma vez, entao toda
@@ -389,6 +382,13 @@ async function donosDosClientes(clienteIds: (string | null)[]) {
   return mapa
 }
 
+/**
+ * Status REAL do device: a coluna `status` continua 'ativo' depois do
+ * vencimento (ninguem passa varrendo o banco), entao quem manda e a DATA.
+ * Mesma regra da Edge Function `ativacao` — as duas TEM que concordar, senao o
+ * painel diz "ativo" e a TV nao abre.
+ */
+// deno-lint-ignore no-explicit-any
 function statusEfetivo(d: any): string {
   const agora = Date.now()
   if (d.status === 'banido') return 'banido'
