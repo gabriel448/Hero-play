@@ -43,9 +43,14 @@ mesmo que exista no painel.
 **Escopo:** a chave de admin enxerga a **plataforma inteira** — clientes,
 aparelhos e listas de **todos os revendedores**, não só os do admin.
 
-> Isso é diferente do painel. Lá, as abas Clientes, Dispositivos e Playlists
-> mostram só o que é do próprio operador, inclusive para o admin. Aqui é de
-> propósito: a API existe para administrar tudo de fora.
+> O painel também mostra a plataforma inteira para o admin, mas em abas
+> separadas e **somente leitura** — e **sem a URL das listas**, só o servidor
+> (`host`). As abas "Meus ..." continuam sendo só do próprio operador, e são
+> elas que têm as ações de escrita.
+>
+> A URL decifrada sai **só por aqui**. É de propósito: por chave o acesso é
+> nominal e fica registrado em `ultimo_uso_em`; numa tela de consulta a
+> credencial do servidor de outro revendedor ficaria à mostra de passagem.
 
 ---
 

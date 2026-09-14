@@ -40,6 +40,9 @@ let me = null // { id, nome, usuario, papel, saldo_creditos }
 const admInf = () => me && me.papel === 'admin'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+/** Celula de revenda: nulo e self-serve (cliente que se ativou sozinho pelo
+ *  app, sem revenda), nao dado faltando. Um traco fazia parecer erro. */
+const celRevenda = (r) => r ? esc(r) : '<span class="tc-self">Self-serve</span>'
 const fmtData = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—'
 // Login por usuário → e-mail sintético (o Supabase Auth exige e-mail). MESMO
 // derivador da Edge Function `painel` (USUARIO_DOMINIO). Nunca é enviado e-mail.
@@ -149,8 +152,15 @@ const NAV = [
     { id: 'todosclientes', rotulo: 'Clientes', ic: 'users', papeis: ['admin'] },
     { id: 'clientes', rotulo: 'Meus clientes', ic: 'users', papeis: ['admin'] },
     { id: 'clientes', rotulo: 'Clientes', ic: 'users', papeis: ['master', 'reseller'] },
-    { id: 'dispositivos', rotulo: 'Dispositivos', ic: 'monitor' },
-    { id: 'playlists', rotulo: 'Playlists', ic: 'listv' },
+    // Mesma divisao dos Clientes: no admin, "Dispositivos"/"Playlists" sao a
+    // plataforma inteira (consulta) e "Meus ..." sao os do proprio operador —
+    // que continuam sendo a aba de trabalho, com vincular/migrar/excluir.
+    { id: 'todosdispositivos', rotulo: 'Dispositivos', ic: 'monitor', papeis: ['admin'] },
+    { id: 'dispositivos', rotulo: 'Meus dispositivos', ic: 'monitor', papeis: ['admin'] },
+    { id: 'dispositivos', rotulo: 'Dispositivos', ic: 'monitor', papeis: ['master', 'reseller'] },
+    { id: 'todasplaylists', rotulo: 'Playlists', ic: 'listv', papeis: ['admin'] },
+    { id: 'playlists', rotulo: 'Minhas playlists', ic: 'listv', papeis: ['admin'] },
+    { id: 'playlists', rotulo: 'Playlists', ic: 'listv', papeis: ['master', 'reseller'] },
   ] },
   { grupo: 'Negócios', papeis: ['master', 'reseller'], itens: [
     { id: 'comprar', rotulo: 'Comprar Créditos', ic: 'cart' },
@@ -225,7 +235,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, playlists: vPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, todosdispositivos: vTodosDispositivos, playlists: vPlaylists, todasplaylists: vTodasPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves }[v]
   if (fn) fn(param)
 }
 
@@ -422,7 +432,7 @@ function abrirModalDispositivo(d, playlists, vinculos, cliente_id, recarregar) {
       onOk: async (v) => {
         const r = await api('renovar_dispositivo', { dispositivo_id: d.id, plano: v.plano })
         atualizarSaldo(r.saldo)
-        invalidar('dispositivos', 'todosclientes', 'cliente:' + cliente_id)
+        invalidar('dispositivos', 'todosdispositivos', 'todosclientes', 'cliente:' + cliente_id)
         toast(r.expira_em ? `Renovado até ${fmtData(r.expira_em)}` : 'Agora é vitalícia')
         fechar(); recarregar()
         return null
@@ -1006,7 +1016,7 @@ const statCard = (ic, cor, val, lbl) => `<div class="stat"><div class="stat-ic" 
 // ── Dispositivos (visão global do operador; busca + filtros) ──────────────────
 async function vDispositivos() {
   view().innerHTML = `<div class="pg">
-    <div class="pg-head"><div><h1>Dispositivos</h1><p id="dv-sub">Carregando…</p></div>
+    <div class="pg-head"><div><h1>${me.papel === 'admin' ? 'Meus dispositivos' : 'Dispositivos'}</h1><p id="dv-sub">Carregando…</p></div>
       <button class="btn" id="dv-vinc">${svg('link')} Vincular Device</button></div>
     <div class="stats" id="dv-stats"></div>
     <div class="filtros">
@@ -1056,6 +1066,142 @@ async function vDispositivos() {
   }
 }
 
+// ── Aparelhos da PLATAFORMA (so admin) ──────────────────────────
+// Todos os aparelhos cadastrados, de todos os revendedores. E de CONSULTA: as
+// acoes (vincular, ativar) continuam em "Meus dispositivos", que e onde o admin
+// mexe no que e dele.
+async function vTodosDispositivos() {
+  if (me.papel !== 'admin') { placeholder('Dispositivos', 'Área restrita ao administrador', 'monitor'); return }
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head"><div><h1>Dispositivos</h1><p id="td-sub">Carregando…</p></div></div>
+    <div class="stats" id="td-stats"></div>
+    <div class="filtros">
+      <input class="busca" id="td-q" placeholder="Buscar MAC, Key, modelo, cliente, revendedor…">
+      <div class="pills" id="td-fst">${pills('Status', [['', 'Todos'], ['ativo', 'Ativo'], ['trial', 'Trial'], ['expirado', 'Expirado'], ['sem_lista', 'Sem lista'], ['banido', 'Banido']])}</div>
+    </div>
+    <div class="tbl-wrap" id="td-tbl"><div class="vazio">Carregando…</div></div>
+  </div>`
+  const meu = viewAtual()
+  let dados = []
+  const st = { q: '', status: '' }
+
+  const render = () => {
+    const f = dados.filter((d) => {
+      if (st.status && (d.status || '') !== st.status) return false
+      if (st.q && !`${d.mac} ${d.device_key} ${d.modelo || ''} ${modeloNome(d.modelo)} ${d.cliente || ''} ${d.revendedor || 'self-serve'}`.toLowerCase().includes(st.q.toLowerCase())) return false
+      return true
+    })
+    const el = document.getElementById('td-tbl'); if (!el) return
+    if (!f.length) { el.innerHTML = '<div class="vazio">Nenhum dispositivo.</div>'; return }
+    el.innerHTML = `<table><thead><tr><th>MAC</th><th>Key</th><th>Modelo</th><th>Cliente</th><th>Revendedor</th><th>Plano</th><th>Status</th><th>Expira</th><th>Criado</th></tr></thead><tbody>
+      ${f.map((d) => `<tr>
+        <td class="mono">${esc(d.mac)}</td><td class="mono">${esc(d.device_key)}</td>
+        <td><span class="mdl-ico">${modeloIcone(d.modelo)}</span> ${esc(modeloNome(d.modelo))}</td>
+        <td>${esc(d.cliente || '—')}</td>
+        <td>${celRevenda(d.revendedor)}</td>
+        <td>${esc(planoRot(d.plano))}</td>
+        <td><span class="badge badge-${esc(d.status)}">${esc(d.status)}</span></td>
+        <td class="tnum">${d.expira_em ? fmtData(d.expira_em) : (d.plano === 'vitalicia' ? 'nunca' : '—')}</td>
+        <td class="tnum">${fmtData(d.criado_em)}</td>
+      </tr>`).join('')}</tbody></table>`
+  }
+
+  document.getElementById('td-q').oninput = (e) => { st.q = e.target.value; render() }
+  wirePills(document.getElementById('td-fst'), (v) => { st.status = v; render() })
+  try {
+    const r = await pega('todosdispositivos', () => api('listar_dispositivos_todos'))
+    if (meu !== viewAtual()) return
+    dados = r.dispositivos || []
+    // Aparelho self-serve nao tem revenda: conta como um grupo so, nao como
+    // "revenda sem nome" repetida.
+    const revs = new Set(dados.map((d) => d.revendedor || '(self-serve)')).size
+    document.getElementById('td-sub').textContent =
+      `${dados.length} aparelho${dados.length !== 1 ? 's' : ''} de ${revs} origem(ns)`
+      + (r.truncado ? ' — mostrando os mais recentes' : '')
+    const c = (x) => dados.filter((d) => d.status === x).length
+    document.getElementById('td-stats').innerHTML =
+      statCard('monitor', '#4f8ef7', dados.length, 'Total') + statCard('shield', '#34c759', c('ativo'), 'Ativos') +
+      statCard('coins', '#e8b23a', c('trial'), 'Trial') + statCard('globe', '#ff5b54', c('expirado'), 'Expirados')
+    render()
+  } catch (e) {
+    if (meu !== viewAtual()) return
+    const el = document.getElementById('td-tbl'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
+}
+
+// ── Listas da PLATAFORMA (so admin) ─────────────────────────────
+// ⚠️ Sem coluna de URL, de proposito: o backend nao manda. Aqui vai o SERVIDOR
+// (host), que responde "onde este cliente esta" sem expor usuario e senha do
+// servidor de outro revendedor numa tela de consulta. Quem precisa da URL usa a
+// API por chave, onde o acesso e nominal e fica registrado.
+//
+// Tambem NAO tem "Migrar URL": a migracao em massa do painel tem escopo "meus",
+// e escopo global foi removido de proposito (deixava reescrever playlist de
+// cliente dos outros). Migrar daqui exigiria trazer esse buraco de volta.
+async function vTodasPlaylists() {
+  if (me.papel !== 'admin') { placeholder('Playlists', 'Área restrita ao administrador', 'listv'); return }
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head"><div><h1>Playlists</h1><p id="tp-sub">Carregando…</p></div></div>
+    <div class="stats" id="tp-stats"></div>
+    <div class="filtros">
+      <input class="busca" id="tp-q" placeholder="Buscar nome, cliente, revendedor, servidor…">
+      <div class="pills" id="tp-fdns">${pills('Free DNS', [['', 'Todas'], ['sim', 'Sim'], ['nao', 'Não']])}</div>
+      <div class="pills" id="tp-fsel">${pills('Selecionada', [['', 'Todas'], ['sim', 'Sim'], ['nao', 'Não']])}</div>
+    </div>
+    <div class="tbl-wrap" id="tp-tbl"><div class="vazio">Carregando…</div></div>
+  </div>`
+  const meu = viewAtual()
+  let dados = []
+  const st = { q: '', dns: '', sel: '' }
+  const ck = (x) => x ? '<span class="ck-s">✓</span>' : '<span class="ck-n">✗</span>'
+
+  const render = () => {
+    const f = dados.filter((pl) => {
+      if (st.dns === 'sim' && !pl.free_dns) return false
+      if (st.dns === 'nao' && pl.free_dns) return false
+      if (st.sel === 'sim' && !pl.selecionada) return false
+      if (st.sel === 'nao' && pl.selecionada) return false
+      if (st.q && !`${pl.nome} ${pl.cliente} ${pl.revendedor || 'self-serve'} ${pl.host || ''}`.toLowerCase().includes(st.q.toLowerCase())) return false
+      return true
+    })
+    const el = document.getElementById('tp-tbl'); if (!el) return
+    if (!f.length) { el.innerHTML = '<div class="vazio">Nenhuma playlist.</div>'; return }
+    el.innerHTML = `<table><thead><tr><th>Nome</th><th>Cliente</th><th>Revendedor</th><th>Tipo</th><th>Servidor</th><th>Free DNS</th><th>Aparelhos</th><th>Selecionada</th><th>Criado</th></tr></thead><tbody>
+      ${f.map((pl) => `<tr>
+        <td><b>${esc(pl.nome)}</b></td>
+        <td>${esc(pl.cliente || '—')}</td>
+        <td>${celRevenda(pl.revendedor)}</td>
+        <td><span class="tipo">${esc(pl.tipo || '')}</span></td>
+        <td class="mono">${esc(pl.host || '—')}</td>
+        <td>${ck(pl.free_dns)}</td>
+        <td class="tnum">${pl.devices}</td>
+        <td>${ck(pl.selecionada)}</td>
+        <td class="tnum">${fmtData(pl.criado_em)}</td>
+      </tr>`).join('')}</tbody></table>`
+  }
+
+  document.getElementById('tp-q').oninput = (e) => { st.q = e.target.value; render() }
+  wirePills(document.getElementById('tp-fdns'), (v) => { st.dns = v; render() })
+  wirePills(document.getElementById('tp-fsel'), (v) => { st.sel = v; render() })
+  try {
+    const r = await pega('todasplaylists', () => api('listar_playlists_todos'))
+    if (meu !== viewAtual()) return
+    dados = r.playlists || []
+    const servidores = new Set(dados.map((pl) => pl.host).filter(Boolean)).size
+    document.getElementById('tp-sub').textContent =
+      `${dados.length} lista${dados.length !== 1 ? 's' : ''} em ${servidores} servidor(es)`
+      + (r.truncado ? ' — mostrando as mais recentes' : '')
+    const c = (t) => dados.filter((pl) => pl.tipo === t).length
+    document.getElementById('tp-stats').innerHTML =
+      statCard('listv', '#4f8ef7', dados.length, 'Total') + statCard('monitor', '#9b7bff', c('xtream'), 'Xtream') +
+      statCard('coins', '#34c759', c('m3u'), 'M3U') + statCard('globe', '#8b8f98', dados.filter((pl) => pl.free_dns).length, 'Free DNS')
+    render()
+  } catch (e) {
+    if (meu !== viewAtual()) return
+    const el = document.getElementById('tp-tbl'); if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
+}
+
 async function modalVincularGlobal() {
   let clientes = []
   try { const r = await pega('clientes', () => api('listar_clientes')); clientes = r.clientes || [] } catch (_) {}
@@ -1074,7 +1220,7 @@ async function modalVincularGlobal() {
       if (!v.key) return 'Informe a Key'
       const r = await api('vincular_dispositivo', { cliente_id: v.cliente_id, mac: v.mac, key: v.key, plano: v.plano })
       atualizarSaldo(r.saldo)
-      invalidar('dispositivos', 'todosclientes', 'cliente:' + v.cliente_id)
+      invalidar('dispositivos', 'todosdispositivos', 'todosclientes', 'cliente:' + v.cliente_id)
       toast(r.cobrado ? `Ativado (${planoRot(r.plano)}) — −1 crédito` : 'Dispositivo vinculado')
       vDispositivos()
       return null
@@ -1085,7 +1231,7 @@ async function modalVincularGlobal() {
 // ── Playlists (visão global; busca + filtros + Migrar URL) ────────────────────
 async function vPlaylists() {
   view().innerHTML = `<div class="pg">
-    <div class="pg-head"><div><h1>Playlists</h1><p id="pl-sub">Carregando…</p></div>
+    <div class="pg-head"><div><h1>${me.papel === 'admin' ? 'Minhas playlists' : 'Playlists'}</h1><p id="pl-sub">Carregando…</p></div>
       <button class="btn-sec" id="pl-migrar">${svg('send')} Migrar URL</button></div>
     <div class="stats" id="pl-stats"></div>
     <div class="filtros">
@@ -1122,7 +1268,7 @@ async function vPlaylists() {
         <td class="tnum">${fmtData(p.criado_em)}</td>
         <td><button class="btn-del" data-id="${esc(p.id)}" data-cli="${esc(p.cliente_id)}">excluir</button></td>
       </tr>`).join('')}</tbody></table>`
-    el.querySelectorAll('.btn-del').forEach((b) => { b.onclick = async () => { if (!confirm('Excluir esta playlist?')) return; try { await api('excluir_playlist', { cliente_id: b.dataset.cli, playlist_id: b.dataset.id }); invalidar('playlists', 'todosclientes'); toast('Excluída'); vPlaylists() } catch (e) { toast(e.message, true) } } })
+    el.querySelectorAll('.btn-del').forEach((b) => { b.onclick = async () => { if (!confirm('Excluir esta playlist?')) return; try { await api('excluir_playlist', { cliente_id: b.dataset.cli, playlist_id: b.dataset.id }); invalidar('playlists', 'todasplaylists', 'todosclientes'); toast('Excluída'); vPlaylists() } catch (e) { toast(e.message, true) } } })
   }
   document.getElementById('pl-q').oninput = (e) => { st.q = e.target.value; render() }
   wirePills(document.getElementById('pl-fsel'), (v) => { st.sel = v; render() })
@@ -1177,7 +1323,7 @@ function modalMigrarUrl() {
         if (!r.restam_mais || !r.proximo || r.proximo === apos) break
         apos = r.proximo
       }
-      invalidar('playlists', 'todosclientes')
+      invalidar('playlists', 'todasplaylists', 'todosclientes')
       toast(`${migradas} playlist(s) migradas`)
       vPlaylists()
       return null
@@ -1476,7 +1622,7 @@ function modalParceiro(recarregar) {
     onOk: async (v) => {
       if (!v.dominio) return 'Informe o domínio do servidor'
       const r = await api('criar_parceiro', v)
-      invalidar('parceiros', 'dispositivos')
+      invalidar('parceiros', 'dispositivos', 'todosdispositivos', 'todasplaylists')
       toast(r.ativados ? `Parceiro adicionado — ${r.ativados} device(s) ativados` : 'Parceiro adicionado')
       recarregar()
       return null

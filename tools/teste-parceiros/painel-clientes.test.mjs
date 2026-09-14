@@ -34,8 +34,9 @@ test('listar_clientes_todos é admin-only e diz de quem é cada cliente', () => 
   // serve para nada.
   assert.match(trecho, /revendedor: donos\.get/)
   assert.match(trecho, /meu: c\.revendedor_id === rev\.id/)
-  // Contagens numa consulta cada, não uma por cliente.
-  assert.match(trecho, /in\('cliente_id', ids\)/)
+  // Contagens em lote, não uma consulta por cliente.
+  assert.match(trecho, /emLotes\(ids,/)
+  assert.match(trecho, /in\('cliente_id', parte\)/)
   assert.match(trecho, /MAX_CLIENTES_PLATAFORMA/)
 })
 
@@ -76,8 +77,8 @@ test('o cache da visão de plataforma é invalidado quando os números mudam', (
   // ou mexer em lista muda o que está na tela.
   for (const gatilho of [
     /criar_cliente[\s\S]{0,80}invalidar\('clientes', 'todosclientes'\)/,
-    /invalidar\('dispositivos', 'todosclientes', 'cliente:'/,
-    /invalidar\('playlists', 'todosclientes'\)/,
+    /invalidar\('dispositivos', 'todosdispositivos', 'todosclientes', 'cliente:'/,
+    /invalidar\('playlists', 'todasplaylists', 'todosclientes'\)/,
   ]) {
     assert.match(ui, gatilho)
   }
@@ -127,5 +128,116 @@ test('toda classe tc-* usada na tela existe no CSS', () => {
   for (const c of usadas) {
     const achou = [' ', ',', ':', '{'].some((fim) => css.includes('.' + c + fim))
     assert.ok(achou, `.${c} nao existe em painel.css`)
+  }
+})
+
+// ── Dispositivos e Playlists: mesma divisao dos Clientes ────────────────────
+
+test('listar_dispositivos e listar_playlists continuam sendo SO do operador', () => {
+  // Mesmo risco da `listar_clientes`: um `if (ehAdmin)` aqui e a aba de
+  // trabalho do admin passa a mostrar a plataforma inteira em silencio.
+  const disp = acao('listar_dispositivos', 'listar_playlists')
+  assert.match(disp, /eq\('revendedor_id', rev\.id\)/)
+  assert.doesNotMatch(disp, /ehAdmin/)
+  const pls = acao('listar_playlists', 'listar_dispositivos_todos')
+  assert.match(pls, /eq\('revendedor_id', rev\.id\)/)
+  assert.doesNotMatch(pls, /ehAdmin/)
+})
+
+test('as visoes de plataforma sao admin-only e dizem de quem e cada linha', () => {
+  const disp = acao('listar_dispositivos_todos', 'listar_playlists_todos')
+  assert.match(disp, /if \(!ehAdmin\) return erro\('apenas admin', 403\)/)
+  assert.doesNotMatch(disp, /eq\('revendedor_id', rev\.id\)/)
+  assert.match(disp, /revendedor: donos\.get/)
+  assert.match(disp, /MAX_LINHAS_PLATAFORMA/)
+
+  const pls = acao('listar_playlists_todos', 'migrar_url')
+  assert.match(pls, /if \(!ehAdmin\) return erro\('apenas admin', 403\)/)
+  assert.doesNotMatch(pls, /eq\('revendedor_id', rev\.id\)/)
+  assert.match(pls, /revendedor: donos\.get/)
+  assert.match(pls, /MAX_LINHAS_PLATAFORMA/)
+})
+
+test('a visao de plataforma NAO devolve URL de playlist', () => {
+  // Credencial de servidor de outro revendedor nao aparece numa tela de
+  // consulta. Quem precisa da URL usa a API por chave, onde o acesso e nominal.
+  // Mesma regra ja aplicada na `admin_cliente_detalhe`.
+  const pls = acao('listar_playlists_todos', 'migrar_url')
+  assert.doesNotMatch(pls, /url_cifrada|decifrar/)
+  assert.match(pls, /host: pl\.host/)
+})
+
+test('consulta por muitos IDs vai em lotes', () => {
+  // `.in(...)` monta a query string inteira na URL: 2000 UUIDs passam de 70 KB
+  // e o pedido morre. As visoes de plataforma buscam exatamente nessa escala.
+  assert.match(fn, /async function emLotes/)
+  const todas = [
+    acao('listar_clientes_todos', 'admin_cliente_detalhe'),
+    acao('listar_dispositivos_todos', 'listar_playlists_todos'),
+    acao('listar_playlists_todos', 'migrar_url'),
+  ]
+  for (const trecho of todas) {
+    const ins = trecho.match(/\.in\(/g) || []
+    const lotes = trecho.match(/emLotes\(/g) || []
+    assert.ok(ins.length <= lotes.length,
+      `sobrou um .in() sem emLotes: ${ins.length} in() para ${lotes.length} emLotes()`)
+  }
+})
+
+test('o menu do admin divide as tres abas; o revendedor tem uma de cada', () => {
+  for (const linha of [
+    /\{ id: 'todosdispositivos', rotulo: 'Dispositivos', ic: 'monitor', papeis: \['admin'\] \}/,
+    /\{ id: 'dispositivos', rotulo: 'Meus dispositivos', ic: 'monitor', papeis: \['admin'\] \}/,
+    /\{ id: 'dispositivos', rotulo: 'Dispositivos', ic: 'monitor', papeis: \['master', 'reseller'\] \}/,
+    /\{ id: 'todasplaylists', rotulo: 'Playlists', ic: 'listv', papeis: \['admin'\] \}/,
+    /\{ id: 'playlists', rotulo: 'Minhas playlists', ic: 'listv', papeis: \['admin'\] \}/,
+    /\{ id: 'playlists', rotulo: 'Playlists', ic: 'listv', papeis: \['master', 'reseller'\] \}/,
+    /todosdispositivos: vTodosDispositivos/,
+    /todasplaylists: vTodasPlaylists/,
+  ]) {
+    assert.match(ui, linha)
+  }
+})
+
+test('as telas de plataforma sao de CONSULTA: nao escrevem e nao migram', () => {
+  const corta = (de, ate) => ui.slice(ui.indexOf(de), ui.indexOf(ate))
+  const telas = {
+    vTodosDispositivos: corta('async function vTodosDispositivos', '// ── Listas da PLATAFORMA'),
+    vTodasPlaylists: corta('async function vTodasPlaylists', 'async function modalVincularGlobal'),
+  }
+  for (const [nome, tela] of Object.entries(telas)) {
+    assert.ok(tela.length > 0, `nao achei ${nome}`)
+    assert.match(tela, /me\.papel !== 'admin'/)
+    for (const escrita of ['excluir_playlist', 'vincular_dispositivo', 'modalVincularGlobal', 'modalMigrarUrl', 'migrar_url']) {
+      assert.ok(!tela.includes(escrita), `${nome} nao pode chamar \`${escrita}\``)
+    }
+  }
+  // Migrar em massa daqui exigiria um escopo "todos", que foi REMOVIDO de
+  // proposito (deixava reescrever playlist de cliente dos outros).
+  assert.ok(!telas.vTodasPlaylists.includes('Migrar URL'))
+})
+
+test('os titulos das abas do operador acompanham o menu do admin', () => {
+  assert.match(ui, /me\.papel === 'admin' \? 'Meus dispositivos' : 'Dispositivos'/)
+  assert.match(ui, /me\.papel === 'admin' \? 'Minhas playlists' : 'Playlists'/)
+})
+
+test('o cache das visoes de plataforma e invalidado quando os numeros mudam', () => {
+  for (const gatilho of [
+    /invalidar\('dispositivos', 'todosdispositivos', 'todosclientes', 'cliente:'/,
+    /invalidar\('playlists', 'todasplaylists', 'todosclientes'\)/,
+    // Mexer em parceiro muda o Free DNS das listas e ativa aparelhos.
+    /invalidar\('parceiros', 'dispositivos', 'todosdispositivos', 'todasplaylists'\)/,
+  ]) {
+    assert.match(ui, gatilho)
+  }
+})
+
+test('self-serve tem um so lugar que decide como e mostrado', () => {
+  // Se cada tela inventar o proprio fallback, uma delas volta a mostrar traco.
+  assert.match(ui, /const celRevenda = \(r\) => r \? esc\(r\) : '<span class="tc-self">Self-serve<\/span>'/)
+  for (const tela of ['vTodosDispositivos', 'vTodasPlaylists']) {
+    const i = ui.indexOf('async function ' + tela)
+    assert.ok(ui.slice(i, i + 6000).includes('celRevenda('), `${tela} nao usa celRevenda`)
   }
 })

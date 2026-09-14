@@ -99,6 +99,9 @@ const MAX_DISPOSITIVOS_MIGRACAO = 200
 /** Teto da visao de plataforma. Acima disso a tela avisa que truncou. */
 const MAX_CLIENTES_PLATAFORMA = 2000
 
+/** Idem para aparelhos e listas. */
+const MAX_LINHAS_PLATAFORMA = 2000
+
 /** "servidor.com:8080" -> "servidor.com". */
 const semPorta = (h: string) => h.replace(/:\d+$/, '')
 
@@ -340,6 +343,52 @@ function erroRpc(e: any, oque: string) {
  * painel diz "ativo" e a TV nao abre.
  */
 // deno-lint-ignore no-explicit-any
+/**
+ * `.in(...)` com muitos IDs estoura a URL. PostgREST poe a lista inteira na
+ * query string: 2000 UUIDs passam de 70 KB e o pedido morre bem antes disso.
+ * As visoes de plataforma buscam por milhares de IDs de uma vez, entao toda
+ * consulta desse tipo vai em lotes.
+ */
+async function emLotes<T>(ids: string[], busca: (parte: string[]) => Promise<T[]>): Promise<T[]> {
+  const TAM = 200
+  const fora: T[] = []
+  for (let i = 0; i < ids.length; i += TAM) fora.push(...(await busca(ids.slice(i, i + TAM))))
+  return fora
+}
+
+/**
+ * cliente_id -> { cliente, revendedor }. Sem isso a visao de plataforma e uma
+ * lista de MACs sem contexto: nao da para saber de quem e cada aparelho.
+ *
+ * `revendedor` nulo NAO e falta de dado: e cliente self-serve, que se ativou
+ * sozinho pelo app e nao tem revenda (o schema permite `revendedor_id` NULL de
+ * proposito). Quem mostra decide como dizer isso.
+ */
+async function donosDosClientes(clienteIds: (string | null)[]) {
+  const mapa = new Map<string, { cliente: string; revendedor: string | null }>()
+  const ids = [...new Set(clienteIds.filter(Boolean))] as string[]
+  if (!ids.length) return mapa
+  const cls = await emLotes(ids, async (parte) => {
+    const { data } = await sb.from('clientes').select('id, nome, revendedor_id').in('id', parte)
+    // deno-lint-ignore no-explicit-any
+    return (data || []) as any[]
+  })
+  const revIds = [...new Set(cls.map((c) => c.revendedor_id).filter(Boolean))] as string[]
+  const nomeRev = new Map<string, string>()
+  if (revIds.length) {
+    const revs = await emLotes(revIds, async (parte) => {
+      const { data } = await sb.from('revendedores').select('id, nome, usuario').in('id', parte)
+      // deno-lint-ignore no-explicit-any
+      return (data || []) as any[]
+    })
+    for (const r of revs) nomeRev.set(r.id, r.nome || r.usuario || '')
+  }
+  for (const c of cls) {
+    mapa.set(c.id, { cliente: c.nome || '', revendedor: nomeRev.get(c.revendedor_id) ?? null })
+  }
+  return mapa
+}
+
 function statusEfetivo(d: any): string {
   const agora = Date.now()
   if (d.status === 'banido') return 'banido'
@@ -1017,12 +1066,15 @@ Deno.serve(async (req: Request) => {
       // Nome do revendedor dono — sem isso a lista da plataforma inteira nao
       // diz nada: sao centenas de nomes sem contexto.
       // deno-lint-ignore no-explicit-any
-      const revIds = [...new Set((lote as any[]).map((c) => c.revendedor_id).filter(Boolean))]
+      const revIds = [...new Set((lote as any[]).map((c) => c.revendedor_id).filter(Boolean))] as string[]
       const donos = new Map<string, string>()
       if (revIds.length) {
-        const { data: revs } = await sb.from('revendedores').select('id, nome, usuario').in('id', revIds)
-        // deno-lint-ignore no-explicit-any
-        for (const r of ((revs || []) as any[])) donos.set(r.id, r.nome || r.usuario || '—')
+        const revs = await emLotes(revIds, async (parte) => {
+          const { data } = await sb.from('revendedores').select('id, nome, usuario').in('id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        for (const r of revs) donos.set(r.id, r.nome || r.usuario || '')
       }
 
       // Contagens numa consulta cada, somadas aqui: uma por cliente seriam
@@ -1030,12 +1082,18 @@ Deno.serve(async (req: Request) => {
       const nDisp = new Map<string, number>()
       const nPls = new Map<string, number>()
       if (ids.length) {
-        const { data: ds } = await sb.from('dispositivos').select('cliente_id').in('cliente_id', ids)
-        // deno-lint-ignore no-explicit-any
-        for (const d of ((ds || []) as any[])) nDisp.set(d.cliente_id, (nDisp.get(d.cliente_id) || 0) + 1)
-        const { data: ps } = await sb.from('playlists').select('cliente_id').in('cliente_id', ids)
-        // deno-lint-ignore no-explicit-any
-        for (const pl of ((ps || []) as any[])) nPls.set(pl.cliente_id, (nPls.get(pl.cliente_id) || 0) + 1)
+        const ds = await emLotes(ids, async (parte) => {
+          const { data } = await sb.from('dispositivos').select('cliente_id').in('cliente_id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        for (const d of ds) nDisp.set(d.cliente_id, (nDisp.get(d.cliente_id) || 0) + 1)
+        const ps = await emLotes(ids, async (parte) => {
+          const { data } = await sb.from('playlists').select('cliente_id').in('cliente_id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        for (const pl of ps) nPls.set(pl.cliente_id, (nPls.get(pl.cliente_id) || 0) + 1)
       }
 
       return json({
@@ -1295,6 +1353,94 @@ Deno.serve(async (req: Request) => {
         })
       }
       return json({ playlists })
+    }
+
+    /**
+     * VISAO DE PLATAFORMA (so admin): TODOS os aparelhos, de todos os
+     * revendedores, com o cliente e a revenda de cada um.
+     *
+     * Par da `listar_clientes_todos`. A `listar_dispositivos` acima continua
+     * respondendo "os meus" — inclusive para o admin —, porque e ela que a aba
+     * de trabalho dele usa, com o botao de vincular device.
+     */
+    if (acao === 'listar_dispositivos_todos') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data } = await sb.from('dispositivos')
+        .select('id, mac, device_key, modelo, status, plano, trial_expira_em, expira_em, cliente_id, ativado_por, criado_em, atualizado_em')
+        .order('criado_em', { ascending: false }).limit(MAX_LINHAS_PLATAFORMA + 1)
+      const linhas = data || []
+      const truncado = linhas.length > MAX_LINHAS_PLATAFORMA
+      const lote = linhas.slice(0, MAX_LINHAS_PLATAFORMA)
+      // deno-lint-ignore no-explicit-any
+      const donos = await donosDosClientes((lote as any[]).map((d) => d.cliente_id))
+      return json({
+        ok: true,
+        // deno-lint-ignore no-explicit-any
+        dispositivos: (lote as any[]).map((d) => ({
+          ...d,
+          status: statusEfetivo(d),
+          cliente: donos.get(d.cliente_id)?.cliente || '',
+          revendedor: donos.get(d.cliente_id)?.revendedor ?? null,
+          meu: false,
+        })),
+        truncado,
+      })
+    }
+
+    /**
+     * VISAO DE PLATAFORMA (so admin): TODAS as listas, de todos os revendedores.
+     *
+     * ⚠️ SEM a URL, de proposito — e a unica diferenca real para a
+     * `listar_playlists`. Vai o `host`, que responde "em que servidor este
+     * cliente esta" sem expor usuario e senha do servidor de OUTRO revendedor
+     * numa tela de consulta. Mesma regra da `admin_cliente_detalhe`.
+     *
+     * Quem precisa da URL de verdade (integracao, auditoria) usa a API por
+     * chave, onde o acesso e nominal e fica registrado em `ultimo_uso_em`.
+     */
+    if (acao === 'listar_playlists_todos') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const { data: pls } = await sb.from('playlists')
+        .select('id, cliente_id, nome, tipo, host, pin, free_dns, criado_em, atualizado_em')
+        .order('criado_em', { ascending: false }).limit(MAX_LINHAS_PLATAFORMA + 1)
+      const linhas = pls || []
+      const truncado = linhas.length > MAX_LINHAS_PLATAFORMA
+      const lote = linhas.slice(0, MAX_LINHAS_PLATAFORMA)
+      // deno-lint-ignore no-explicit-any
+      const donos = await donosDosClientes((lote as any[]).map((pl) => pl.cliente_id))
+
+      // Quantos aparelhos usam cada lista, e se algum a tem selecionada.
+      // deno-lint-ignore no-explicit-any
+      const ids = (lote as any[]).map((pl) => pl.id) as string[]
+      const nDev = new Map<string, number>()
+      const temSel = new Set<string>()
+      if (ids.length) {
+        const vin = await emLotes(ids, async (parte) => {
+          const { data } = await sb.from('dispositivo_playlists')
+            .select('playlist_id, selecionada').in('playlist_id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        for (const v of vin) {
+          nDev.set(v.playlist_id, (nDev.get(v.playlist_id) || 0) + 1)
+          if (v.selecionada) temSel.add(v.playlist_id)
+        }
+      }
+
+      return json({
+        ok: true,
+        // deno-lint-ignore no-explicit-any
+        playlists: (lote as any[]).map((pl) => ({
+          id: pl.id, cliente_id: pl.cliente_id,
+          cliente: donos.get(pl.cliente_id)?.cliente || '',
+          revendedor: donos.get(pl.cliente_id)?.revendedor ?? null,
+          nome: pl.nome, tipo: pl.tipo, host: pl.host || null,
+          pin: pl.pin || null, free_dns: !!pl.free_dns,
+          selecionada: temSel.has(pl.id), devices: nDev.get(pl.id) || 0,
+          criado_em: pl.criado_em, atualizado_em: pl.atualizado_em,
+        })),
+        truncado,
+      })
     }
 
     // ── Migrar URL em massa: troca a base (protocolo+domínio+porta) mantendo o resto ──
