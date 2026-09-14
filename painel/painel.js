@@ -48,8 +48,10 @@ const celRevenda = (r) => r ? esc(r) : '<span class="tc-self">Self-serve</span>'
  *  vermelho (culpa nossa) — a distincao e o que diz para quem mandar o bug. */
 const classeStatus = (n) => n >= 500 ? 'badge-expirado' : (n >= 400 ? 'badge-trial' : 'badge-ativo')
 
-/** Data COM hora: num log, "14/09" sem hora nao serve para nada. */
-const fmtDataHora = (d) => {
+/** Instante COM segundos, para log: `fmtDataHora` (logo abaixo) e do
+ *  detalhe do device e nao tem segundos — num log, duas chamadas no mesmo
+ *  minuto ficariam indistinguiveis. */
+const fmtInstante = (d) => {
   if (!d) return '—'
   const x = new Date(d)
   if (isNaN(x)) return '—'
@@ -1823,7 +1825,7 @@ async function vApiLogs() {
     if (!f.length) { el.innerHTML = '<div class="vazio">Nenhuma chamada no período.</div>'; return }
     el.innerHTML = `<table><thead><tr><th>Quando</th><th>Chave</th><th>Método</th><th>Rota</th><th>Status</th><th>Tempo</th><th>IP</th><th>Erro</th></tr></thead><tbody>
       ${f.map((l) => `<tr>
-        <td class="tnum">${fmtDataHora(l.criado_em)}</td>
+        <td class="tnum">${fmtInstante(l.criado_em)}</td>
         <td>${l.chave_nome ? esc(l.chave_nome) : '<i>desconhecida</i>'}<br><span class="al-pfx mono">${esc(l.prefixo || '—')}</span></td>
         <td><span class="al-m al-m-${esc((l.metodo || '').toLowerCase())}">${esc(l.metodo)}</span></td>
         <td class="mono">${esc(l.rota)}</td>

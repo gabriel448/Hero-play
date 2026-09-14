@@ -186,8 +186,11 @@ test('status 4xx e 5xx se distinguem: dizem para quem mandar o bug', () => {
 
 test('o log mostra hora, e o tempo é mediana', () => {
   // "14/09" num log não serve para nada.
-  assert.match(ui, /const fmtDataHora =/)
-  assert.match(tela, /fmtDataHora\(l\.criado_em\)/)
+  // `fmtInstante`, nao `fmtDataHora`: aquele ja existia (detalhe do device) e
+  // nao tem segundos. Declarar um segundo com o mesmo nome derrubou o painel
+  // inteiro uma vez — ver painel-sintaxe.test.mjs.
+  assert.match(ui, /const fmtInstante =/)
+  assert.match(tela, /fmtInstante\(l\.criado_em\)/)
   assert.match(ui, /hour: '2-digit', minute: '2-digit', second: '2-digit'/)
   // Média deixa uma chamada de 8 s esconder que o resto está rápido.
   assert.match(tela, /const mediana =/)
