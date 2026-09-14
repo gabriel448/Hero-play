@@ -468,6 +468,41 @@ create table if not exists public.api_chaves (
   revogada_em   timestamptz
 );
 create unique index if not exists idx_api_chaves_hash on public.api_chaves(hash);
+
+-- ── LOG DE REQUISICOES DA API ───────────────────────────────────────────────
+-- Toda chamada a Edge Function `api` vira uma linha aqui, inclusive as que
+-- falham na autenticacao: chave invalida batendo de novo e de novo e
+-- justamente o que se quer enxergar.
+--
+-- ⚠️ NAO guarda corpo de requisicao nem query string. O corpo do
+-- POST/PATCH /playlists leva `lista_url`, que carrega USUARIO E SENHA do
+-- servidor Xtream em texto claro — a playlist e gravada cifrada no banco
+-- exatamente para isso nao ficar a mostra, e um log de depuracao nao pode ser
+-- a porta dos fundos dessa protecao. Guarda o caminho, o resultado e quanto
+-- demorou, que e o que responde "essa integracao esta funcionando?".
+create table if not exists public.api_logs (
+  id         bigserial primary key,
+  -- `on delete set null` + prefixo desnormalizado: revogar e apagar a chave
+  -- nao pode apagar o historico do que ela fez.
+  chave_id   uuid references public.api_chaves(id) on delete set null,
+  prefixo    text,                             -- inicio da chave apresentada
+  chave_nome text,                             -- rotulo no momento da chamada
+  metodo     text not null,
+  rota       text not null,                    -- caminho, SEM query string
+  status     int  not null,
+  ms         int,                              -- duracao
+  ip         text,
+  erro       text,                             -- mensagem NOSSA, nunca corpo
+  criado_em  timestamptz not null default now()
+);
+create index if not exists idx_api_logs_criado on public.api_logs(criado_em desc);
+create index if not exists idx_api_logs_chave  on public.api_logs(chave_id, criado_em desc);
+create index if not exists idx_api_logs_status on public.api_logs(status, criado_em desc);
+alter table public.api_logs enable row level security;
+revoke all on public.api_logs from anon, authenticated;
+grant all on public.api_logs to service_role;
+grant usage, select on sequence public.api_logs_id_seq to service_role;
+
 create index if not exists idx_api_chaves_rev on public.api_chaves(revendedor_id);
 alter table public.api_chaves enable row level security;
 revoke all on public.api_chaves from anon, authenticated;

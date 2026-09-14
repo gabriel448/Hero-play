@@ -102,6 +102,9 @@ const MAX_CLIENTES_PLATAFORMA = 2000
 /** Idem para aparelhos e listas. */
 const MAX_LINHAS_PLATAFORMA = 2000
 
+/** Teto do log da API por consulta. Acima disso a tela avisa que truncou. */
+const MAX_API_LOGS = 1000
+
 /** "servidor.com:8080" -> "servidor.com". */
 const semPorta = (h: string) => h.replace(/:\d+$/, '')
 
@@ -946,6 +949,58 @@ Deno.serve(async (req: Request) => {
       const { data: depois } = await sb.from('api_chaves').select('ativo').eq('id', id).maybeSingle()
       if (!depois || depois.ativo) return erro('o banco não confirmou a revogação da chave', 500)
       return json({ ok: true, nome: antes.nome })
+    }
+
+    // ── LOG DA API (so admin) ────────────────────────────────────────────────
+    // O que a Edge Function `api` recebeu: quem bateu, em que rota, com que
+    // resultado e em quanto tempo. Nao ha corpo de requisicao aqui de
+    // proposito — ver o comentario da tabela no schema.
+    if (acao === 'listar_api_logs') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const chave_id = String(body.chave_id || '').trim()
+      const faixa = String(body.faixa || '24h')
+      const horas = faixa === '7d' ? 168 : (faixa === '30d' ? 720 : (faixa === '1h' ? 1 : 24))
+      const desde = new Date(Date.now() - horas * 3600_000).toISOString()
+
+      let q = sb.from('api_logs')
+        .select('id, chave_id, prefixo, chave_nome, metodo, rota, status, ms, ip, erro, criado_em')
+        .gte('criado_em', desde)
+        .order('criado_em', { ascending: false })
+        .limit(MAX_API_LOGS + 1)
+      if (chave_id) q = q.eq('chave_id', chave_id)
+      const { data, error } = await q
+      // Tabela nova: se o schema ainda nao rodou, a tela precisa DIZER isso em
+      // vez de mostrar "nenhuma chamada" — que parece integracao parada.
+      if (error) {
+        return json({
+          ok: true, logs: [], truncado: false, faixa,
+          indisponivel: 'A tabela de logs ainda nao existe. Rode o supabase/schema-tv.sql.',
+        })
+      }
+      const linhas = data || []
+      const truncado = linhas.length > MAX_API_LOGS
+      const logs = linhas.slice(0, MAX_API_LOGS)
+
+      // Chaves que aparecem no periodo, para o filtro da tela.
+      const { data: chs } = await sb.from('api_chaves')
+        .select('id, nome, prefixo').eq('revendedor_id', rev.id).order('criado_em', { ascending: false })
+
+      return json({ ok: true, logs, truncado, faixa, chaves: chs || [] })
+    }
+
+    /**
+     * Apaga log antigo. Existe porque a tabela so cresce: uma integracao ativa
+     * gera milhares de linhas por dia, e nao ha nada aqui que valha guardar
+     * para sempre. Botao explicito em vez de limpeza automatica escondida —
+     * quem apaga historico e o admin, sabendo que apagou.
+     */
+    if (acao === 'limpar_api_logs') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const dias = Math.min(Math.max(Number(body.dias) || 30, 1), 365)
+      const corte = new Date(Date.now() - dias * 86400_000).toISOString()
+      const { error } = await sb.from('api_logs').delete().lt('criado_em', corte)
+      if (error) return erro(error.message, 500)
+      return json({ ok: true, dias })
     }
 
     // ── Caixa de entrada ──────────────────────────────────────────────────────

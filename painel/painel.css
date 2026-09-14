@@ -566,3 +566,15 @@ tbody tr:first-child td { border-top: none; }
 .tc-copy svg { width: 13px; height: 13px; }
 
 .tc-nada { font-size: 13px; color: var(--muted); font-style: italic; padding: 4px 2px; }
+
+/* ── API Logs ───────────────────────────────────────────────────────────────
+   Tabela de log: densa, lida na vertical. O metodo ganha cor propria (nao a
+   do status) porque sao duas perguntas diferentes — "o que pediram" e "deu
+   certo?" — e misturar as duas cores faz a linha mentir. */
+.al-pfx { font-size: 11px; color: var(--muted); }
+.al-m { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 3px 8px; border-radius: 6px; border: 1px solid currentColor; white-space: nowrap; }
+.al-m-get { color: var(--info); }
+.al-m-post { color: var(--ok); }
+.al-m-patch { color: var(--warn); }
+.al-m-delete { color: var(--danger); }
+.al-erro { color: var(--muted); font-size: 12px; max-width: 320px; }

@@ -159,29 +159,36 @@ async function parceiroDoHost(host: string | null) {
  * So aceita chave. NAO ha fallback para JWT de sessao: fallback e como API
  * publica vira porta dos fundos do painel.
  */
-async function autenticar(req: Request) {
+async function autenticar(req: Request): Promise<{ erro?: Response; rev?: Rev; quem: Quem }> {
   const bruto = req.headers.get('x-api-key')
     || (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
   const chave = (bruto || '').trim()
-  if (!chave) return { erro: erro('informe a chave de API em `Authorization: Bearer ...` ou `X-API-Key`', 401) }
+  // Prefixo da chave APRESENTADA, para o log saber quem bateu mesmo quando a
+  // chave nao vale. So os 11 primeiros caracteres — o mesmo pedaco que ja
+  // aparece no painel; a chave inteira nunca sai daqui.
+  const quem: Quem = { id: null, prefixo: chave ? chave.slice(0, 11) : null, nome: null }
+  if (!chave) return { erro: erro('informe a chave de API em `Authorization: Bearer ...` ou `X-API-Key`', 401), quem }
 
   const { data: registro } = await sb.from('api_chaves')
-    .select('id, revendedor_id, ativo').eq('hash', await hashDaChave(chave)).maybeSingle()
-  if (!registro || !registro.ativo) return { erro: erro('chave de API invalida ou revogada', 401) }
+    .select('id, nome, prefixo, revendedor_id, ativo').eq('hash', await hashDaChave(chave)).maybeSingle()
+  if (!registro || !registro.ativo) return { erro: erro('chave de API invalida ou revogada', 401), quem }
+  quem.id = registro.id
+  quem.nome = registro.nome
+  quem.prefixo = registro.prefixo || quem.prefixo
 
   const { data: rev } = await sb.from('revendedores')
     .select('id, nome, usuario, papel, ativo').eq('id', registro.revendedor_id).maybeSingle()
-  if (!rev || !rev.ativo) return { erro: erro('a conta dona desta chave esta inativa', 403) }
+  if (!rev || !rev.ativo) return { erro: erro('a conta dona desta chave esta inativa', 403), quem }
   // O papel e conferido A CADA requisicao, e nao so na criacao da chave: se a
   // conta for rebaixada depois, a chave para de valer na hora, sem ninguem
   // precisar lembrar de revogar. E e o que sustenta o escopo "ve tudo".
-  if (rev.papel !== 'admin') return { erro: erro('esta chave nao pertence a uma conta admin', 403) }
+  if (rev.papel !== 'admin') return { erro: erro('esta chave nao pertence a uma conta admin', 403), quem }
 
   // Best-effort: registrar uso nao pode derrubar a requisicao.
   sb.from('api_chaves').update({ ultimo_uso_em: new Date().toISOString() })
     .eq('id', registro.id).then(() => {}, () => {})
 
-  return { rev }
+  return { rev, quem }
 }
 
 /** Mapa cliente_id -> { nome, revendedor }, para as listagens nao virem cegas. */
@@ -249,11 +256,57 @@ async function aplicarHostNaPlaylist(playlistId: string, novaUrl: string, epgCif
   return { erro: null, ativados, parceiro: !!parceiro }
 }
 
+/** Quem fez a chamada, do ponto de vista do log. */
+type Quem = { id: string | null; prefixo: string | null; nome: string | null }
+// deno-lint-ignore no-explicit-any
+type Rev = any
+
+/**
+ * Registra a chamada em `api_logs`.
+ *
+ * ⚠️ NAO grava corpo nem query string. O corpo do POST/PATCH /playlists leva
+ * `lista_url`, que carrega USUARIO E SENHA do servidor Xtream em texto claro —
+ * a playlist e gravada cifrada no banco justamente para isso nao ficar a
+ * mostra, e um log de depuracao nao pode ser a porta dos fundos dessa
+ * protecao. Vai o caminho, o resultado e a duracao.
+ *
+ * A resposta e CLONADA para ler a mensagem de erro. Guardar o ultimo payload
+ * numa variavel de modulo seria mais simples e estaria errado: o mesmo isolate
+ * atende requisicoes concorrentes, e uma embaralharia o log da outra.
+ */
+async function registrarLog(req: Request, resp: Response, quem: Quem, ms: number) {
+  try {
+    const u = new URL(req.url)
+    const i = u.pathname.indexOf('/api')
+    const rota = (i >= 0 ? u.pathname.slice(i + 4) : u.pathname) || '/'
+    const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim()
+      || req.headers.get('cf-connecting-ip') || null
+
+    let mensagem: string | null = null
+    if (resp.status >= 400) {
+      try {
+        const corpo = await resp.clone().json()
+        // So a mensagem NOSSA (`erro`), nunca o corpo inteiro.
+        if (typeof corpo?.erro === 'string') mensagem = corpo.erro.slice(0, 300)
+      } catch { /* resposta sem JSON: fica sem mensagem */ }
+    }
+
+    await sb.from('api_logs').insert({
+      chave_id: quem.id, prefixo: quem.prefixo, chave_nome: quem.nome,
+      metodo: req.method, rota, status: resp.status, ms, ip, erro: mensagem,
+    })
+  } catch { /* log que derruba a requisicao e pior que log nenhum */ }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
 
+  const t0 = Date.now()
+  let quem: Quem = { id: null, prefixo: null, nome: null }
+  const resposta = await (async (): Promise<Response> => {
   try {
     const auth = await autenticar(req)
+    quem = auth.quem
     if (auth.erro) return auth.erro
 
     const url = new URL(req.url)
@@ -551,4 +604,16 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     return erro((e as Error).message || 'erro interno', 500)
   }
+  })()
+
+  // O log e esperado de verdade — `EdgeRuntime.waitUntil` deixa ele terminar
+  // DEPOIS de a resposta sair, sem somar latencia. Sem ele, cai no await: um
+  // log que some em silencio e pior que nenhum, porque a tela mostra vazio e
+  // ninguem descobre que o problema e o log, nao a integracao.
+  const tarefa = registrarLog(req, resposta, quem, Date.now() - t0)
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime
+  if (rt?.waitUntil) rt.waitUntil(tarefa); else await tarefa
+
+  return resposta
 })

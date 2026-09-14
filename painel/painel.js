@@ -43,6 +43,18 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 /** Celula de revenda: nulo e self-serve (cliente que se ativou sozinho pelo
  *  app, sem revenda), nao dado faltando. Um traco fazia parecer erro. */
 const celRevenda = (r) => r ? esc(r) : '<span class="tc-self">Self-serve</span>'
+
+/** Faixa do HTTP -> cor. 2xx verde, 4xx ambar (culpa de quem chamou), 5xx
+ *  vermelho (culpa nossa) — a distincao e o que diz para quem mandar o bug. */
+const classeStatus = (n) => n >= 500 ? 'badge-expirado' : (n >= 400 ? 'badge-trial' : 'badge-ativo')
+
+/** Data COM hora: num log, "14/09" sem hora nao serve para nada. */
+const fmtDataHora = (d) => {
+  if (!d) return '—'
+  const x = new Date(d)
+  if (isNaN(x)) return '—'
+  return x.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 const fmtData = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—'
 // Login por usuário → e-mail sintético (o Supabase Auth exige e-mail). MESMO
 // derivador da Edge Function `painel` (USUARIO_DOMINIO). Nunca é enviado e-mail.
@@ -178,6 +190,7 @@ const NAV = [
     { id: 'parceiros', rotulo: 'Parceiros', ic: 'globe' },
     { id: 'servidores', rotulo: 'Servidores', ic: 'server' },
     { id: 'apichaves', rotulo: 'API', ic: 'link' },
+    { id: 'apilogs', rotulo: 'API Logs', ic: 'hash' },
   ] },
 ]
 
@@ -235,7 +248,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, todosdispositivos: vTodosDispositivos, playlists: vPlaylists, todasplaylists: vTodasPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, todosdispositivos: vTodosDispositivos, playlists: vPlaylists, todasplaylists: vTodasPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves, apilogs: vApiLogs }[v]
   if (fn) fn(param)
 }
 
@@ -1005,8 +1018,12 @@ async function abrirTicket(id, recarregar) {
 }
 
 // ── Helpers de filtro (pílulas) ──────────────────────────────────────────────
-function pills(label, opts) {
-  return `<span class="pill-lbl">${esc(label)}:</span>` + opts.map(([v, t], i) => `<button class="pill${i === 0 ? ' on' : ''}" data-v="${esc(v)}">${esc(t)}</button>`).join('')
+// `sel` marca qual pilula nasce acesa; sem ele, a primeira. Sem esse
+// parametro, uma tela com padrao diferente da 1a opcao acende um botao e
+// filtra por outro — o usuario ve "1 hora" aceso mostrando 24h de dados.
+function pills(label, opts, sel) {
+  const ativo = sel === undefined ? (opts[0] || [])[0] : sel
+  return `<span class="pill-lbl">${esc(label)}:</span>` + opts.map(([v, t]) => `<button class="pill${v === ativo ? ' on' : ''}" data-v="${esc(v)}">${esc(t)}</button>`).join('')
 }
 function wirePills(container, onChange) {
   container.querySelectorAll('.pill').forEach((p) => { p.onclick = () => { container.querySelectorAll('.pill').forEach((x) => x.classList.remove('on')); p.classList.add('on'); onChange(p.dataset.v) } })
@@ -1768,6 +1785,102 @@ function modalServidor(s, recarregar) {
 // ── Chaves de API (SÓ ADMIN) ────────────────────────────────────────────────
 // Abrem a Edge Function `api`, que expõe LEITURA + UPLOAD DE LISTA para painéis
 // de terceiros. A chave aparece UMA vez, na criação: do banco só sai o hash.
+// ── API Logs (so admin) ─────────────────────────────────────────────────────
+// O que a API recebeu: quem bateu, em que rota, com que resultado e em quanto
+// tempo. Responde "a integracao do parceiro esta funcionando?" sem ninguem
+// precisar abrir o Supabase.
+//
+// ⚠️ Nao existe corpo de requisicao aqui, e nao e esquecimento: o corpo do
+// POST/PATCH de playlist leva usuario e senha do servidor Xtream. Ver o
+// comentario da tabela `api_logs` no schema.
+async function vApiLogs() {
+  if (me.papel !== 'admin') { placeholder('API Logs', 'Área restrita ao administrador', 'hash'); return }
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head">
+      <div><h1>API Logs</h1><p id="al-sub">Carregando…</p></div>
+      <button class="btn-sec" id="al-limpar">${svg('trash')} Limpar antigos</button>
+    </div>
+    <div class="stats" id="al-stats"></div>
+    <div class="filtros">
+      <input class="busca" id="al-q" placeholder="Buscar rota, chave, IP, erro…">
+      <div class="pills" id="al-ffaixa">${pills('Período', [['1h', '1 hora'], ['24h', '24 horas'], ['7d', '7 dias'], ['30d', '30 dias']], '24h')}</div>
+      <div class="pills" id="al-fres">${pills('Resultado', [['', 'Todos'], ['ok', 'Sucesso'], ['erro', 'Erro']])}</div>
+    </div>
+    <div class="tbl-wrap" id="al-tbl"><div class="vazio">Carregando…</div></div>
+  </div>`
+  const meu = viewAtual()
+  let dados = []
+  const st = { q: '', faixa: '24h', res: '' }
+
+  const render = () => {
+    const f = dados.filter((l) => {
+      if (st.res === 'ok' && l.status >= 400) return false
+      if (st.res === 'erro' && l.status < 400) return false
+      if (st.q && !`${l.metodo} ${l.rota} ${l.chave_nome || ''} ${l.prefixo || ''} ${l.ip || ''} ${l.erro || ''}`.toLowerCase().includes(st.q.toLowerCase())) return false
+      return true
+    })
+    const el = document.getElementById('al-tbl'); if (!el) return
+    if (!f.length) { el.innerHTML = '<div class="vazio">Nenhuma chamada no período.</div>'; return }
+    el.innerHTML = `<table><thead><tr><th>Quando</th><th>Chave</th><th>Método</th><th>Rota</th><th>Status</th><th>Tempo</th><th>IP</th><th>Erro</th></tr></thead><tbody>
+      ${f.map((l) => `<tr>
+        <td class="tnum">${fmtDataHora(l.criado_em)}</td>
+        <td>${l.chave_nome ? esc(l.chave_nome) : '<i>desconhecida</i>'}<br><span class="al-pfx mono">${esc(l.prefixo || '—')}</span></td>
+        <td><span class="al-m al-m-${esc((l.metodo || '').toLowerCase())}">${esc(l.metodo)}</span></td>
+        <td class="mono">${esc(l.rota)}</td>
+        <td><span class="badge ${classeStatus(l.status)}">${l.status}</span></td>
+        <td class="tnum">${l.ms != null ? l.ms + ' ms' : '—'}</td>
+        <td class="mono">${esc(l.ip || '—')}</td>
+        <td class="al-erro">${l.erro ? esc(l.erro) : ''}</td>
+      </tr>`).join('')}</tbody></table>`
+  }
+
+  async function carregar() {
+    const el = document.getElementById('al-tbl'); if (el) el.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const r = await api('listar_api_logs', { faixa: st.faixa })
+      if (meu !== viewAtual()) return
+      dados = r.logs || []
+      const sub = document.getElementById('al-sub')
+      // Tabela ausente tem que DIZER isso: "nenhuma chamada" parece integração
+      // parada, e manda o admin investigar o lado errado.
+      if (r.indisponivel) {
+        if (sub) sub.textContent = r.indisponivel
+        if (el) el.innerHTML = `<div class="vazio">${esc(r.indisponivel)}</div>`
+        document.getElementById('al-stats').innerHTML = ''
+        return
+      }
+      const erros = dados.filter((l) => l.status >= 400).length
+      const tempos = dados.filter((l) => l.ms != null).map((l) => l.ms).sort((a, x) => a - x)
+      // Mediana, não média: uma chamada de 8 s puxa a média e esconde que o
+      // resto está rápido.
+      const mediana = tempos.length ? tempos[Math.floor(tempos.length / 2)] : 0
+      if (sub) {
+        sub.textContent = `${dados.length} chamada${dados.length !== 1 ? 's' : ''} no período`
+          + (r.truncado ? ' — mostrando as mais recentes' : '')
+      }
+      document.getElementById('al-stats').innerHTML =
+        statCard('zap', '#4f8ef7', dados.length, 'Chamadas') +
+        statCard('check', '#34c759', dados.length - erros, 'Sucesso') +
+        statCard('shield', '#ff5b54', erros, 'Erros') +
+        statCard('refresh', '#9b7bff', mediana + ' ms', 'Tempo (mediana)')
+      render()
+    } catch (e) {
+      if (meu !== viewAtual()) return
+      if (el) el.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+
+  document.getElementById('al-q').oninput = (e) => { st.q = e.target.value; render() }
+  wirePills(document.getElementById('al-ffaixa'), (v) => { st.faixa = v || '24h'; carregar() })
+  wirePills(document.getElementById('al-fres'), (v) => { st.res = v; render() })
+  document.getElementById('al-limpar').onclick = async () => {
+    if (!confirm('Apagar os registros com mais de 30 dias? Não dá para desfazer.')) return
+    try { await api('limpar_api_logs', { dias: 30 }); toast('Registros antigos apagados'); carregar() }
+    catch (e) { toast(e.message, true) }
+  }
+  carregar()
+}
+
 async function vApiChaves() {
   if (me.papel !== 'admin') { placeholder('API', 'Área restrita ao administrador', 'link') ; return }
   // Deriva da mesma base da função `painel` — não repete a URL do projeto.
