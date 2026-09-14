@@ -78,6 +78,15 @@ async function api(acao, payload = {}) {
     body: JSON.stringify({ acao, ...payload }),
   })
   const j = await r.json().catch(() => ({}))
+  // "acao desconhecida" quase nunca e um bug do painel: e a Edge Function
+  // publicada estando mais velha que este arquivo. O painel sobe sozinho no
+  // push; a funcao so sobe com deploy manual, entao as duas desencontram
+  // justamente quando uma tela nova estreia. A mensagem crua mandava o admin
+  // procurar defeito na tela, que esta boa.
+  if (j.erro === 'acao desconhecida') {
+    throw new Error(`A função do painel no servidor está desatualizada: ela não conhece "${acao}". `
+      + 'Rode `supabase functions deploy painel` (e o schema-tv.sql, se a tela for nova).')
+  }
   if (!r.ok || j.ok === false || j.erro) throw new Error(j.erro || ('erro ' + r.status))
   return j
 }
