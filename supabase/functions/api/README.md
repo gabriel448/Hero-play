@@ -313,17 +313,42 @@ Supabase derruba a requisição antes do nosso código rodar, e a resposta é
 válida. Quem garante isso é o `[functions.api]` no `supabase/config.toml`
 (com teste em `tools/teste-parceiros/api.test.mjs`).
 
-Para publicar:
+Para publicar, **sempre com a flag explícita**:
 
 ```bash
-supabase functions deploy api
+supabase functions deploy api --no-verify-jwt
 ```
+
+O `[functions.api]` do `config.toml` sozinho **não bastou** na prática: a
+função subiu e mesmo assim o gateway continuou na frente, enquanto
+`painel` e `ativacao` — com a mesma entrada no mesmo arquivo — passavam. O
+`verify_jwt` é gravado por função **na plataforma**, e um redeploy nem
+sempre rebaixa o que já está lá. A flag resolve; pelo painel web também dá
+(Edge Functions → `api` → *Verify JWT with legacy secret* → desligar).
 
 Depois de publicar, confira que o gateway saiu da frente — o erro tem que ser
 **nosso**, e não do Supabase:
 
 ```bash
 curl -s "$BASE/clientes" -H "Authorization: Bearer hp_chave_falsa"
-# esperado: {"ok":false,"erro":"chave inválida"}
-# se vier {"code":"UNAUTHORIZED_INVALID_JWT_FORMAT"}, o verify_jwt ficou ligado
+```
+
+| Resposta | O que é |
+|---|---|
+| `{"ok":false,"erro":"chave de API invalida..."}` | ✅ o erro é **nosso** — o gateway saiu da frente |
+| `{"code":"UNAUTHORIZED_INVALID_JWT_FORMAT"}` | ❌ `verify_jwt` ainda ligado — redeploy com a flag |
+| `{"code":"NOT_FOUND"}` | ❌ a função não está publicada |
+
+Os três se distinguem só pela resposta, e é o que separa "não subiu" de
+"subiu e está bloqueada" — que pedem correções diferentes.
+
+**Enquanto o gateway estiver na frente** dá para usar a API mandando os dois
+cabeçalhos: a `anon key` do projeto em `Authorization` (só para passar pelo
+gateway — ela é pública, já vai no JS do site) e a chave de verdade em
+`X-API-Key`. É contorno, não solução: o certo é desligar o `verify_jwt`.
+
+```bash
+curl -s "$BASE/clientes" \
+  -H "Authorization: Bearer <SUPABASE_ANON_KEY>" \
+  -H "X-API-Key: $CHAVE"
 ```
