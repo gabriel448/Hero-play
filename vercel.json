@@ -28,6 +28,12 @@
       "permanent": false
     }
   ],
+  "rewrites": [
+    {
+      "source": "/upload",
+      "destination": "/upload.html"
+    }
+  ],
   "headers": [
     {
       "source": "/painel/(.*)",
