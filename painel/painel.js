@@ -122,6 +122,9 @@ const IC = {
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   lifebuoy: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
+  tv: '<rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/>',
   menu: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
   server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
   pencil: '<path d="M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.63l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>',
@@ -165,6 +168,8 @@ const NAV = [
     { id: 'dashboard', rotulo: 'Dashboard', ic: 'dashboard' },
     { id: 'suporte', rotulo: 'Suporte', ic: 'lifebuoy' },
     { id: 'caixa', rotulo: 'Caixa de entrada', ic: 'inbox' },
+    // Todos os papéis: é o revendedor quem manda o link do app para o cliente.
+    { id: 'downloads', rotulo: 'Downloads', ic: 'download' },
   ] },
   { grupo: 'Conteúdo', itens: [
     // Clientes é NOSSO (o painel é client-centric; o de referência é device-centric).
@@ -259,7 +264,7 @@ const viewAtual = () => _viewSeq
 function irPara(v, param) {
   _viewSeq++
   marcarNav(v)
-  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, todosdispositivos: vTodosDispositivos, playlists: vPlaylists, todasplaylists: vTodasPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves, apilogs: vApiLogs }[v]
+  const fn = { dashboard: vDashboard, suporte: vSuporte, caixa: vCaixa, clientes: vClientes, todosclientes: vTodosClientes, cliente: vCliente, dispositivos: vDispositivos, todosdispositivos: vTodosDispositivos, playlists: vPlaylists, todasplaylists: vTodasPlaylists, revendedores: vRevendedores, creditos: vCreditos, comprar: vComprar, indicacao: vIndicacao, parceiros: vParceiros, servidores: vServidores, apichaves: vApiChaves, apilogs: vApiLogs, downloads: vDownloads }[v]
   if (fn) fn(param)
 }
 
@@ -768,8 +773,10 @@ async function vRevendedores() {
         <td class="acoes-dl">
           <button class="btn-sec" data-acao="transferir" data-id="${esc(r.id)}" data-nome="${esc(r.nome || r.usuario)}">${svg('send')} Transferir</button>
           ${ehAdmin ? `<button class="btn-sec" data-acao="tier" data-id="${esc(r.id)}" data-tier="${r.papel === 'master' ? 'reseller' : 'master'}">${r.papel === 'master' ? 'Rebaixar' : 'Promover a Master'}</button>` : ''}
+          ${ehAdmin ? `<button class="btn-sec" data-acao="det" data-id="${esc(r.id)}">Detalhes</button>` : ''}
         </td>
-      </tr>`).join('')}</tbody></table>`
+      </tr>
+      ${ehAdmin ? `<tr id="rvtr-${esc(r.id)}" hidden><td class="rv-det-cel" colspan="6"><div id="rvdet-${esc(r.id)}"></div></td></tr>` : ''}`).join('')}</tbody></table>`
     el.querySelectorAll('[data-acao="transferir"]').forEach((b) => { b.onclick = () => abrirModal({
       titulo: 'Transferir créditos', okLabel: 'Transferir',
       campos: [{ id: 'qtd', label: admInf()
@@ -787,17 +794,39 @@ async function vRevendedores() {
       },
     }) })
     el.querySelectorAll('[data-acao="tier"]').forEach((b) => { b.onclick = async () => { try { await api('promover', { revendedor_id: b.dataset.id, tier: b.dataset.tier }); invalidar('downline'); toast(b.dataset.tier === 'master' ? 'Promovido a Master' : 'Rebaixado a comum'); vRevendedores() } catch (e) { toast(e.message, true) } } })
+    el.querySelectorAll('[data-acao="det"]').forEach((b) => { b.onclick = () => detalheRevendedor(b.dataset.id, b) })
   } catch (e) { toast(e.message, true) }
 }
 
 // ── Créditos (extrato) ───────────────────────────────────────────────────────
 async function vCreditos() {
+  // No admin a tela ganha uma segunda aba com o histórico da plataforma inteira
+  // (`abaMovimentacoes`). O extrato de quem não é admin não muda em nada.
+  const adm = admInf()
   view().innerHTML = `<div class="pg"><div class="pg-head"><div><h1>Créditos</h1><p>${
-    admInf() ? 'Você distribui crédito para os revendedores — seu saldo é ilimitado' : 'Seu saldo e histórico de movimentos'}</p></div></div>
-    <div class="stats"><div class="stat"><div class="stat-ic" style="background:#E539351f;color:#E53935">${svg('coins')}</div><div>${
-    admInf() ? '<b class="cr-inf">∞</b><span>Crédito ilimitado</span>'
-      : `<b id="cr-saldo">${me.saldo_creditos ?? 0}</b><span>Saldo atual</span>`}</div></div></div>
-    <div class="tbl-wrap" id="cr-tbl"><div class="vazio">Carregando…</div></div></div>`
+    adm ? 'Você distribui crédito para os revendedores — seu saldo é ilimitado' : 'Seu saldo e histórico de movimentos'}</p></div></div>
+    ${adm ? `<div class="tabs" id="cr-tabs">
+      <button class="tab on" data-t="meu">Meu extrato</button>
+      <button class="tab" data-t="todos">Todos os revendedores</button>
+    </div>` : ''}
+    <div id="cr-aba-meu">
+      <div class="stats"><div class="stat"><div class="stat-ic" style="background:#E539351f;color:#E53935">${svg('coins')}</div><div>${
+      adm ? '<b class="cr-inf">∞</b><span>Crédito ilimitado</span>'
+        : `<b id="cr-saldo">${me.saldo_creditos ?? 0}</b><span>Saldo atual</span>`}</div></div></div>
+      <div class="tbl-wrap" id="cr-tbl"><div class="vazio">Carregando…</div></div>
+    </div>
+    ${adm ? '<div id="cr-aba-todos" class="oculto"></div>' : ''}
+  </div>`
+  if (adm) {
+    document.querySelectorAll('#cr-tabs .tab').forEach((b) => {
+      b.onclick = () => {
+        const aba = b.dataset.t
+        ;['meu', 'todos'].forEach((x) => document.getElementById('cr-aba-' + x).classList.toggle('oculto', x !== aba))
+        document.querySelectorAll('#cr-tabs .tab').forEach((y) => y.classList.toggle('on', y.dataset.t === aba))
+        if (aba === 'todos') abaMovimentacoes(document.getElementById('cr-aba-todos'))
+      }
+    })
+  }
   const meu = viewAtual()
   try {
     const { saldo, transacoes } = await pega('creditos', () => api('listar_creditos'))
@@ -806,16 +835,250 @@ async function vCreditos() {
     const cs = document.getElementById('cr-saldo'); if (cs && saldo !== null) cs.textContent = saldo
     const el = document.getElementById('cr-tbl')
     if (!transacoes.length) { el.innerHTML = '<div class="vazio">Nenhum movimento ainda.</div>'; return }
-    const rotulo = { adicionado: 'Adicionado', consumido: 'Consumido', transferido_saida: 'Transferido', transferido_entrada: 'Recebido' }
     el.innerHTML = `<table><thead><tr><th>Tipo</th><th>Qtd</th><th>Saldo após</th><th>Nota</th><th>Data</th></tr></thead><tbody>
       ${transacoes.map((t) => `<tr>
-        <td>${esc(rotulo[t.tipo] || t.tipo)}</td>
+        <td>${esc(ROTULO_CREDITO[t.tipo] || t.tipo)}</td>
         <td class="${t.quantidade >= 0 ? 'pos' : 'neg'} tnum">${t.quantidade >= 0 ? '+' : ''}${t.quantidade}</td>
         <td class="tnum">${t.saldo_apos ?? '—'}</td>
         <td>${esc(t.nota || '—')}</td>
         <td class="tnum">${fmtData(t.criado_em)}</td>
       </tr>`).join('')}</tbody></table>`
   } catch (e) { toast(e.message, true) }
+}
+
+// Rótulo de cada tipo de movimento de crédito. O extrato, a gaveta do
+// revendedor e o histórico da plataforma usam o mesmo, para uma tela não chamar
+// de "Transferido" o que outra chama de outro nome.
+const ROTULO_CREDITO = { adicionado: 'Adicionado', consumido: 'Consumido', transferido_saida: 'Transferido', transferido_entrada: 'Recebido' }
+
+// ── Revendedores: gaveta de detalhe (só admin) ───────────────────────────────
+// Dados da conta, tamanho da rede e da carteira, últimos movimentos e as ações
+// que tiram ou devolvem acesso. Ficam na gaveta, e não na linha da tabela, para
+// a linha continuar legível com os botões que já existiam.
+async function detalheRevendedor(id, btn) {
+  const tr = document.getElementById('rvtr-' + id)
+  const caixa = document.getElementById('rvdet-' + id)
+  if (!tr || !caixa) return
+  if (!tr.hidden) { tr.hidden = true; btn.textContent = 'Detalhes'; return }
+  tr.hidden = false
+  btn.textContent = 'Ocultar'
+  caixa.innerHTML = '<div class="vazio">Carregando…</div>'
+  try {
+    const d = await api('admin_revendedor_detalhe', { revendedor_id: id })
+    const r = d.revendedor
+    const nome = r.nome || r.usuario || 'este revendedor'
+    const campo = (rot, val) => `<span class="tc-campo"><span class="tc-rot">${rot}</span>${val}</span>`
+    caixa.innerHTML = `<div class="tc-det">
+      <div class="tc-fatos">
+        ${campo('Usuário', `<span class="tc-val mono">@${esc(r.usuario || '—')}</span>`)}
+        ${campo('Indicado por', `<span class="tc-val">${r.indicado_por ? esc(r.indicado_por) : 'cadastro direto'}</span>`)}
+        ${campo('Código de indicação', `<span class="tc-val mono">${esc(r.codigo_indicacao || '—')}</span>`)}
+        ${campo('Na plataforma desde', `<span class="tc-val">${fmtData(r.criado_em)}</span>`)}
+        ${campo('Indicados diretos', `<span class="tc-val">${d.indicados}</span>`)}
+        ${campo('Clientes', `<span class="tc-val">${d.clientes}</span>`)}
+        ${campo('Aparelhos', `<span class="tc-val">${d.dispositivos}</span>`)}
+      </div>
+
+      <div class="tc-sec">
+        <div class="tc-sec-h">${svg('shield')} Conta</div>
+        <div class="rv-acoes">
+          ${r.ativo
+            ? '<button class="btn-danger" data-rv="bloquear">Bloquear conta</button>'
+            : '<button class="btn" data-rv="desbloquear">Desbloquear conta</button>'}
+          <button class="btn-sec" data-rv="senha">Redefinir senha</button>
+        </div>
+        <div class="row-sub">${r.ativo
+          ? 'Bloquear corta o acesso ao painel e às chaves de API desta conta na hora. Os clientes e aparelhos dela continuam funcionando.'
+          : 'Conta bloqueada: não entra no painel. Os clientes e aparelhos dela continuam funcionando.'}</div>
+      </div>
+
+      <div class="tc-sec">
+        <div class="tc-sec-h">${svg('coins')} Últimos movimentos <span class="tc-n">${d.transacoes.length}</span></div>
+        ${d.transacoes.length ? d.transacoes.map((t) => `<div class="tc-linha">
+          <div class="tc-linha-top">
+            <span class="tc-chave">${esc(ROTULO_CREDITO[t.tipo] || t.tipo)}</span>
+            <span class="${t.quantidade >= 0 ? 'pos' : 'neg'} tnum">${t.quantidade >= 0 ? '+' : ''}${t.quantidade}</span>
+          </div>
+          <div class="tc-campos">
+            ${campo('Nota', `<span class="tc-val">${esc(t.nota || '—')}</span>`)}
+            ${campo('Saldo após', `<span class="tc-val">${t.saldo_apos ?? '—'}</span>`)}
+            ${campo('Quando', `<span class="tc-val">${fmtInstante(t.criado_em)}</span>`)}
+          </div>
+        </div>`).join('') : '<div class="tc-nada">Nenhum movimento ainda.</div>'}
+      </div>
+    </div>`
+
+    caixa.querySelectorAll('[data-rv]').forEach((bt) => {
+      bt.onclick = async () => {
+        if (bt.dataset.rv === 'senha') {
+          if (!confirm(`Gerar uma senha nova para ${nome}? A senha atual deixa de funcionar na hora.`)) return
+          try {
+            const res = await api('redefinir_senha_revendedor', { revendedor_id: id })
+            abrirModal({
+              titulo: 'Senha nova de ' + nome,
+              okLabel: 'Já passei a senha',
+              aviso: 'Esta é a <b>única</b> vez que ela aparece. Passe para o revendedor por um canal seguro.',
+              campos: [{ id: 'senha', label: 'Senha provisória', value: res.senha }],
+              onOk: async () => null,
+            })
+            navigator.clipboard?.writeText(res.senha).then(
+              () => toast('Senha copiada'),
+              () => { /* sem permissão: ela está visível no campo */ },
+            )
+          } catch (e) { toast(e.message, true) }
+          return
+        }
+        const bloquear = bt.dataset.rv === 'bloquear'
+        if (bloquear && !confirm(`Bloquear ${nome}? A conta perde o acesso ao painel na hora.`)) return
+        try {
+          await api('revendedor_ativo', { revendedor_id: id, ativo: !bloquear })
+          invalidar('downline')
+          toast(bloquear ? 'Conta bloqueada' : 'Conta desbloqueada')
+          vRevendedores()
+        } catch (e) { toast(e.message, true) }
+      }
+    })
+  } catch (e) {
+    caixa.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+  }
+}
+
+// ── Créditos da PLATAFORMA (só admin) ────────────────────────────────────────
+// Todo movimento de crédito de todos os revendedores: quando, quanto e para onde
+// foi. Ativação feita pelo admin e por domínio parceiro não gastam crédito, então
+// não aparecem aqui — a própria tela diz isso, para ninguém procurá-las.
+async function abaMovimentacoes(el) {
+  el.innerHTML = `
+    <div class="stats" id="mv-stats"></div>
+    <div class="filtros">
+      <input class="busca" id="mv-q" placeholder="Buscar revendedor, MAC, cliente, nota…">
+      <div class="pills" id="mv-ffaixa">${pills('Período', [['24h', '24 horas'], ['7d', '7 dias'], ['30d', '30 dias'], ['90d', '90 dias']], '30d')}</div>
+      <div class="pills" id="mv-ftipo">${pills('Tipo', [['', 'Todos'], ['consumido', 'Consumido'], ['transferido_saida', 'Transferido'], ['transferido_entrada', 'Recebido'], ['adicionado', 'Adicionado']])}</div>
+    </div>
+    <p class="row-sub" id="mv-sub">Carregando…</p>
+    <div class="tbl-wrap" id="mv-tbl"><div class="vazio">Carregando…</div></div>`
+  let dados = []
+  const st = { q: '', faixa: '30d', tipo: '' }
+
+  // "Para onde": o aparelho (e o cliente dele) numa ativação, o outro revendedor
+  // numa transferência. Linha antiga sem essas colunas mostra a nota.
+  const destino = (m) => {
+    if (m.tipo === 'consumido' && m.mac) {
+      return `<span class="mono">${esc(m.mac)}</span>${m.cliente ? `<div class="row-sub">${esc(m.cliente)}</div>` : ''}`
+    }
+    if (m.contraparte) return `${m.tipo === 'transferido_entrada' ? 'de ' : 'para '}${esc(m.contraparte)}`
+    return `<span class="row-sub">${esc(m.nota || '—')}</span>`
+  }
+
+  const render = () => {
+    const q = st.q.toLowerCase()
+    const f = !q ? dados : dados.filter((m) =>
+      `${m.revendedor || ''} ${m.contraparte || ''} ${m.mac || ''} ${m.cliente || ''} ${m.nota || ''}`.toLowerCase().includes(q))
+    const tb = document.getElementById('mv-tbl'); if (!tb) return
+    if (!f.length) { tb.innerHTML = '<div class="vazio">Nenhum movimento no período.</div>'; return }
+    tb.innerHTML = `<table><thead><tr><th>Quando</th><th>Revendedor</th><th>Tipo</th><th>Qtd</th><th>Destino</th><th>Plano</th><th>Saldo após</th></tr></thead><tbody>
+      ${f.map((m) => `<tr>
+        <td class="tnum">${fmtInstante(m.criado_em)}</td>
+        <td>${esc(m.revendedor || '—')}</td>
+        <td>${esc(ROTULO_CREDITO[m.tipo] || m.tipo)}</td>
+        <td class="${m.quantidade >= 0 ? 'pos' : 'neg'} tnum">${m.quantidade >= 0 ? '+' : ''}${m.quantidade}</td>
+        <td>${destino(m)}</td>
+        <td>${m.plano ? esc(planoRot(m.plano)) : '—'}</td>
+        <td class="tnum">${m.saldo_apos ?? '—'}</td>
+      </tr>`).join('')}</tbody></table>`
+  }
+
+  async function carregar() {
+    const tb = document.getElementById('mv-tbl'); if (tb) tb.innerHTML = '<div class="vazio">Carregando…</div>'
+    try {
+      const r = await api('listar_movimentacoes_todas', { faixa: st.faixa, tipo: st.tipo })
+      const sub = document.getElementById('mv-sub')
+      const stats = document.getElementById('mv-stats')
+      if (!sub || !stats) return                       // trocou de aba durante a busca
+      // Schema velho tem que DIZER que é o schema: "nenhum movimento" pareceria
+      // a plataforma parada.
+      if (r.indisponivel) {
+        dados = []
+        sub.textContent = r.indisponivel
+        stats.innerHTML = ''
+        if (tb) tb.innerHTML = `<div class="vazio">${esc(r.indisponivel)}</div>`
+        return
+      }
+      dados = r.movimentos || []
+      const soma = (tipo) => dados.filter((m) => m.tipo === tipo).reduce((a, m) => a + Math.abs(m.quantidade), 0)
+      const ativacoes = dados.filter((m) => m.tipo === 'consumido' && /^Ativa/.test(m.nota || '')).length
+      const renovacoes = dados.filter((m) => m.tipo === 'consumido' && /^Renova/.test(m.nota || '')).length
+      stats.innerHTML =
+        statCard('coins', '#E53935', soma('consumido'), 'Créditos consumidos') +
+        statCard('zap', '#34c759', ativacoes, 'Ativações') +
+        statCard('refresh', '#4f8ef7', renovacoes, 'Renovações') +
+        statCard('send', '#9b7bff', soma('transferido_entrada'), 'Créditos transferidos')
+      sub.textContent = `${dados.length} movimento${dados.length !== 1 ? 's' : ''} no período`
+        + (r.truncado ? ' — mostrando os mais recentes' : '')
+        + '. Ativação feita pelo admin e por domínio parceiro não gastam crédito, por isso não aparecem.'
+      render()
+    } catch (e) {
+      if (tb) tb.innerHTML = `<div class="vazio">${esc(e.message)}</div>`
+    }
+  }
+
+  document.getElementById('mv-q').oninput = (e) => { st.q = e.target.value; render() }
+  wirePills(document.getElementById('mv-ffaixa'), (v) => { st.faixa = v || '30d'; carregar() })
+  wirePills(document.getElementById('mv-ftipo'), (v) => { st.tipo = v; carregar() })
+  carregar()
+}
+
+// ── Downloads (todos os papéis) ──────────────────────────────────────────────
+// O app de cada aparelho que tem build de verdade, para o revendedor mandar ao
+// cliente. Tudo aponta para `/releases/latest/`: versão nova entra sem ninguém
+// editar esta lista. O link curto (heroplaytv.com/...) é um redirect do
+// vercel.json — o teste confere que cada um existe e leva ao mesmo arquivo.
+const REL_DOWNLOADS = 'https://github.com/gabriel448/heroplay-downloads/releases/latest/download/'
+const DOWNLOADS = [
+  {
+    nome: 'Android', sub: 'Celular e tablet', ic: 'smartphone',
+    curto: 'heroplaytv.com/android', url: REL_DOWNLOADS + 'HeroPlay-android.apk',
+    dica: 'Na instalação, o Android pede para permitir "fontes desconhecidas". É o normal para app baixado fora da loja.',
+  },
+  {
+    nome: 'Android TV · Fire Stick · TV Box', sub: 'Aparelhos de TV com Android', ic: 'tv',
+    curto: 'heroplaytv.com/fire', url: REL_DOWNLOADS + 'HeroPlayTV-androidtv.apk',
+    dica: 'No Fire Stick: instale o app Downloader, abra e digite heroplaytv.com/fire.',
+  },
+  {
+    nome: 'Windows', sub: 'Windows 10 ou superior', ic: 'monitor',
+    curto: 'heroplaytv.com/windows', url: REL_DOWNLOADS + 'HeroPlay-windows-setup.exe',
+    dica: 'O Windows pode avisar que o autor é desconhecido: clique em "Mais informações" e depois em "Executar assim mesmo".',
+  },
+]
+
+async function vDownloads() {
+  view().innerHTML = `<div class="pg">
+    <div class="pg-head"><div><h1>Downloads</h1><p>O app para cada aparelho. Mande o link curto ao cliente: ele sempre baixa a versão mais recente.</p></div></div>
+    <div class="lista">
+      ${DOWNLOADS.map((d) => `<div class="sv-card">
+        <div class="pc-row">
+          <div class="pc-ic on">${svg(d.ic)}</div>
+          <div class="pc-meta">
+            <div class="pc-top"><span class="pc-dom">${esc(d.nome)}</span></div>
+            <div class="pc-sub"><span>${esc(d.sub)}</span><span class="mono">${esc(d.curto)}</span></div>
+          </div>
+          <div class="pc-acoes">
+            <button class="btn-sec" data-copiar="https://${esc(d.curto)}">${svg('copy')} Copiar link</button>
+            <a class="btn" href="${esc(d.url)}" rel="noopener">${svg('download')} Baixar</a>
+          </div>
+        </div>
+        <div class="dl-dica">${esc(d.dica)}</div>
+      </div>`).join('')}
+    </div>
+    <p class="row-sub">Samsung e LG: o app ainda não está publicado nas lojas dessas TVs. Fale com o suporte.</p>
+  </div>`
+  view().querySelectorAll('[data-copiar]').forEach((b) => {
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copiar) } catch (_) { /* sem permissão */ }
+      toast('Link copiado')
+    }
+  })
 }
 
 // ── Caixa de entrada ─────────────────────────────────────────────────────────
@@ -1721,8 +1984,8 @@ async function vServidores() {
         </div>
       </div>
       <div class="sv-ajuda">
-        <b>Como usar:</b> no app, vá em <span class="mono">Adicionar playlist → Por código</span>,
-        digite <b class="mono">${esc(s.codigo)}</b> e confirme.
+        <b>Como usar:</b> no app de TV ou em heroplaytv.com/upload, digite
+        <b class="mono">${esc(s.codigo)}</b> no campo <b>Servidor</b>, no lugar do endereço.
       </div>
     </div>`).join('')
 

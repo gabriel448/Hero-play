@@ -3303,7 +3303,7 @@ function mostrarOnboarding() {
           <button class="ob-tab focusable" data-modo="m3u">M3U / URL</button>
         </div>
         <div class="ob-form" id="ob-form-xtream">
-          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="x-host" placeholder="${escapar(t('Servidor (http://host:porta)'))}" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="x-host" placeholder="${escapar(t('Servidor ou código'))}" autocomplete="off" spellcheck="false"></div>
           <div class="ob-campo"><span class="ob-ico">${IC_USER}</span><input class="ob-input focusable" id="x-user" placeholder="${escapar(t('Usuário'))}" autocomplete="off" spellcheck="false"></div>
           <div class="ob-campo"><span class="ob-ico">${IC_LOCK}</span><input class="ob-input focusable" id="x-pass" type="password" placeholder="${escapar(t('Senha'))}" autocomplete="off" spellcheck="false"></div>
         </div>
@@ -3385,9 +3385,35 @@ function trocarModoOnboarding(modo) {
   SpatialNav.setFocus(document.getElementById(primeiro));
 }
 
+// O campo "Servidor" aceita o ENDERECO ou o CODIGO que o admin cadastrou em
+// Servidores no painel — o cliente digita "1234" no controle em vez de um
+// endereco inteiro. Com ":" (esquema ou porta) e endereco, como sempre foi.
+const _pareceCodigoServidor = (v) => !v.includes(':') && /^[A-Za-z0-9._-]{2,64}$/.test(v);
+
+// Devolve { host } ou { erro }. Sem ponto nao existe dominio: se a nuvem nao
+// conhece o codigo, e codigo errado, e dizer isso poupa uma lista que nunca
+// carrega. Com ponto e nao sendo codigo ("servidor.com"), segue como host.
+async function hostDoCampo(valor) {
+  const v = (valor || '').trim();
+  if (!_pareceCodigoServidor(v)) return { host: v };
+  const r = await Dispositivo.resolverServidor(v);
+  if (r.host) return { host: r.host };
+  if (v.includes('.')) return { host: v };
+  return {
+    erro: r.motivo === 'offline'
+      ? t('Sem conexão para conferir o código do servidor.')
+      : t('Código de servidor não encontrado.'),
+  };
+}
+
+// Barra o "Conectar" repetido enquanto o codigo e conferido: no controle remoto
+// o OK repete facil, e cada toque criaria uma playlist na nuvem.
+let _conferindoServidor = false;
+
 // Adiciona a lista digitada no proprio app (Xtream OU M3U). "Traga sua lista":
 // sem venda no app — só configura a playlist do cliente. Inicia o teste (trial).
-function onboardingAdicionar() {
+async function onboardingAdicionar() {
+  if (_conferindoServidor) return;
   const val = (id) => (document.getElementById(id).value || '').trim();
   const erro = (m) => { document.getElementById('ob-erro').textContent = m; };
   const _tab = document.querySelector('.ob-tab.ativo');
@@ -3395,9 +3421,15 @@ function onboardingAdicionar() {
   let lista_url, epg_url, user = '';
 
   if (modo === 'xtream') {
-    const host = val('x-host'); user = val('x-user'); const pass = val('x-pass');
-    if (!host || !user || !pass) return erro(t('Preencha servidor, usuário e senha.'));
-    ({ lista_url, epg_url } = ListaUtil.montarXtream(host, user, pass));
+    const campo = val('x-host'); user = val('x-user'); const pass = val('x-pass');
+    if (!campo || !user || !pass) return erro(t('Preencha servidor, usuário e senha.'));
+    _conferindoServidor = true;
+    try {
+      if (_pareceCodigoServidor(campo)) mostrarLoading(t('Conferindo o servidor…'));
+      const r = await hostDoCampo(campo);
+      if (r.erro) { esconderLoading(); return erro(r.erro); }
+      ({ lista_url, epg_url } = ListaUtil.montarXtream(r.host, user, pass));
+    } finally { _conferindoServidor = false; }
   } else {
     lista_url = val('m-url');
     if (!/^https?:\/\//i.test(lista_url)) return erro(t('Informe uma URL M3U válida (http/https).'));
@@ -3636,7 +3668,7 @@ function abrirAddPlaylist() {
           <button class="ob-tab focusable" data-modo="m3u">M3U / URL</button>
         </div>
         <div class="ob-form" id="ap-form-xtream">
-          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="ap-host" placeholder="${escapar(t('Servidor (http://host:porta)'))}" autocomplete="off" spellcheck="false"></div>
+          <div class="ob-campo"><span class="ob-ico">${IC_GLOBO}</span><input class="ob-input focusable" id="ap-host" placeholder="${escapar(t('Servidor ou código'))}" autocomplete="off" spellcheck="false"></div>
           <div class="ob-campo"><span class="ob-ico">${IC_USER}</span><input class="ob-input focusable" id="ap-user" placeholder="${escapar(t('Usuário'))}" autocomplete="off" spellcheck="false"></div>
           <div class="ob-campo"><span class="ob-ico">${IC_LOCK}</span><input class="ob-input focusable" id="ap-pass" type="password" placeholder="${escapar(t('Senha'))}" autocomplete="off" spellcheck="false"></div>
         </div>
@@ -3662,15 +3694,23 @@ function abrirAddPlaylist() {
 }
 
 async function addPlaylistSubmit(ov) {
+  if (_conferindoServidor) return;
   const val = (id) => (document.getElementById(id).value || '').trim();
   const erro = (m) => { const e = document.getElementById('ap-erro'); if (e) e.textContent = m; };
   const _tab = ov.querySelector('.ob-tab.ativo');
   const modo = (_tab && _tab.dataset.modo) || 'xtream';
   let lista_url, epg_url, user = '';
   if (modo === 'xtream') {
-    const host = val('ap-host'); user = val('ap-user'); const pass = val('ap-pass');
-    if (!host || !user || !pass) return erro(t('Preencha servidor, usuário e senha.'));
-    ({ lista_url, epg_url } = ListaUtil.montarXtream(host, user, pass));
+    const campo = val('ap-host'); user = val('ap-user'); const pass = val('ap-pass');
+    if (!campo || !user || !pass) return erro(t('Preencha servidor, usuário e senha.'));
+    // Mesmo campo "Servidor ou código" do onboarding — ver `hostDoCampo`.
+    _conferindoServidor = true;
+    try {
+      if (_pareceCodigoServidor(campo)) mostrarLoading(t('Conferindo o servidor…'));
+      const r = await hostDoCampo(campo);
+      if (r.erro) { esconderLoading(); return erro(r.erro); }
+      ({ lista_url, epg_url } = ListaUtil.montarXtream(r.host, user, pass));
+    } finally { _conferindoServidor = false; }
   } else {
     lista_url = val('ap-url');
     if (!/^https?:\/\//i.test(lista_url)) return erro(t('Informe uma URL M3U válida (http/https).'));

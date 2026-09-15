@@ -43,7 +43,7 @@
               </div>
               <form id="form" autocomplete="off">
                 <div id="campos-x">
-                  <div class="campo"><label for="x-host" data-i18n="up.server">Servidor</label><input class="in" type="text" id="x-host" placeholder="http://host:porta" autocomplete="off" spellcheck="false"></div>
+                  <div class="campo"><label for="x-host" data-i18n="up.server">Servidor</label><input class="in" type="text" id="x-host" placeholder="http://host:porta ou código" data-i18n-ph="up.serverph" autocomplete="off" spellcheck="false"></div>
                   <div class="campo"><label for="x-user" data-i18n="up.user">Usuário</label><input class="in" type="text" id="x-user" autocomplete="off" spellcheck="false"></div>
                   <div class="campo"><label for="x-pass" data-i18n="up.pass">Senha</label><input class="in" type="password" id="x-pass" autocomplete="off"></div>
                 </div>
@@ -134,10 +134,15 @@
     function atualizarDerivado() {
       const d = montarAtual(); const box = $('derivado');
       if (!d) { box.classList.remove('show'); return; }
-      $('dv-m3u').textContent = d.lista_url;
-      $('dv-epg').textContent = d.epg_url
-        ? d.epg_url + (d.epgManual ? '' : '  ' + t('up.epgauto'))
-        : t('up.epgsem');
+      // Codigo de servidor so vira endereco ao adicionar: a consulta precisa do
+      // MAC/Key e nao roda a cada tecla. Mostrar "http://1234/get.php" aqui seria
+      // prometer uma URL que nao existe.
+      const h = ($('x-host').value || '').trim();
+      const codigo = modo === 'xtream' && pareceCodigo(h) && !h.includes('.');
+      $('dv-m3u').textContent = codigo ? t('up.codres') : d.lista_url;
+      $('dv-epg').textContent = d.epgManual
+        ? d.epg_url
+        : (codigo ? t('up.codres') : (d.epg_url ? d.epg_url + '  ' + t('up.epgauto') : t('up.epgsem')));
       box.classList.add('show');
     }
     function trocarAba(n) {
@@ -151,6 +156,15 @@
       const r = await fetch(ATIVACAO_API, { method: 'POST', headers: { 'content-type': 'application/json', apikey: ANON, authorization: 'Bearer ' + ANON }, body: JSON.stringify(payload) });
       const j = await r.json().catch(() => ({})); if (!r.ok || j.ok === false) throw new Error(j.erro || 'Falha ao processar.'); return j;
     }
+    // O campo Servidor aceita o ENDERECO ou o CODIGO cadastrado em Servidores no
+    // painel. Com ":" (esquema ou porta) e endereco, como sempre foi. Sem ponto
+    // nao existe dominio: codigo que a nuvem nao conhece e codigo errado, e dizer
+    // isso poupa uma lista que nunca carrega. Com ponto, segue como host.
+    const pareceCodigo = (v) => !v.includes(':') && /^[A-Za-z0-9._-]{2,64}$/.test(v);
+    async function resolverServidor(dev, codigo) {
+      try { const r = await chamarApi({ acao: 'servidor', mac: dev.mac, key: dev.key, codigo }); return { host: r.host || null }; }
+      catch (err) { return { host: null, erro: err.message }; }
+    }
     async function adicionar(e) {
       e.preventDefault(); $('erro').classList.remove('show');
       const d = lerDev(); if (!d.mac || !d.key) return erro(t('up.errdev'));
@@ -158,7 +172,22 @@
       const lista = montarAtual(); if (!lista) return erro(modo === 'xtream' ? t('up.errx') : t('up.errm'));
       delete lista.epgManual;   // flag so da tela, nao vai para a API
       const b = $('btn-add'); b.disabled = true; b.textContent = t('up.adding');
-      try { const r = await chamarApi({ acao: 'adicionar', mac: d.mac, key: d.key, ...lista }); mostrarResultado(r); }
+      try {
+        const h = ($('x-host').value || '').trim();
+        if (modo === 'xtream' && pareceCodigo(h)) {
+          const s = await resolverServidor(d, h);
+          if (s.host) {
+            const x = montarXtream(s.host, $('x-user').value, $('x-pass').value);
+            lista.lista_url = x.lista_url;
+            if (!epgInformado()) lista.epg_url = x.epg_url;   // EPG digitado continua mandando
+          } else if (!h.includes('.')) {
+            // MAC/Key errados chegam aqui com a mensagem propria da nuvem; so o
+            // "nao existe" vira o texto traduzido.
+            throw new Error(s.erro && !/codigo de servidor/i.test(s.erro) ? s.erro : t('up.errcod'));
+          }
+        }
+        const r = await chamarApi({ acao: 'adicionar', mac: d.mac, key: d.key, ...lista }); mostrarResultado(r);
+      }
       catch (err) { erro(err.message); b.disabled = false; b.textContent = t('up.add'); }
     }
     function mostrarResultado(r) {

@@ -16,6 +16,16 @@
       "source": "/tv",
       "destination": "https://github.com/gabriel448/heroplay-downloads/releases/latest/download/HeroPlayTV-androidtv.apk",
       "permanent": false
+    },
+    {
+      "source": "/android",
+      "destination": "https://github.com/gabriel448/heroplay-downloads/releases/latest/download/HeroPlay-android.apk",
+      "permanent": false
+    },
+    {
+      "source": "/windows",
+      "destination": "https://github.com/gabriel448/heroplay-downloads/releases/latest/download/HeroPlay-windows-setup.exe",
+      "permanent": false
     }
   ],
   "headers": [

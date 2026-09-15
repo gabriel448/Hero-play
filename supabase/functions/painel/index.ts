@@ -105,6 +105,9 @@ const MAX_LINHAS_PLATAFORMA = 2000
 /** Teto do log da API por consulta. Acima disso a tela avisa que truncou. */
 const MAX_API_LOGS = 1000
 
+/** Teto do historico de creditos da plataforma por consulta. */
+const MAX_MOVIMENTACOES = 1000
+
 /** "servidor.com:8080" -> "servidor.com". */
 const semPorta = (h: string) => h.replace(/:\d+$/, '')
 
@@ -275,6 +278,24 @@ function gerarCodigo(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let s = ''
   for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)]
+  return s
+}
+
+/**
+ * Senha provisoria que o ADMIN gera para um revendedor (`redefinir_senha_revendedor`).
+ *
+ * 10 caracteres sem os ambiguos (0/O, 1/I/l), porque ela costuma ser ditada por
+ * telefone ou mensagem. `crypto`, e nao `Math.random` como o codigo acima: isto
+ * e credencial. E rejeita os bytes do fim da faixa para nao ter vies de modulo.
+ */
+function gerarSenha(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  const limite = 256 - (256 % chars.length)
+  let s = ''
+  while (s.length < 10) {
+    const x = crypto.getRandomValues(new Uint8Array(1))[0]
+    if (x < limite) s += chars[x % chars.length]
+  }
   return s
 }
 // Código de indicação ÚNICO: gera aleatório e confere na tabela (o índice único
@@ -492,7 +513,11 @@ Deno.serve(async (req: Request) => {
     if (!user) return erro('nao autenticado', 401)
 
     const { data: rev } = await sb.from('revendedores').select('*').eq('id', user.id).maybeSingle()
-    if (!rev || !rev.ativo) return erro('conta invalida ou inativa', 403)
+    if (!rev) return erro('conta nao encontrada', 403)
+    // Conta BLOQUEADA pelo admin (acao `revendedor_ativo`). Conferido a cada
+    // requisicao, entao o bloqueio vale na hora, sem esperar a sessao expirar.
+    // A mensagem aparece na tela de login do painel — tem que dizer o que fazer.
+    if (!rev.ativo) return erro('Conta bloqueada. Fale com o suporte.', 403)
 
     // Declarado AQUI, junto do `rev`: várias ações abaixo dependem dele (rede do
     // admin, tickets, avisos). Estava lá embaixo, no bloco de suporte, e como
@@ -1052,6 +1077,118 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, tier })
     }
 
+    /**
+     * BLOQUEAR / DESBLOQUEAR um revendedor (so admin).
+     *
+     * O que o bloqueio corta, e o que ele NAO corta:
+     *  - corta o PAINEL na proxima requisicao: `rev.ativo` e conferido em toda
+     *    acao, entao nao precisa esperar a sessao expirar;
+     *  - corta as CHAVES DE API da conta (a funcao `api` tambem confere `ativo`);
+     *  - NAO corta os clientes nem os aparelhos dele: quem pagou pelo app nao e
+     *    punido pelo que o revendedor fez;
+     *  - NAO corta a rede abaixo dele: cada revendedor responde pela propria conta.
+     *
+     * Nunca contra outro admin, nem contra a propria conta — bloquear a si mesmo
+     * trancaria o painel sem ninguem para abrir de novo.
+     */
+    if (acao === 'revendedor_ativo') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = String(body.revendedor_id || '').trim()
+      const ativo = body.ativo === true
+      if (!id) return erro('revendedor_id obrigatorio')
+      if (id === rev.id) return erro('voce nao pode bloquear a propria conta')
+      const { data: alvo } = await sb.from('revendedores').select('id, papel').eq('id', id).maybeSingle()
+      if (!alvo || alvo.papel === 'admin') return erro('revendedor invalido', 404)
+      const { error } = await sb.from('revendedores').update({ ativo }).eq('id', id)
+      if (error) return erro(error.message, 500)
+      // Rele: bloqueio que nao pegou e responde "ok" e pior que erro — o admin
+      // acha que fechou a porta.
+      const { data: depois } = await sb.from('revendedores').select('ativo').eq('id', id).maybeSingle()
+      if (!depois || depois.ativo !== ativo) return erro('o banco nao confirmou a mudanca', 500)
+      // So avisa no desbloqueio: a conta bloqueada nem consegue abrir a caixa.
+      if (ativo) await notificar([id], 'aviso', 'Sua conta foi reativada', 'Voce ja pode usar o painel de novo.')
+      return json({ ok: true, ativo })
+    }
+
+    /**
+     * REDEFINIR A SENHA de um revendedor (so admin). E o "esqueci a senha" deste
+     * painel.
+     *
+     * Nao existe recuperacao por e-mail: o login e por usuario, e o e-mail no
+     * Auth e sintetico (`@u.heroplaytv.com`), nunca entregue. Quem esqueceu pede
+     * ao suporte e o admin gera uma senha nova aqui.
+     *
+     * So admin: se quem indicou pudesse, entraria na conta do indicado e
+     * transferiria os creditos dele para si.
+     *
+     * ⚠️ A senha nova sai UMA vez, nesta resposta. Nao vai para log, nem para
+     * `notificar`, nem para tabela nenhuma.
+     */
+    if (acao === 'redefinir_senha_revendedor') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = String(body.revendedor_id || '').trim()
+      if (!id) return erro('revendedor_id obrigatorio')
+      const { data: alvo } = await sb.from('revendedores').select('id, papel').eq('id', id).maybeSingle()
+      if (!alvo || alvo.papel === 'admin') return erro('revendedor invalido', 404)
+      const senha = gerarSenha()
+      const { error } = await sb.auth.admin.updateUserById(id, { password: senha })
+      if (error) return erro(`falha ao redefinir a senha: ${error.message}`, 500)
+      await notificar([id], 'aviso', 'Sua senha foi redefinida',
+        'O administrador gerou uma senha nova para a sua conta.')
+      return json({ ok: true, senha })
+    }
+
+    /**
+     * Detalhe de UM revendedor (so admin), para a gaveta da tela Revendedores:
+     * dados da conta, quem indicou, tamanho da rede e da carteira, ultimos
+     * movimentos de credito. Somente leitura.
+     */
+    if (acao === 'admin_revendedor_detalhe') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const id = String(body.revendedor_id || '').trim()
+      if (!id) return erro('revendedor_id obrigatorio')
+      const { data: alvo } = await sb.from('revendedores')
+        .select('id, nome, usuario, papel, ativo, saldo_creditos, criado_em, criado_por, codigo_indicacao')
+        .eq('id', id).maybeSingle()
+      if (!alvo) return erro('revendedor nao encontrado', 404)
+
+      let indicado_por: string | null = null
+      if (alvo.criado_por) {
+        const { data: pai } = await sb.from('revendedores').select('nome, usuario').eq('id', alvo.criado_por).maybeSingle()
+        if (pai) indicado_por = pai.nome || pai.usuario || null
+      }
+      const { count: indicados } = await sb.from('revendedores')
+        .select('id', { count: 'exact', head: true }).eq('criado_por', id)
+
+      const { data: cls } = await sb.from('clientes').select('id').eq('revendedor_id', id)
+      // deno-lint-ignore no-explicit-any
+      const cids = ((cls || []) as any[]).map((c) => c.id) as string[]
+      let dispositivos = 0
+      if (cids.length) {
+        const ds = await emLotes(cids, async (parte) => {
+          const { data } = await sb.from('dispositivos').select('id').in('cliente_id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        dispositivos = ds.length
+      }
+
+      // Sem as colunas novas no select: esta gaveta tem que abrir mesmo antes
+      // de o schema atualizado rodar. A nota ja diz aparelho e plano.
+      const { data: transacoes } = await sb.from('creditos_transacoes')
+        .select('id, tipo, quantidade, saldo_apos, nota, criado_em')
+        .eq('revendedor_id', id).order('criado_em', { ascending: false }).limit(50)
+
+      return json({
+        ok: true,
+        revendedor: { ...alvo, indicado_por },
+        indicados: indicados || 0,
+        clientes: cids.length,
+        dispositivos,
+        transacoes: transacoes || [],
+      })
+    }
+
     // ── Créditos: transferir p/ um downline (debita quem dá, credita quem recebe) ─
     if (acao === 'transferir_creditos') {
       const alvo_id = (body.revendedor_id || '').trim()
@@ -1082,6 +1219,86 @@ Deno.serve(async (req: Request) => {
         .select('id, tipo, quantidade, saldo_apos, nota, criado_em')
         .eq('revendedor_id', rev.id).order('criado_em', { ascending: false }).limit(200)
       return json({ saldo: ehAdmin ? null : (rev.saldo_creditos ?? 0), transacoes: data || [] })
+    }
+
+    /**
+     * HISTORICO DE CREDITOS DA PLATAFORMA (so admin): todo movimento de todos os
+     * revendedores — quando, quanto e para onde foi.
+     *
+     * "Para onde" vem das colunas `dispositivo_id`/`plano` (ativacao) e
+     * `contraparte_id` (transferencia), criadas em 2026-09-15. Linha antiga de
+     * transferencia sem elas cai na `nota`, que sempre existiu.
+     *
+     * O que NAO aparece, porque nao gasta credito: ativacao feita pelo admin e
+     * ativacao por dominio parceiro (Free DNS).
+     */
+    if (acao === 'listar_movimentacoes_todas') {
+      if (!ehAdmin) return erro('apenas admin', 403)
+      const faixa = String(body.faixa || '30d')
+      const dias = faixa === '24h' ? 1 : (faixa === '7d' ? 7 : (faixa === '90d' ? 90 : 30))
+      const desde = new Date(Date.now() - dias * 86400_000).toISOString()
+
+      let q = sb.from('creditos_transacoes')
+        .select('id, revendedor_id, tipo, quantidade, saldo_apos, nota, dispositivo_id, plano, contraparte_id, criado_em')
+        .gte('criado_em', desde)
+        .order('criado_em', { ascending: false })
+        .limit(MAX_MOVIMENTACOES + 1)
+      const tipo = String(body.tipo || '').trim()
+      if (tipo) q = q.eq('tipo', tipo)
+      const { data, error } = await q
+      // Sem as colunas novas (schema ainda nao rodado) a consulta falha. A tela
+      // tem que DIZER isso: "nenhum movimento" pareceria a plataforma parada.
+      if (error) {
+        return json({
+          ok: true, movimentos: [], truncado: false, faixa,
+          indisponivel: 'O historico da plataforma precisa do schema atualizado. Rode o supabase/schema-tv.sql.',
+        })
+      }
+      const linhas = data || []
+      const truncado = linhas.length > MAX_MOVIMENTACOES
+      // deno-lint-ignore no-explicit-any
+      const lote = linhas.slice(0, MAX_MOVIMENTACOES) as any[]
+
+      // Nomes de quem gastou e de quem estava do outro lado da transferencia.
+      const revIds = [...new Set(lote.flatMap((m) => [m.revendedor_id, m.contraparte_id]).filter(Boolean))] as string[]
+      const nomeRev = new Map<string, string>()
+      if (revIds.length) {
+        const revs = await emLotes(revIds, async (parte) => {
+          const { data } = await sb.from('revendedores').select('id, nome, usuario').in('id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        for (const r of revs) nomeRev.set(r.id, r.nome || r.usuario || '')
+      }
+
+      // MAC e cliente de cada aparelho ativado.
+      const dispIds = [...new Set(lote.map((m) => m.dispositivo_id).filter(Boolean))] as string[]
+      const disp = new Map<string, { mac: string; cliente_id: string | null }>()
+      if (dispIds.length) {
+        const ds = await emLotes(dispIds, async (parte) => {
+          const { data } = await sb.from('dispositivos').select('id, mac, cliente_id').in('id', parte)
+          // deno-lint-ignore no-explicit-any
+          return (data || []) as any[]
+        })
+        for (const d of ds) disp.set(d.id, { mac: d.mac, cliente_id: d.cliente_id })
+      }
+      const donos = await donosDosClientes([...disp.values()].map((d) => d.cliente_id))
+
+      return json({
+        ok: true, faixa, truncado,
+        movimentos: lote.map((m) => {
+          const d = m.dispositivo_id ? disp.get(m.dispositivo_id) : undefined
+          return {
+            id: m.id, tipo: m.tipo, quantidade: m.quantidade, saldo_apos: m.saldo_apos,
+            nota: m.nota, plano: m.plano, criado_em: m.criado_em,
+            revendedor_id: m.revendedor_id,
+            revendedor: nomeRev.get(m.revendedor_id) || null,
+            contraparte: m.contraparte_id ? (nomeRev.get(m.contraparte_id) || null) : null,
+            mac: d?.mac || null,
+            cliente: d?.cliente_id ? (donos.get(d.cliente_id)?.cliente || null) : null,
+          }
+        }),
+      })
     }
 
     // ── Clientes ──────────────────────────────────────────────────────────────

@@ -136,6 +136,28 @@ alter table public.creditos_transacoes enable row level security;
 revoke all on public.creditos_transacoes from anon, authenticated;
 grant all on public.creditos_transacoes to service_role;
 
+-- "Para onde foi" cada movimento, em COLUNA. Antes so existia na `nota`, texto
+-- livre: dava para ler numa linha, nao para filtrar nem juntar na visao do
+-- admin de todos os revendedores. As RPCs abaixo preenchem as tres.
+alter table public.creditos_transacoes add column if not exists dispositivo_id uuid references public.dispositivos(id) on delete set null;
+alter table public.creditos_transacoes add column if not exists plano text;
+alter table public.creditos_transacoes add column if not exists contraparte_id uuid references public.revendedores(id) on delete set null;
+create index if not exists idx_creditos_criado on public.creditos_transacoes(criado_em desc);
+
+-- Backfill das ativacoes ANTIGAS, lendo a nota "Ativação do dispositivo
+-- AA:BB:.. (ano)". Idempotente: so toca linha com a coluna ainda nula. Casa o
+-- aparelho por IGUALDADE do MAC extraido (e nao `like '%mac%'`, que varreria
+-- todos os aparelhos para cada linha). Transferencias antigas ficam sem
+-- contraparte — a nota delas ("Para X") continua sendo o que se le.
+update public.creditos_transacoes
+   set plano = substring(nota from '\(([a-z]+)\)$')
+ where tipo = 'consumido' and plano is null and nota ~ '\([a-z]+\)$';
+update public.creditos_transacoes t
+   set dispositivo_id = d.id
+  from public.dispositivos d
+ where t.tipo = 'consumido' and t.dispositivo_id is null
+   and d.mac = substring(t.nota from 'dispositivo ([0-9A-Fa-f:]+) \(');
+
 -- ── CÓDIGOS DE ATIVAÇÃO do TV (dev/revendedor gera; cliente usa em "ativar") ─
 -- dias = null → vitalício.
 create table if not exists public.codigos_ativacao_tv (
@@ -220,12 +242,14 @@ begin
     returning saldo_creditos into v_saldo_para;
   if not found then raise exception 'DESTINO_INVALIDO'; end if;
 
+  -- `contraparte_id` = o outro lado da transferencia, para o historico do admin
+  -- dizer "para quem" sem depender do texto da nota.
   if not v_admin then
-    insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
-      values (p_de, 'transferido_saida', -p_qtd, v_saldo_de, p_por, p_nota_saida);
+    insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota, contraparte_id)
+      values (p_de, 'transferido_saida', -p_qtd, v_saldo_de, p_por, p_nota_saida, p_para);
   end if;
-  insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
-    values (p_para, 'transferido_entrada', p_qtd, v_saldo_para, p_por, p_nota_entrada);
+  insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota, contraparte_id)
+    values (p_para, 'transferido_entrada', p_qtd, v_saldo_para, p_por, p_nota_entrada, p_de);
 
   return v_saldo_de;   -- NULL p/ admin: o painel nao mostra saldo dele
 end $$;
@@ -287,11 +311,14 @@ begin
       returning saldo_creditos into v_saldo;
     if not found then raise exception 'SALDO_INSUFICIENTE'; end if;
 
-    insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota)
+    -- A nota continua (e o que o extrato do revendedor mostra), mas o aparelho e
+    -- o plano agora vao tambem em COLUNA, para o historico do admin filtrar.
+    insert into creditos_transacoes (revendedor_id, tipo, quantidade, saldo_apos, por, nota, dispositivo_id, plano)
       values (p_rev, 'consumido', -1, v_saldo,  p_rev,
               (case when p_renovar then 'Renovação' else 'Ativação' end)
               || ' do dispositivo ' || coalesce(p_mac, '')
-              || ' (' || coalesce(p_plano, '?') || ')');
+              || ' (' || coalesce(p_plano, '?') || ')',
+              p_dispositivo_id, p_plano);
   elsif not coalesce(v_admin, false) then
     select saldo_creditos into v_saldo from revendedores where id = p_rev;
   end if;   -- admin: v_saldo fica NULL (o painel nao mostra saldo dele)

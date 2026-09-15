@@ -578,3 +578,16 @@ tbody tr:first-child td { border-top: none; }
 .al-m-patch { color: var(--warn); }
 .al-m-delete { color: var(--danger); }
 .al-erro { color: var(--muted); font-size: 12px; max-width: 320px; }
+
+/* ── Revendedores: gaveta de detalhe numa linha de tabela ────────────────────
+   A gaveta vive num <td colspan> logo abaixo da linha; sem zerar o padding da
+   célula ela ficaria recuada em relação à tabela. */
+.rv-det-cel { padding: 0 !important; }
+.rv-det-cel .tc-det { border-top: none; }
+.rv-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
+
+/* ── Downloads ────────────────────────────────────────────────────────────────
+   A dica de instalação é conteúdo que o revendedor repassa ao cliente, não nota
+   de rodapé: 13px, e não os 11px de `.sv-ajuda`. */
+.dl-dica { padding: 11px 20px 13px; font-size: 13px; line-height: 1.55; color: var(--muted); border-top: 1px solid var(--divider); }
+.pc-acoes a.btn, .pc-acoes a.btn-sec { text-decoration: none; }

@@ -262,6 +262,33 @@ Deno.serve(async (req: Request) => {
       return json({ status: statusAtual(d), playlists })
     }
 
+    // ── POST servidor: traduz o CODIGO de um servidor para o host ────────────
+    // O campo "Servidor" do app de TV e do site aceita o endereco OU o codigo
+    // curto que o admin cadastra em Servidores no painel. Aqui so se traduz um
+    // no outro; quem monta a URL da lista continua sendo o cliente.
+    //
+    // Exige um aparelho que JA EXISTE, com MAC e Key conferindo: o codigo padrao
+    // tem 4 digitos, e sem isso bastaria varrer 1000-9999 para listar todos os
+    // servidores cadastrados. O host em si nao e segredo — o aparelho toca os
+    // streams dele —, mas a lista inteira tambem nao precisa sair de graca.
+    if (acao === 'servidor') {
+      const mac = (body.mac || '').trim()
+      const key = (body.key || '').trim()
+      const codigo = String(body.codigo || '').trim().toUpperCase().replace(/\s+/g, '')
+      if (!mac || !key) return erro('mac e key obrigatorios')
+      if (!/^[A-Z0-9._-]{2,64}$/.test(codigo)) return erro('codigo invalido')
+      const { data: d } = await sb.from('dispositivos').select('device_key').eq('mac', mac).maybeSingle()
+      if (!d || d.device_key !== key) {
+        return erro('MAC e Key nao conferem com nenhum aparelho. Abra o app no aparelho uma vez antes de adicionar.', 403)
+      }
+      // `eq` e nao `ilike`: o codigo aceita "_", que no LIKE e curinga e casaria
+      // o codigo de OUTRO servidor. O painel grava sempre em maiusculo.
+      const { data: s } = await sb.from('servidores')
+        .select('host').eq('codigo', codigo).eq('ativo', true).maybeSingle()
+      if (!s) return erro('codigo de servidor nao encontrado', 404)
+      return json({ ok: true, host: s.host })
+    }
+
     // ── POST selecionar: define a playlist ATIVA do device ────────────────────
     if (acao === 'selecionar') {
       const mac = (body.mac || '').trim()

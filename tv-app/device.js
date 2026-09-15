@@ -264,8 +264,17 @@ const Dispositivo = (() => {
     const j = await _post({ acao: 'excluir', id });
     return !!(j && j.ok !== false);
   }
+  // Traduz o CODIGO de servidor (cadastrado no painel) para o host.
+  // `motivo` separa "nao existe" de "nao deu para perguntar": sem rede, dizer
+  // "codigo nao encontrado" mandaria o cliente conferir um codigo que esta certo.
+  async function resolverServidor(codigo) {
+    const j = await _post({ acao: 'servidor', codigo });
+    if (!j) return { host: null, motivo: 'offline' };
+    if (j.ok && j.host) return { host: j.host, motivo: null };
+    return { host: null, motivo: 'nao_encontrado' };
+  }
 
-  return { init, mac, key, plataforma, temLista, status, expirado, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, urlAtivacao };
+  return { init, mac, key, plataforma, temLista, status, expirado, diasTeste, registro, salvar, consultar, adicionar, listarPlaylists, selecionarPlaylist, excluirPlaylist, resolverServidor, urlAtivacao };
 })();
 
 // Utilitarios de lista: montar a URL a partir do Xtream e DERIVAR o EPG da M3U.
